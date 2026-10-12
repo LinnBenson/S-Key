@@ -9,7 +9,7 @@ class EmojiLexiconTest {
 
     @Test fun approvedInventoryAndNumerals() {
         val rows = File("src/main/assets/dictionaries/emoji_keywords.tsv").readLines()
-        assertEquals(109, rows.size)
+        assertEquals(110, rows.size)
         val lex = lexicon()
         listOf("零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十").zip(
             listOf("零", "壹", "贰", "叁", "肆", "伍", "陆", "柒", "捌", "玖", "拾")
@@ -18,6 +18,16 @@ class EmojiLexiconTest {
             assertEquals(listOf(ordinary, emoji), lex.appendTo(listOf(ordinary)))
             assertEquals(listOf(capital, emoji), lex.appendTo(listOf(capital)))
         }
+    }
+
+    @Test fun redDragonKeywords() {
+        val lex = lexicon()
+        for (word in listOf("中", "红中", "麻将")) {
+            assertEquals(listOf(word, "🀄"), lex.appendTo(listOf(word)))
+        }
+        assertEquals(listOf("中", "红中", "麻将", "🀄", "其他"),
+            lex.appendTo(listOf("中", "红中", "麻将", "其他")))
+        assertEquals(listOf("中国"), lex.appendTo(listOf("中国")))
     }
 
     @Test fun exactMatchesTextFirstAndDeduplicated() {
