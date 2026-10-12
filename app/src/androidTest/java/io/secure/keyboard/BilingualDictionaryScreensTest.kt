@@ -1,5 +1,6 @@
 package io.secure.keyboard
 
+import io.secure.keyboard.diagnostics.checkedMain
 import android.app.Activity
 import android.app.Application
 import android.app.Instrumentation
@@ -19,7 +20,6 @@ import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
 import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
 import io.secure.keyboard.data.ContentStore
 import io.secure.keyboard.data.DictionaryKind
@@ -64,12 +64,12 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
         store = ContentStore(sandbox)
         config = SettingsStore(sandbox)
         application = instrumentation.targetContext.applicationContext as Application
-        instrumentation.runOnMainSync { application.registerActivityLifecycleCallbacks(lifecycle) }
+        instrumentation.checkedMain { application.registerActivityLifecycleCallbacks(lifecycle) }
     }
 
     override fun tearDown() {
         try {
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 activity?.finish()
                 application.unregisterActivityLifecycleCallbacks(lifecycle)
             }
@@ -87,30 +87,25 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
         store.addDictionary("English Two", "more", DictionaryKind.ENGLISH)
         config.toolbarPins = listOf("dictionary")
         openPage()
-        assertButton("中文词库（1）")
-        assertButton("英文词库（2）")
+        assertButton("中文词库\n1 条自定义词条")
+        assertButton("英文词库\n2 条自定义词条")
         scrollToBottom()
         saveScreenshot("35-bilingual-settings-home.png")
-        clickButton("中文词库（1）")
+        clickButton("中文词库\n1 条自定义词条")
         assertTitle("中文词库")
         assertEquals(listOf("中文测试"), visibleRows().map { it.wordView.text.toString() })
         clickButton("‹ 返回设置")
-        clickButton("英文词库（2）")
+        clickButton("英文词库\n2 条自定义词条")
         assertTitle("英文词库")
         assertEquals(listOf("English One", "English Two"), visibleRows().map { it.wordView.text.toString() })
         openPage("toolbar")
-        instrumentation.runOnMainSync {
-            val toggles = descendants(requireActivity().window.decorView).filterIsInstance<Switch>()
-            assertTrue(toggles.single { it.text == "中文词库" }.isChecked)
-            val english = toggles.single { it.text == "英文词库" }
-            assertFalse(english.isChecked)
-            // CompoundButton toggles before returning View's OnClickListener-handled flag.
-            // This switch intentionally saves through OnCheckedChangeListener instead.
-            english.performClick()
-            assertTrue("The clicked switch must become checked", english.isChecked)
-            val refreshedEnglish = descendants(requireActivity().window.decorView)
-                .filterIsInstance<Switch>().single { it.text == "英文词库" }
-            assertTrue("The rebuilt toolbar must reflect the saved pin", refreshedEnglish.isChecked)
+        instrumentation.checkedMain {
+            val views = descendants(requireActivity().window.decorView)
+            assertNotNull(views.singleOrNull { it.tag == "toolbar_remove_dictionary" })
+            assertTrue(views.single { it.tag == "toolbar_add_english_dictionary" }.performClick())
+            assertNotNull(descendants(requireActivity().window.decorView).singleOrNull {
+                it.tag == "toolbar_remove_english_dictionary"
+            })
         }
         assertEquals(listOf("dictionary", "english_dictionary"), config.toolbarPins)
         assertEquals(listOf("dictionary", "english_dictionary"), SettingsStore(sandbox).toolbarPins)
@@ -126,7 +121,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
         clickButton("下一页")
         assertPage(2, 2)
         clickButton("‹ 返回设置")
-        clickButton("英文词库（201）")
+        clickButton("英文词库\n201 条自定义词条")
         clickButton("下一页")
         clickButton("下一页")
         assertPage(3, 3)
@@ -134,14 +129,14 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
         assertTitle("英文词库")
         assertPage(3, 3)
         clickButton("‹ 返回设置")
-        clickButton("中文词库（101）")
+        clickButton("中文词库\n101 条自定义词条")
         assertPage(2, 2)
         clickButton("‹ 返回设置")
-        clickButton("英文词库（201）")
+        clickButton("英文词库\n201 条自定义词条")
         assertPage(3, 3)
         scrollToBottom()
         saveScreenshot("35-english-dictionary-compact.png")
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val row = visibleRows().single()
             val edit = Rect()
             val delete = Rect()
@@ -151,7 +146,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
             val targetSize = (48 * requireActivity().resources.displayMetrics.density).toInt()
             assertEquals(targetSize, row.editAction.width)
             assertEquals(targetSize, row.deleteAction.width)
-            assertTrue(row.codeView.left < row.wordView.left)
+            assertTrue(row.wordView.bottom <= row.codeView.top)
             assertEquals(1, row.codeView.lineCount)
             assertEquals(1, row.wordView.lineCount)
             assertEquals(TextUtils.TruncateAt.END, row.wordView.ellipsize)
@@ -193,7 +188,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
         val saved = store.dictionary(DictionaryKind.ENGLISH).single()
         assertEquals("Literal OpenAI α e\u0301!", saved.word)
         assertEquals("CuStOm", saved.reading)
-        instrumentation.runOnMainSync { assertTrue(visibleRows().single().deleteAction.performClick()) }
+        instrumentation.checkedMain { assertTrue(visibleRows().single().deleteAction.performClick()) }
         awaitDialog("删除词条？")
         assertTrue(activeTexts().any { it.contains("英文词库") })
         clickDialog("删除")
@@ -201,7 +196,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
         assertEquals(chinese, store.dictionary().single().word)
         assertEquals(legacyCode, store.dictionary().single().reading)
         openPage("dictionary")
-        instrumentation.runOnMainSync { visibleRows().single().editAction.performClick() }
+        instrumentation.checkedMain { visibleRows().single().editAction.performClick() }
         awaitDialog("编辑中文词库词条")
         assertEquals(listOf(chinese, legacyCode), editorValues())
         clickDialog("保存")
@@ -231,6 +226,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
         assertEquals(1, store.phrases().size)
         store.addDictionary("Again", "again", DictionaryKind.ENGLISH)
         clickButton("‹ 返回设置")
+        openPage("cleanup")
         clickButton("清空全部用户内容")
         awaitDialog("清空用户内容？")
         assertTrue(activeTexts().any { it.contains("中文词库、英文词库") && it.contains("布局与设置会保留") })
@@ -290,7 +286,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
         }
         openPage("dictionary")
         recreateActivity()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             deliverPickerResult("IMPORT_ENGLISH", input)
         }
         awaitCondition("Delayed English result") { store.dictionary(DictionaryKind.ENGLISH).size == 1 }
@@ -301,7 +297,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
         val output = File(sandbox.root, "delayed-export.tsv")
         openPage("english_dictionary")
         recreateActivity()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             deliverPickerResult("EXPORT_CHINESE", output)
         }
         awaitCondition("Delayed Chinese export") { output.isFile && output.length() > 0 }
@@ -318,7 +314,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
             val started = CountDownLatch(1)
             val transfer = transfer()
             try {
-                instrumentation.runOnMainSync {
+                instrumentation.checkedMain {
                     val start = transfer.javaClass.getDeclaredMethod(
                         "start", DictionaryKind::class.java, String::class.java, kotlin.jvm.functions.Function0::class.java,
                     ).apply { isAccessible = true }
@@ -358,7 +354,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
         if (activity == null) {
             next.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
             instrumentation.startActivitySync(next)
-        } else instrumentation.runOnMainSync { routeActivity(requireActivity(), next) }
+        } else instrumentation.checkedMain { routeActivity(requireActivity(), next) }
         instrumentation.waitForIdleSync()
     }
 
@@ -377,13 +373,13 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
 
     private fun recreateActivity() {
         val previous = requireActivity()
-        instrumentation.runOnMainSync { previous.recreate() }
+        instrumentation.checkedMain { previous.recreate() }
         awaitCondition("Activity recreation") { activity != null && activity !== previous }
         instrumentation.waitForIdleSync()
     }
 
     private fun scrollToBottom() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             descendants(requireActivity().window.decorView).filterIsInstance<ScrollView>().single().fullScroll(View.FOCUS_DOWN)
         }
         instrumentation.waitForIdleSync()
@@ -391,6 +387,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
     }
 
     private fun saveScreenshot(name: String) {
+        if ((instrumentation as android.test.InstrumentationTestRunner).arguments.getString("skipScreenshots") == "true") return
         instrumentation.waitForIdleSync()
         val directory = File(requireNotNull(instrumentation.targetContext.getExternalFilesDir(null)), "validation")
         check(directory.isDirectory || directory.mkdirs())
@@ -406,11 +403,11 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
     }
 
     private fun assertTitle(expected: String) {
-        instrumentation.runOnMainSync { assertEquals(expected, requireActivity().title.toString()) }
+        instrumentation.checkedMain { assertEquals(expected, requireActivity().title.toString()) }
     }
 
     private fun assertPage(page: Int, total: Int) {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertTrue(descendants(requireActivity().window.decorView).filterIsInstance<TextView>().any {
                 it.text.contains("第 $page / $total 页")
             })
@@ -418,14 +415,14 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
     }
 
     private fun assertButton(text: String) {
-        instrumentation.runOnMainSync {
-            assertTrue(descendants(requireActivity().window.decorView).filterIsInstance<Button>().any { it.text == text })
+        instrumentation.checkedMain {
+            assertTrue(descendants(requireActivity().window.decorView).filterIsInstance<Button>().any { it.text?.toString() == text })
         }
     }
 
     private fun clickButton(text: String) {
-        instrumentation.runOnMainSync {
-            val button = descendants(requireActivity().window.decorView).filterIsInstance<Button>().firstOrNull { it.text == text }
+        instrumentation.checkedMain {
+            val button = descendants(requireActivity().window.decorView).filterIsInstance<Button>().firstOrNull { it.text?.toString() == text || it.contentDescription == text }
             assertNotNull("Missing button: $text", button)
             assertTrue(button!!.performClick())
         }
@@ -468,7 +465,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
 
     private fun clickDialog(text: String) {
         withActiveNodes { nodes ->
-            val action = nodes.firstOrNull { it.text == text && it.isClickable }
+            val action = nodes.firstOrNull { it.text?.toString() == text && it.isClickable }
             assertNotNull("Missing dialog action: $text", action)
             assertTrue(action!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
         }
@@ -503,7 +500,7 @@ class BilingualDictionaryScreensTest : InstrumentationTestCase() {
     private fun awaitTransferIdle() {
         awaitCondition("Transfer completion") {
             var running = true
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 val value = transfer()
                 running = value.javaClass.getDeclaredMethod("getRunning").apply { isAccessible = true }.invoke(value) as Boolean
             }

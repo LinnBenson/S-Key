@@ -122,40 +122,29 @@ internal class KeyboardThemeEditor(
         groups.forEach { (heading, ids) ->
             val card = ui.card(body)
             ui.text(card, heading, 15f, true)
-            ids.chunked(2).forEach { pair ->
-                val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
-                card.addView(row, LinearLayout.LayoutParams(-1, -2))
-                pair.forEachIndexed { index, id ->
-                    val tile = ui.column().apply {
-                        setPadding(ui.dp(10), ui.dp(12), ui.dp(10), ui.dp(6))
-                        background = ui.shape(SettingsPalette.functional, 18)
-                    }
-                    row.addView(tile, LinearLayout.LayoutParams(0, -1, 1f).apply {
-                        setMargins(if (index == 0) 0 else ui.dp(8), ui.dp(6), 0, ui.dp(6))
-                    })
-                    val swatch = View(activity).apply {
-                        background = SettingsPalette.shape(context, Color.parseColor(values.getValue(id)), 12, SettingsPalette.divider)
-                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    }
-                    tile.addView(swatch, LinearLayout.LayoutParams(-1, ui.dp(30)))
-                    val button = ui.button(tile, "${labels.getValue(id)}\n${values.getValue(id)}") { edit(id) }.apply {
-                        tag = "theme_token_$id"
-                        gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                        textSize = 12f
-                        setPadding(ui.dp(2), ui.dp(8), ui.dp(2), ui.dp(8))
-                        contentDescription = "${labels.getValue(id)}，${values.getValue(id)}，编辑颜色"
-                    }
-                    tile.isClickable = true
-                    tile.isFocusable = true
-                    tile.contentDescription = button.contentDescription
-                    tile.setOnClickListener { edit(id) }
-                    tokenRows[id] = swatch to button
-                    pageActions.add(button)
-                    pageActions.add(tile)
+            ids.forEach { id ->
+                val row = LinearLayout(activity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
                 }
-                if (pair.size == 1) row.addView(View(activity), LinearLayout.LayoutParams(0, 1, 1f).apply { marginStart = ui.dp(8) })
+                card.addView(row, LinearLayout.LayoutParams(-1, -2))
+                val swatch = View(activity).apply {
+                    background = SettingsPalette.shape(context, Color.parseColor(values.getValue(id)), 10, SettingsPalette.divider)
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }
+                row.addView(swatch, LinearLayout.LayoutParams(ui.dp(36), ui.dp(36)).apply { marginEnd = ui.dp(12) })
+                val button = ui.actionRow(row, labels.getValue(id), values.getValue(id)) { edit(id) }.apply {
+                    tag = "theme_token_$id"
+                    contentDescription = "${labels.getValue(id)}，${values.getValue(id)}，编辑颜色"
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                }
+                swatch.setOnClickListener { edit(id) }
+                tokenRows[id] = swatch to button
+                pageActions.add(swatch)
+                pageActions.add(button)
             }
         }
+
         pageActions.add(ui.button(body, "恢复${if (dark) "深色" else "浅色"}默认配色") { confirmReset() })
     }
 
@@ -166,7 +155,7 @@ internal class KeyboardThemeEditor(
         pageAdvice?.text = contrastAdvice(values)
         tokenRows.forEach { (id, views) ->
             views.first.background = SettingsPalette.shape(activity, Color.parseColor(values.getValue(id)), 10, SettingsPalette.outline)
-            views.second.text = "${labels.getValue(id)}\n${values.getValue(id)}"
+            views.second.text = ui.actionText(labels.getValue(id), values.getValue(id))
             views.second.contentDescription = "${labels.getValue(id)}，${values.getValue(id)}，编辑颜色"
         }
     }

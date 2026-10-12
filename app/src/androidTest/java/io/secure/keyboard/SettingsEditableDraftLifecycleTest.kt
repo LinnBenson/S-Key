@@ -84,13 +84,14 @@ class SettingsEditableDraftLifecycleTest : InstrumentationTestCase() {
         open("phrases")
         val text = unicode(600_000)
         var originalTransfer: Any? = null
+        onMain { editPhrase() }
+        await("Editor window focus before selecting") { dialog().window!!.decorView.hasWindowFocus() }
         onMain {
-            editPhrase()
             fields().single().apply {
                 setText(text)
+                requestFocus()
                 setSelection(length() - 7, 3)
                 error = "Synthetic validation error"
-                requestFocus()
             }
             originalTransfer = get(activity(), "dictionaryTransfer")
         }
@@ -170,8 +171,10 @@ class SettingsEditableDraftLifecycleTest : InstrumentationTestCase() {
         for (route in listOf("phrases", "dictionary", "english_dictionary", "profile_outer_portrait")) {
             open(route)
             var expected = emptyList<String>()
+            onMain { openEditor(route) }
+            await("Editor window focus before selecting") { dialog().window!!.decorView.hasWindowFocus() }
             onMain {
-                openEditor(route)
+                fields().last().requestFocus()
                 expected = fields().mapIndexed { index, field ->
                     val text = if (route.startsWith("profile")) "000377" else "  Full 𠀀 e\u0301 $index\nText  "
                     field.setText(text)
@@ -179,7 +182,6 @@ class SettingsEditableDraftLifecycleTest : InstrumentationTestCase() {
                     field.error = "Synthetic error $index"
                     text
                 }
-                fields().last().requestFocus()
                 val saved = savedState()
                 assertNotNull(saved.getBundle("editable_draft"))
                 assertFalse(saved.getBoolean("oversized_editable_draft"))
@@ -354,8 +356,9 @@ class SettingsEditableDraftLifecycleTest : InstrumentationTestCase() {
         await("Permanent destroy") { fixture.current == null }
         settle()
         val deadline = SystemClock.elapsedRealtime() + 15_000
-        while (SystemClock.elapsedRealtime() < deadline &&
-            (fixture.destroyedActivities.any { it.get() != null } || snapshots.any { it.get() != null })) {
+        // Do not promote WeakReference referents immediately before GC: ART can keep the
+        // temporary get() result alive in this very frame across loop iterations.
+        while (SystemClock.elapsedRealtime() < deadline) {
             Runtime.getRuntime().gc()
             System.runFinalization()
             settle()
@@ -366,8 +369,21 @@ class SettingsEditableDraftLifecycleTest : InstrumentationTestCase() {
         assertNull(get(retained!!, "editableDraft"))
         assertNull(get(get(retained!!, "dictionaryTransfer")!!, "observer"))
         assertTrue("Old snapshot retained; inspect heap owners", snapshots.all { it.get() == null })
-        assertTrue("Destroyed Activity remains reachable; inspect root before classifying leak",
-            fixture.destroyedActivities.all { it.get() == null })
+        val remaining = fixture.destroyedActivities.mapIndexedNotNull { i, ref -> ref.get()?.let { "$i:${it.javaClass.simpleName}" } }
+        if (remaining.isNotEmpty()) onMain {
+            val imm = instrumentation.targetContext.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+            val owners = imm.javaClass.declaredFields.mapNotNull { field ->
+                runCatching {
+                    field.isAccessible = true
+                    val view = field.get(imm) as? View ?: return@runCatching null
+                    var context = view.context
+                    while (context is android.content.ContextWrapper && context !is Activity) context = context.baseContext
+                    "${field.name}:${(context as? Activity)?.isDestroyed}"
+                }.getOrNull()
+            }
+            instrumentation.sendStatus(2, Bundle().apply { putString("retained_view_owners", owners.joinToString()) })
+        }
+        assertTrue("Destroyed Activities reachable: $remaining", remaining.isEmpty())
     }
 
     private fun open(route: String) {
@@ -409,7 +425,7 @@ class SettingsEditableDraftLifecycleTest : InstrumentationTestCase() {
 
     private fun assertLargeStateBounded() {
         val state = savedState()
-        assertNull("Oversized text must never enter saved state", state.getBundle("editable_draft"))
+        assertNull("Oversized draft: route=${(get(activity(), "body") as View).tag}, lengths=${fields().map { it.length() }}, errors=${fields().map { it.error?.length }}", state.getBundle("editable_draft"))
         assertTrue(state.getBoolean("oversized_editable_draft"))
         val size = parcelSize(state)
         assertTrue("Complete Activity state exceeds app diagnostic budget: $size bytes", size <= 65_536)

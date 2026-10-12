@@ -44,9 +44,17 @@ internal object SettingsPalette {
 
     fun buttonBackground(context: Context, primary: Boolean = false): RippleDrawable {
         val states = StateListDrawable().apply {
-            addState(intArrayOf(-android.R.attr.state_enabled), shape(context, functional, 18))
-            addState(intArrayOf(android.R.attr.state_focused), shape(context, if (primary) accent else functional, 18, outline))
-            addState(intArrayOf(), shape(context, if (primary) accent else functional, 18))
+            addState(intArrayOf(-android.R.attr.state_enabled), shape(context, functional, 14))
+            addState(intArrayOf(android.R.attr.state_focused), shape(context, if (primary) accent else functional, 14, outline))
+            addState(intArrayOf(), shape(context, if (primary) accent else functional, 14))
+        }
+        return RippleDrawable(ColorStateList.valueOf(ripple), states, null)
+    }
+
+    fun rowBackground(context: Context, color: Int = surface): RippleDrawable {
+        val states = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_focused), shape(context, color, 14, outline))
+            addState(intArrayOf(), shape(context, color, 14))
         }
         return RippleDrawable(ColorStateList.valueOf(ripple), states, null)
     }

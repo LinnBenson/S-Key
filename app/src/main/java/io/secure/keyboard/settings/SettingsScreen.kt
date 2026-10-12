@@ -3,6 +3,10 @@ package io.secure.keyboard.settings
 import android.app.Activity
 import android.content.Context
 import android.graphics.Typeface
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
 import android.os.Build
 import android.view.Gravity
 import android.view.View
@@ -52,7 +56,7 @@ internal open class SettingsScreen(private val activity: Activity) {
         else activity.window.decorView.systemUiVisibility = activity.window.decorView.systemUiVisibility or
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        val inset = if (activity.resources.configuration.screenWidthDp >= 600) 24 else 22
+        val inset = if (activity.resources.configuration.screenWidthDp >= 600) 24 else 20
         val root = column().apply {
             tag = "settings_shell"
             setBackgroundColor(this@SettingsScreen.background)
@@ -61,11 +65,13 @@ internal open class SettingsScreen(private val activity: Activity) {
         if (title != null || backLabel != null) {
             val header = column().apply { setPadding(dp(inset), dp(10), dp(inset), dp(12)) }
             backLabel?.let { label ->
-                button(header, "‹  返回") { onBack?.invoke() }.apply {
+                button(header, "返回") { onBack?.invoke() }.apply {
                     tag = "settings_back"
                     gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                    background = SettingsPalette.buttonBackground(activity)
-                    setPadding(dp(14), 0, dp(14), 0)
+                    background = SettingsPalette.rowBackground(activity, this@SettingsScreen.background)
+                    setCompoundDrawablesRelativeWithIntrinsicBounds(SettingsChevron(activity, true), null, null, null)
+                    compoundDrawablePadding = dp(4)
+                    setPadding(0, 0, dp(12), 0)
                     minHeight = dp(44); minimumHeight = dp(44)
                     textSize = 13f
                     layoutParams = LinearLayout.LayoutParams(-2, -2)
@@ -73,7 +79,7 @@ internal open class SettingsScreen(private val activity: Activity) {
                 }
             }
             title?.let { value ->
-                text(header, value, 24f, true).apply {
+                text(header, value, 28f, true).apply {
                     tag = "settings_title"
                     if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
                 }
@@ -153,7 +159,7 @@ internal open class SettingsScreen(private val activity: Activity) {
 
     fun card(parent: LinearLayout, color: Int = surface): LinearLayout = column().apply {
         background = shape(color)
-        setPadding(dp(18), dp(16), dp(18), dp(16))
+        setPadding(dp(20), dp(18), dp(20), dp(18))
         parent.addView(this, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(8), 0, dp(8)) })
     }
 
@@ -179,13 +185,54 @@ internal open class SettingsScreen(private val activity: Activity) {
         infoCard(parent, title, message)
 
     fun actionRow(parent: LinearLayout, title: String, summary: String? = null, action: () -> Unit): Button =
-        button(parent, if (summary.isNullOrBlank()) title else "$title\n$summary", action = action).apply {
+        button(parent, title, action = action).apply {
+            background = SettingsPalette.rowBackground(activity, surface)
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            minimumHeight = dp(56)
+            setPadding(0, dp(10), 0, dp(10))
+            minimumHeight = dp(if (summary.isNullOrBlank()) 56 else 72)
+            minHeight = minimumHeight
+            setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, SettingsChevron(activity), null)
+            compoundDrawablePadding = dp(12)
+            text = actionText(title, summary)
+            layoutParams = LinearLayout.LayoutParams(-1, -2)
+        }
+
+    fun actionText(title: String, summary: String?): CharSequence =
+        if (summary.isNullOrBlank()) title else SpannableString("$title\n$summary").apply {
+            setSpan(RelativeSizeSpan(0.8f), title.length + 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(ForegroundColorSpan(muted), title.length + 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
 
     fun valueRow(parent: LinearLayout, title: String, value: String, action: () -> Unit): Button =
         actionRow(parent, "$title: $value", action = action)
+
+    fun segmented(parent: LinearLayout, labels: List<String>, selected: Int, change: (Int) -> Unit) {
+        val row = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = shape(tint, 14)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+        parent.addView(row, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(8), 0, dp(8)) })
+        val buttons = mutableListOf<Button>()
+        fun select(index: Int) = buttons.forEachIndexed { i, button ->
+            button.isSelected = i == index
+            button.setTextColor(if (i == index) SettingsPalette.onAccent else muted)
+            button.background = shape(if (i == index) ink else tint, 11)
+        }
+        labels.forEachIndexed { index, label ->
+            val button = Button(activity).apply {
+                text = label
+                SettingsPalette.styleButton(this)
+                textSize = 13f
+                minWidth = 0; minimumWidth = 0
+                setPadding(dp(4), dp(8), dp(4), dp(8))
+                setOnClickListener { change(index); select(index) }
+            }
+            row.addView(button, LinearLayout.LayoutParams(0, -2, 1f))
+            buttons.add(button)
+        }
+        select(selected)
+    }
 
     fun dangerRow(parent: LinearLayout, label: String, action: () -> Unit): Button =
         button(parent, label, action = action).apply { SettingsPalette.styleButton(this, destructive = true) }

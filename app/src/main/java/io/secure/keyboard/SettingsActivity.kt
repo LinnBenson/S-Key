@@ -54,6 +54,7 @@ class SettingsActivity : Activity() {
     private var activeDialog: AlertDialog? = null
     private var activeDraft: Bundle? = null
     private var draftFields = emptyList<EditText>()
+    private var pendingSelectionRestore: Pair<View, ViewTreeObserver.OnWindowFocusChangeListener>? = null
     private val dialogs = mutableSetOf<AlertDialog>()
     private val numberEditors = mutableMapOf<String, (Bundle?) -> Unit>()
     private var pendingLayout: Pair<View, ViewTreeObserver.OnGlobalLayoutListener>? = null
@@ -143,6 +144,9 @@ class SettingsActivity : Activity() {
             "emoji" -> emoji()
             "layout" -> profiles()
             "behavior" -> behavior()
+            "feedback" -> feedback()
+            "input" -> inputPreferences()
+            "cleanup" -> cleanup()
             "theme_light" -> themeEditor(false)
             "theme_dark" -> themeEditor(true)
             "profile_outer_portrait" -> profile(true, false)
@@ -174,7 +178,7 @@ class SettingsActivity : Activity() {
         ui = SettingsScreen(this)
         val backLabel = when {
             route.startsWith("profile_") -> "‹ 返回布局配置"
-            route.startsWith("theme_") -> "‹ 返回外观与按键"
+            route.startsWith("theme_") || route == "feedback" -> "‹ 返回外观与按键"
             else -> "‹ 返回设置"
         }
         body = ui.root(title, if (back) backLabel else null, if (back) ({ navigateBack() }) else null)
@@ -261,9 +265,47 @@ class SettingsActivity : Activity() {
 
     private fun button(text: String, primary: Boolean = false, action: () -> Unit): Button =
         ui.button(target(), text, primary) { safely(action) }.apply {
-            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            gravity = Gravity.CENTER
             tag = "action:${target().tag ?: navigation.current}:$text"
             if (text.startsWith("删除") || text.startsWith("清空")) setTextColor(SettingsPalette.error)
+        }
+
+    private fun compactActions(parent: LinearLayout): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        parent.addView(this, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    private fun compactAction(parent: LinearLayout, label: String, icon: String? = null, action: () -> Unit) {
+        val button = Button(this).apply {
+            text = if (icon == null) label else ""
+            contentDescription = label
+            tag = "action:${target().tag ?: navigation.current}:$label"
+            SettingsPalette.styleButton(this)
+            minWidth = dp(48); minimumWidth = dp(48)
+            minHeight = dp(48); minimumHeight = dp(48)
+            textSize = 13f
+            setPadding(dp(8), 0, dp(8), 0)
+            background = SettingsPalette.rowBackground(this@SettingsActivity)
+            if (label.startsWith("删除")) setTextColor(SettingsPalette.error)
+            setOnClickListener { safely(action) }
+        }
+        if (icon == null) parent.addView(button, LinearLayout.LayoutParams(-2, dp(48)))
+        else {
+            val frame = android.widget.FrameLayout(this)
+            parent.addView(frame, LinearLayout.LayoutParams(dp(48), dp(48)))
+            frame.addView(button, android.widget.FrameLayout.LayoutParams(-1, -1))
+            frame.addView(io.secure.keyboard.ui.ToolIcon(this, icon,
+                if (label.startsWith("删除")) SettingsPalette.error else ui.ink, artworkSizeDp = 20f).apply {
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                isClickable = false
+            }, android.widget.FrameLayout.LayoutParams(-1, -1))
+        }
+    }
+
+    private fun navigateRow(text: String, summary: String? = null, action: () -> Unit): Button =
+        ui.actionRow(target(), text, summary) { safely(action) }.apply {
+            tag = "action:${target().tag ?: navigation.current}:$text"
         }
 
     private fun toggle(text: String, value: Boolean, change: (Boolean) -> Unit): Switch =
@@ -293,6 +335,7 @@ class SettingsActivity : Activity() {
             val input = SettingsInputs.field(this).apply {
                 id = R.id.settings_numeric_input
                 inputType = InputType.TYPE_CLASS_NUMBER
+                filters = emptyArray() // Validate on Save; never silently truncate an editable draft.
                 setText(current.toString())
                 contentDescription = text
             }
@@ -317,17 +360,10 @@ class SettingsActivity : Activity() {
             }
             showEditable(dialog, Bundle().apply { putString("type", "number"); putString("key", key) }, listOf(input), draft)
         }
-        row = button("$text: $value") { open(null) }
+        row = navigateRow("$text: $value") { open(null) }
         row.tag = "anchor:number:$key"
         numberEditors[key] = open
     }
-
-    private fun themeName(value: String) =
-        when (value) {
-            "light" -> "浅色"
-            "dark" -> "深色"
-            else -> "跟随系统"
-        }
 
     private fun toolName(value: String) =
         when (value) {
@@ -372,33 +408,36 @@ class SettingsActivity : Activity() {
 
     private fun home() {
         intent.removeExtra("page")
-        page("home", "键盘设置", false)
-        ui.card(body, ui.tint).also {
-            ui.text(it, "数据仅保存在本机", 17f, true)
-            ui.text(it, "无联网权限，不学习输入内容、不保存输入历史、不自动收集常用语。", 13f)
-        }
-        section("键盘与输入法")
-        button("在 Android 设置中启用键盘") { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
-        button("切换输入法") {
-            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
-                .showInputMethodPicker()
+        page("home", "偏好设置")
+        label("把常用的设置，放在容易找到的地方。", 12f)
+        ui.card(body).also {
+            ui.text(it, "安心输入，只在本机", 17f, true)
+            ui.text(it, "不学习输入内容，不保存输入历史。", 12f)
         }
         section("输入体验")
-        button("外观与按键") { behavior() }
-        button("布局配置") { profiles() }
-        button("工具栏固定项") { toolbar() }
+        navigateRow("外观与按键", "主题配色、字号与按键角标") { behavior() }
+        navigateRow("输入与补全", "自动上屏、英文补全、模糊拼音") { inputPreferences() }
+        navigateRow("布局配置", "外屏 / 内屏 · 横屏 / 竖屏") { profiles() }
+        navigateRow("定制工具栏", "添加、移除与拖动排序") { toolbar() }
         section("本机内容")
-        button("剪贴板（${content.clipboard().size}）") { clipboard() }
-        button("常用语（${content.phrases().size}）") { phrases() }
-        button("中文词库（${content.dictionary(DictionaryKind.CHINESE).size}）") {
-            dictionary(DictionaryKind.CHINESE)
-        }
-        button("英文词库（${content.dictionary(DictionaryKind.ENGLISH).size}）") {
-            dictionary(DictionaryKind.ENGLISH)
-        }
-        button("最近表情（${content.recentEmoji().size}/50）") { emoji() }
-        section("内容清理")
-        label("仅删除本机内容，布局、配色与输入设置保留。")
+        navigateRow("剪贴板", "${content.clipboard().size} 条记录") { clipboard() }
+        navigateRow("常用语", "${content.phrases().size} 条手动添加") { phrases() }
+        navigateRow("中文词库", "${content.dictionary(DictionaryKind.CHINESE).size} 条自定义词条") { dictionary(DictionaryKind.CHINESE) }
+        navigateRow("英文词库", "${content.dictionary(DictionaryKind.ENGLISH).size} 条自定义词条") { dictionary(DictionaryKind.ENGLISH) }
+        navigateRow("最近表情", "${content.recentEmoji().size} / 50") { emoji() }
+        section("更多")
+        navigateRow("启用 S Key", "前往 Android 输入法设置") { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+        navigateRow("切换输入法") { (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker() }
+        navigateRow("离线语音", "模型与麦克风权限") { startActivity(Intent(this, VoiceSetupActivity::class.java)) }
+        navigateRow("内容清理", "保留布局、配色与输入设置") { cleanup() }
+    }
+
+    private fun cleanup() {
+        page("cleanup", "内容清理")
+        section("本次会删除")
+        label("剪贴板历史、手动常用语、中文与英文自定义词库、最近表情。")
+        section("这些会保留")
+        label("布局、配色与输入设置；Android 系统剪贴板和已导出的文件。")
         button("清空全部用户内容") {
             confirm("清空剪贴板、常用语、中文词库、英文词库和最近表情？布局与设置会保留，Android 系统剪贴板和已导出的文件不会被删除。") {
                 content.clearAll()
@@ -419,50 +458,33 @@ class SettingsActivity : Activity() {
         ui.card(body, ui.tint).also { ui.text(it, text, 14f) }
     }
 
-    private fun choice(title: String, labels: Array<String>, selected: Int, change: (Int) -> Unit) {
-        showDialog(SettingsDialogs.builder(this).setTitle(title)
-            .setSingleChoiceItems(labels, selected) { dialog, which ->
-                safely { change(which) }
-                dialog.dismiss()
-            }.setNegativeButton("取消", null).create())
-    }
-
     private fun behavior() {
         page("behavior", "外观与按键")
-        notice("开关、选择与滑块会立即保存。数字和配色编辑在点击「保存」后生效。这里的主题只影响键盘，设置界面始终为浅色。")
+        label("开关与滑块即时保存，配色单独确认。", 12f)
         section("键盘主题")
-        lateinit var fixedMode: Button
-        toggle("跟随系统主题", config.theme == "system") { follow ->
-            val systemDark = resources.configuration.uiMode and
-                android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
-            config.theme = if (follow) "system" else if (systemDark) "dark" else "light"
-            fixedMode.text = "固定主题：${themeName(config.theme)}"
-            fixedMode.visibility = if (follow) View.GONE else View.VISIBLE
+        val modes = listOf("system", "light", "dark")
+        ui.segmented(target(), listOf("跟随系统", "浅色", "深色"), modes.indexOf(config.theme).coerceAtLeast(0)) {
+            safely { config.theme = modes[it] }
         }
-        fixedMode = button("固定主题：${themeName(config.theme)}") {
-            val values = arrayOf("light", "dark")
-            choice("固定主题", arrayOf("浅色", "深色"), values.indexOf(config.theme)) {
-                config.theme = values[it]
-                fixedMode.text = "固定主题：${themeName(config.theme)}"
-            }
-        }.apply { visibility = if (config.theme == "system") View.GONE else View.VISIBLE }
-        button("自定义浅色主题") { themeEditor(false) }
-        button("自定义深色主题") { themeEditor(true) }
+        navigateRow("自定义浅色主题", "浅色配色独立保存") { themeEditor(false) }
+        navigateRow("自定义深色主题", "深色配色独立保存") { themeEditor(true) }
         section("候选词字体")
         slider("候选栏字号", config.candidateTextSize, 12, 32, 1, "sp") { config.candidateTextSize = it }
         slider("展开候选字号", config.expandedCandidateTextSize, 12, 32, 1, "sp") { config.expandedCandidateTextSize = it }
         label("默认候选栏为20 sp，展开候选为18 sp；修改后重新打开键盘生效，并跟随系统字体缩放。")
         section("按键角标")
-        val hintModes = arrayOf("all", "digits", "hidden")
-        val hintLabels = arrayOf("全部", "仅数字", "隐藏")
-        lateinit var hintButton: Button
-        hintButton = button("按键角标：${hintLabels[hintModes.indexOf(config.symbolHints).coerceAtLeast(0)]}") {
-            choice("按键角标", hintLabels, hintModes.indexOf(config.symbolHints)) { which ->
-                config.symbolHints = hintModes[which]
-                hintButton.text = "按键角标：${hintLabels[which]}"
-            }
+        val hintModes = listOf("all", "digits", "hidden")
+        ui.segmented(target(), listOf("全部", "仅数字", "隐藏"), hintModes.indexOf(config.symbolHints).coerceAtLeast(0)) {
+            safely { config.symbolHints = hintModes[it] }
         }
-        label("仅调整三行字母键右上角的提示显示，不改变长按输入。")
+        label("仅调整提示显示，不改变长按输入。", 12f)
+        section("触感与手势")
+        navigateRow("按键反馈与手势", "声音、振动、长按与滑动删除") { feedback() }
+    }
+
+    private fun feedback() {
+        page("feedback", "按键反馈与手势")
+        label("熟悉的触感，按你的习惯调整。", 12f)
         section("按键与手势")
         toggle("按键声音", config.keySound) { config.keySound = it }
         label("默认关闭。开启后使用系统键盘音效，遵循系统触摸音效、静音与系统音量设置。")
@@ -472,7 +494,12 @@ class SettingsActivity : Activity() {
         toggle("长按输入符号", config.longPressSymbols) { config.longPressSymbols = it }
         slider("长按延迟", config.longPressDelay, 150, 1500, 10, "毫秒") { config.longPressDelay = it }
         toggle("滑动退格键删除", config.swipeDelete) { config.swipeDelete = it }
-        section("输入与补全")
+    }
+
+    private fun inputPreferences() {
+        page("input", "输入与补全")
+        label("文字候选优先，表情始终手动选择。", 12f)
+        section("输入规则")
         toggle("四码自动上屏", config.fourCodeAutoCommit) { config.fourCodeAutoCommit = it }
         toggle("英文补全", config.englishCompletion) { config.englishCompletion = it }
         section("模糊拼音")
@@ -522,7 +549,7 @@ class SettingsActivity : Activity() {
                 } else body
                 group = ui.card(cardParent).apply { tag = "anchor:${SettingsNavigation.profile(outer, landscape)}" }
                 val p = config.profile(outer, landscape)
-                button(profileName(outer, landscape)) { profile(outer, landscape) }
+                ui.actionRow(target(), profileName(outer, landscape)) { profile(outer, landscape) }
                 label("高度 ${p.heightDp} dp · 两侧 ${p.sideGapDp} dp · 底部 ${p.bottomGapDp} dp")
                 label(if (p.floating) "悬浮模式已开启" else if (!outer && p.split) "分离布局已开启" else "标准布局")
             }
@@ -565,12 +592,15 @@ class SettingsActivity : Activity() {
 
     private fun clipboard() {
         page("clipboard", "剪贴板")
-        notice("置顶仅改变顺序；超出上限优先删除最旧未置顶，全部置顶时删除最旧记录。不自动过期，重复复制也会保留。置顶记录也会随内容清空。仅在 Android 允许访问时响应复制事件，不在后台轮询，不收集密码输入场景或带敏感标记的内容。单条最多65536字符，历史合计最多100万字符；超长或短时大量复制可能跳过自动保存，系统剪贴板仍可粘贴。清空不会修改 Android 系统剪贴板，旧内容也不会再次收集，直到您重新复制。")
+        val clipboardHelp = "置顶仅改变顺序；超出上限优先删除最旧未置顶，全部置顶时删除最旧记录。不自动过期，相同内容合并去重。置顶记录也会随内容清空。仅在 Android 允许访问时响应复制事件，不在后台轮询，不收集密码输入场景或带敏感标记的内容。单条最多65536字符，历史合计最多100万字符；超长或短时大量复制可能跳过自动保存，系统剪贴板仍可粘贴。清空不会修改 Android 系统剪贴板，旧内容也不会再次收集，直到您重新复制。"
         section("保存设置")
         number("保存条数上限", config.clipboardLimit, 1, 1000) {
             config.clipboardLimit = it
             content.trimClipboard()
             clipboard()
+        }
+        navigateRow("保存与清理规则", "查看隐私、去重与容量说明") {
+            showDialog(SettingsDialogs.builder(this).setTitle("保存与清理规则").setMessage(clipboardHelp).setPositiveButton("关闭", null).create())
         }
         val records = content.clipboard().asReversed()
         group = null
@@ -579,7 +609,7 @@ class SettingsActivity : Activity() {
         contentPage(records, "clipboard", ::clipboard).forEach { (index, item) ->
             group = ui.card(body).apply { tag = "anchor:clipboard:${item.id}" }
             label(item.text, 15f).setTextColor(ui.ink)
-            button("删除这条记录") {
+            compactAction(compactActions(target()), "删除这条记录", "delete") {
                 content.deleteClipboard(item.id)
                 (records.getOrNull(index + 1) ?: records.getOrNull(index - 1))?.let {
                     keepItemVisible("anchor:clipboard:${it.id}")
@@ -627,20 +657,21 @@ class SettingsActivity : Activity() {
         contentPage(phrases, "phrases", ::phrases).forEach { (index, item) ->
             group = ui.card(body).apply { tag = "anchor:phrase:${item.id}" }
             label(item.text, 15f).setTextColor(ui.ink)
-            button("编辑") { editPhrase(item.id) }
-            if (index > 0) button("上移") {
+            val actions = compactActions(target())
+            compactAction(actions, "编辑", "edit") { editPhrase(item.id) }
+            if (index > 0) compactAction(actions, "上移") {
                 content.movePhrase(item.id, index - 1)
                 contentPageIndices["phrases"] = (index - 1) / 100
                 keepItemVisible("anchor:phrase:${item.id}")
                 phrases()
             }
-            if (index < phrases.lastIndex) button("下移") {
+            if (index < phrases.lastIndex) compactAction(actions, "下移") {
                 content.movePhrase(item.id, index + 1)
                 contentPageIndices["phrases"] = (index + 1) / 100
                 keepItemVisible("anchor:phrase:${item.id}")
                 phrases()
             }
-            button("删除") {
+            compactAction(actions, "删除", "delete") {
                 content.deletePhrase(item.id)
                 (phrases.getOrNull(index + 1) ?: phrases.getOrNull(index - 1))?.let {
                     keepItemVisible("anchor:phrase:${it.id}")
@@ -669,23 +700,11 @@ class SettingsActivity : Activity() {
         page(route, name)
         currentDictionaryKind = kind
         intent.putExtra("page", route)
-        section("词库管理")
-        label("UTF-8 TSV 文件：词语 + 制表符 + 编码。编辑需要保存，导入前会完整校验。")
-        val completeHelp = label(
-            "导入导出格式为 UTF-8 TSV：每行「词语 + 制表符 + 编码」，可选首行为 word<TAB>reading。字段内不能有制表符或换行。每个词库最多 10,000 条，单次导入最多 400 万字符，先校验完整文件，再追加到$name。导出文件保存在您选择的位置，清空应用内容不会删除这些文件。\n" +
-            if (kind == DictionaryKind.ENGLISH)
-                "编码须为 1–40 个英文字母，匹配时不区分大小写。词语按原样输出，可含空格和标点，但首尾不能有空白。开启「英文补全」后，仅在英文输入中使用。"
-            else "拼音／编码与词语按原样保存，仅用于中文输入。"
-        ).apply { visibility = if (route in navigation.expandedHelp) View.VISIBLE else View.GONE }
-        lateinit var helpButton: Button
-        helpButton = button(if (route in navigation.expandedHelp) "收起格式说明" else "展开完整格式说明") {
-            val expand = completeHelp.visibility != View.VISIBLE
-            completeHelp.visibility = if (expand) View.VISIBLE else View.GONE
-            if (expand) navigation.expandedHelp.add(route) else navigation.expandedHelp.remove(route)
-            helpButton.text = if (expand) "收起格式说明" else "展开完整格式说明"
-        }
-        button("添加词条") { editDictionary(null, kind) }
-        button("导入 TSV") {
+        label("你的表达，按原样保存。", 12f)
+        section("管理词条")
+        button("添加词条", true) { editDictionary(null, kind) }
+        val transferActions = compactActions(target())
+        compactAction(transferActions, "导入 TSV") {
             startActivityForResult(
                 Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -695,7 +714,7 @@ class SettingsActivity : Activity() {
                 if (kind == DictionaryKind.CHINESE) IMPORT_CHINESE else IMPORT_ENGLISH,
             )
         }
-        button("导出 TSV") {
+        compactAction(transferActions, "导出 TSV") {
             startActivityForResult(
                 Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -708,6 +727,27 @@ class SettingsActivity : Activity() {
                 },
                 if (kind == DictionaryKind.CHINESE) EXPORT_CHINESE else EXPORT_ENGLISH,
             )
+        }
+        for (index in 0 until transferActions.childCount) {
+            transferActions.getChildAt(index).apply {
+                background = SettingsPalette.buttonBackground(this@SettingsActivity)
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    if (index > 0) marginStart = dp(8)
+                }
+            }
+        }
+        val completeHelp = label(
+            "导入导出格式为 UTF-8 TSV：每行「词语 + 制表符 + 编码」，可选首行为 word<TAB>reading。字段内不能有制表符或换行。每个词库最多 10,000 条，单次导入最多 400 万字符，先校验完整文件，再追加到$name。导出文件保存在您选择的位置，清空应用内容不会删除这些文件。\n" +
+            if (kind == DictionaryKind.ENGLISH)
+                "编码须为 1–40 个英文字母，匹配时不区分大小写。词语按原样输出，可含空格和标点，但首尾不能有空白。开启「英文补全」后，仅在英文输入中使用。"
+            else "拼音／编码与词语按原样保存，仅用于中文输入。"
+        ).apply { visibility = if (route in navigation.expandedHelp) View.VISIBLE else View.GONE }
+        lateinit var helpButton: Button
+        helpButton = navigateRow(if (route in navigation.expandedHelp) "收起格式说明" else "展开完整格式说明") {
+            val expand = completeHelp.visibility != View.VISIBLE
+            completeHelp.visibility = if (expand) View.VISIBLE else View.GONE
+            if (expand) navigation.expandedHelp.add(route) else navigation.expandedHelp.remove(route)
+            helpButton.text = if (expand) "收起格式说明" else "展开完整格式说明"
         }
         val entries = content.dictionary(kind)
         val lastPage = ((entries.size - 1).coerceAtLeast(0)) / DICTIONARY_PAGE_SIZE
@@ -726,10 +766,13 @@ class SettingsActivity : Activity() {
             if (pageIndex < lastPage) button("下一页") { dictionary(kind, pageIndex + 1) }
             group = null
         }
-        pageControls(true)
         val visibleEntries = entries.drop(pageIndex * DICTIONARY_PAGE_SIZE).take(DICTIONARY_PAGE_SIZE)
+        val entriesCard = ui.card(body).apply { tag = "anchor:dictionary:page" }
+        ui.text(entriesCard, "自定义词条 · ${entries.size}", 17f, true)
+        ui.text(entriesCard, if (entries.isEmpty()) "还没有词条，添加或导入后即可在这里管理。"
+            else "第 ${pageIndex + 1} / ${lastPage + 1} 页", 12f)
         visibleEntries.forEachIndexed { index, item ->
-            body.addView(
+            entriesCard.addView(
                 DictionaryEntryRow(
                     this,
                     item,
@@ -749,11 +792,15 @@ class SettingsActivity : Activity() {
                         }
                     },
                 ).apply { tag = "anchor:dictionary:${kind.name}:${item.id}" },
-                LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(3), 0, dp(3)) },
+                LinearLayout.LayoutParams(-1, -2),
             )
+            if (index < visibleEntries.lastIndex) entriesCard.addView(View(this).apply {
+                setBackgroundColor(SettingsPalette.divider)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(-1, dp(1)))
         }
         if (entries.size > DICTIONARY_PAGE_SIZE) pageControls()
-        section("内容清理")
+        group = entriesCard
         button("清空$name") {
             confirm("删除$name 的全部词条？另一个词库和已导出的文件不会被删除。", "清空$name？") {
                 content.clearDictionary(kind)
@@ -767,14 +814,16 @@ class SettingsActivity : Activity() {
         val word = SettingsInputs.field(this).apply {
             id = R.id.settings_dictionary_word
             hint = if (kind == DictionaryKind.ENGLISH) "词语／短语（按原样输出）" else "词语"
-            setText(item?.word ?: "")
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            filters = emptyArray() // Android may install an implicit single-line 5000-character cap.
+            setText(item?.word ?: "")
         }
         val reading = SettingsInputs.field(this).apply {
             id = R.id.settings_dictionary_reading
             hint = if (kind == DictionaryKind.ENGLISH) "编码（1–40 个英文字母）" else "拼音／编码"
-            setText(item?.reading ?: "")
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            filters = emptyArray()
+            setText(item?.reading ?: "")
             textDirection = View.TEXT_DIRECTION_LTR
         }
         SettingsInputs.labeled(group, word.hint.toString(), word)
@@ -847,7 +896,7 @@ class SettingsActivity : Activity() {
             id = R.id.settings_phrase_input
             setText(item?.text.orEmpty())
             minLines = 3
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             gravity = Gravity.TOP or Gravity.START
         }
         val parent = ui.column()
@@ -885,9 +934,11 @@ class SettingsActivity : Activity() {
     private fun showDialog(dialog: AlertDialog): AlertDialog {
         dialogs.add(dialog)
         dialog.setOnDismissListener {
+            dialog.currentFocus?.clearFocus()
             dialogs.remove(dialog)
             if (transferDialog === dialog) transferDialog = null
             if (activeDialog === dialog) {
+                cancelSelectionRestore()
                 activeDialog = null
                 activeDraft = null
                 draftFields = emptyList()
@@ -913,10 +964,6 @@ class SettingsActivity : Activity() {
         restored?.let { state ->
             fields.forEachIndexed { index, field ->
                 if (state.containsKey("field_$index")) field.setText(state.getString("field_$index").orEmpty())
-                val start = state.getInt("selection_start_$index", field.text.length).coerceIn(0, field.text.length)
-                val end = state.getInt("selection_end_$index", start).coerceIn(0, field.text.length)
-                // Keep a valid reversed anchor/focus range; clamp only invalid offsets.
-                field.setSelection(start, end)
                 state.getString("error_$index")?.let { SettingsInputs.error(field, it) }
             }
         }
@@ -926,6 +973,36 @@ class SettingsActivity : Activity() {
         showDialog(dialog)
         val focus = restored?.getInt("focused", -1) ?: -1
         if (focus in fields.indices) fields[focus].requestFocus()
+        // Android can normalize the selection again when the newly shown window gains focus.
+        // Retain only offsets until that first focus event, never a second copy of the text.
+        restored?.let { state ->
+            val offsets = fields.mapIndexed { index, field ->
+                val start = state.getInt("selection_start_$index", field.length()).coerceIn(0, field.length())
+                start to state.getInt("selection_end_$index", start).coerceIn(0, field.length())
+            }
+            fun restoreSelection() = fields.forEachIndexed { index, field ->
+                field.setSelection(offsets[index].first.coerceAtMost(field.length()), offsets[index].second.coerceAtMost(field.length()))
+            }
+            restoreSelection()
+            val decor = dialog.window!!.decorView
+            if (!decor.hasWindowFocus()) {
+                val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+                    if (focused) {
+                        cancelSelectionRestore()
+                        if (activeDialog === dialog) restoreSelection()
+                    }
+                }
+                pendingSelectionRestore = decor to listener
+                decor.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+            }
+        }
+    }
+
+    private fun cancelSelectionRestore() {
+        pendingSelectionRestore?.let { (view, listener) ->
+            if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
+        }
+        pendingSelectionRestore = null
     }
 
     private fun captureEditableDraft(): SettingsEditableDraft? = activeDraft?.let { descriptor ->
@@ -973,13 +1050,17 @@ class SettingsActivity : Activity() {
     private fun closeDialogs() = dismissOwnedDialogs(keepRetainedDraft = false)
 
     private fun dismissOwnedDialogs(keepRetainedDraft: Boolean) {
+        cancelSelectionRestore()
         if (!keepRetainedDraft && ::lifetimeState.isInitialized) lifetimeState.editableDraft = null
         // Clear before dismiss: a queued callback from the old Activity must not erase the
         // snapshot retained for its replacement (or a new edit owned by that replacement).
         activeDialog = null
         activeDraft = null
         draftFields = emptyList()
-        dialogs.toList().forEach { it.dismiss() }
+        dialogs.toList().forEach { dialog ->
+            dialog.currentFocus?.clearFocus()
+            dialog.dismiss()
+        }
         dialogs.clear()
     }
 

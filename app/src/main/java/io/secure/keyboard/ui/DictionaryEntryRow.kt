@@ -35,8 +35,8 @@ class DictionaryEntryRow(
         orientation = HORIZONTAL
         layoutDirection = View.LAYOUT_DIRECTION_LTR
         gravity = Gravity.CENTER_VERTICAL
-        minimumHeight = dp(52)
-        setPadding(dp(12), dp(2), dp(4), dp(2))
+        minimumHeight = dp(56)
+        setPadding(dp(4), dp(4), 0, dp(4))
         background =
             GradientDrawable().apply {
                 cornerRadius = dp(16).toFloat()
@@ -46,6 +46,7 @@ class DictionaryEntryRow(
             TextView(context).apply {
                 text = value
                 textSize = 15f
+                includeFontPadding = false
                 setTextColor(color)
                 setSingleLine(true)
                 ellipsize = TextUtils.TruncateAt.END
@@ -55,12 +56,17 @@ class DictionaryEntryRow(
             }
         codeView =
             preview(entry.reading, codeColor).apply {
+                textSize = 12f
                 typeface = Typeface.MONOSPACE
                 textDirection = View.TEXT_DIRECTION_LTR
             }
         wordView = preview(entry.word, textColor).apply { CandidateFont.apply(this) }
-        addView(codeView, LayoutParams(0, LayoutParams.MATCH_PARENT, 0.3f))
-        addView(wordView, LayoutParams(0, LayoutParams.MATCH_PARENT, 0.7f))
+        val labels = LinearLayout(context).apply {
+            orientation = VERTICAL
+            addView(wordView, LayoutParams(-1, -2))
+            addView(codeView, LayoutParams(-1, -2).apply { topMargin = dp(3) })
+        }
+        addView(labels, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         editAction =
             ActionTarget(context, "edit", "编辑词条", editColor).apply {
                 setOnClickListener { onEdit(entry) }
@@ -91,7 +97,7 @@ class DictionaryEntryRow(
                     },
                 )
             addView(
-                ToolIcon(context, kind, color).apply {
+                ToolIcon(context, kind, color, artworkSizeDp = 20f).apply {
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 },
                 LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),

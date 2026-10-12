@@ -39,7 +39,7 @@ class SettingsRedesignScreensTest : InstrumentationTestCase() {
     private lateinit var fixture: SettingsUiFixture
     private lateinit var evidence: SettingsUiEvidence
     private val arguments get() = (instrumentation as InstrumentationTestRunner).arguments
-    private val settingsRoutes = listOf("home", "behavior", "layout",
+    private val settingsRoutes = listOf("home", "behavior", "feedback", "input", "cleanup", "layout",
         "profile_outer_portrait", "profile_outer_landscape", "profile_inner_portrait", "profile_inner_landscape",
         "toolbar", "clipboard", "phrases", "dictionary", "english_dictionary", "emoji",
         "theme_light", "theme_dark", "recovery")
@@ -58,7 +58,7 @@ class SettingsRedesignScreensTest : InstrumentationTestCase() {
         try { fixture.close() } finally { super.tearDown() }
     }
 
-    fun testAllEighteenRoutesRenderFixedLightAndCaptureNativeStates() {
+    fun testAllSettingsRoutesRenderFixedLightAndCaptureNativeStates() {
         seedContent()
         openActivity(MainActivity::class.java)
         assertLightShell()
@@ -137,7 +137,7 @@ class SettingsRedesignScreensTest : InstrumentationTestCase() {
         for (route in settingsRoutes.filter { it != "home" }) {
             val expectedParent = when {
                 route.startsWith("profile_") -> "layout"
-                route.startsWith("theme_") -> "behavior"
+                route.startsWith("theme_") || route == "feedback" -> "behavior"
                 else -> "home"
             }
             openSettings(route)
@@ -161,7 +161,7 @@ class SettingsRedesignScreensTest : InstrumentationTestCase() {
         assertTrue("Phrase fixture must genuinely scroll", before > 0)
         recreate()
         assertRoute("phrases")
-        await("Restored phrase scroll") { abs(scrollY() - before) <= dp(8) }
+        await("Restored phrase scroll ($before -> ${scrollY()})") { abs(scrollY() - before) <= dp(8) }
         openSettings("profile_inner_landscape")
         recreate()
         assertRoute("profile_inner_landscape")
@@ -210,7 +210,7 @@ class SettingsRedesignScreensTest : InstrumentationTestCase() {
     fun testNativeSwitchesPersistAndToolbarReorderKeepsBothDictionaries() {
         config.keySound = false
         config.toolbarPins = listOf("dictionary", "english_dictionary", "settings")
-        openSettings("behavior")
+        openSettings("feedback")
         val previous = current()
         onMain {
             val sound = allViews().filterIsInstance<Switch>().single { it.text == "按键声音" }
@@ -232,6 +232,56 @@ class SettingsRedesignScreensTest : InstrumentationTestCase() {
         clickTag("toolbar_add_dictionary")
         assertEquals(listOf("english_dictionary", "settings", "dictionary"), SettingsStore(fixture.context).toolbarPins)
         assertLightShell()
+    }
+
+    fun testSegmentedChoicesPersistWithoutChangingUnrelatedInputSettings() {
+        val fourCode = config.fourCodeAutoCommit
+        val completion = config.englishCompletion
+        val vibration = config.vibration
+        openSettings("behavior")
+        clickButton("深色")
+        clickButton("隐藏")
+        assertEquals("dark", SettingsStore(fixture.context).theme)
+        assertEquals("hidden", SettingsStore(fixture.context).symbolHints)
+        recreate()
+        onMain {
+            assertTrue(allViews().filterIsInstance<Button>().single { it.text == "深色" }.isSelected)
+            assertTrue(allViews().filterIsInstance<Button>().single { it.text == "隐藏" }.isSelected)
+            assertNotNull(findTag<Button>("settings_back").compoundDrawablesRelative[0])
+        }
+        assertEquals(fourCode, config.fourCodeAutoCommit)
+        assertEquals(completion, config.englishCompletion)
+        assertEquals(vibration, config.vibration)
+    }
+
+    fun testCompactContentActionsKeepCompleteTextAndCorrectIdentity() {
+        content.addPhrase("first fixture")
+        content.addPhrase("second fixture")
+        val first = content.phrases().first()
+        openSettings("phrases")
+        clickTag("action:anchor:phrase:${first.id}:下移")
+        assertEquals(first.id, content.phrases().last().id)
+        clickTag("action:anchor:phrase:${first.id}:编辑")
+        onMain {
+            assertEquals(first.text, descendants(settingsDialog().window!!.decorView).filterIsInstance<EditText>().single().text.toString())
+        }
+        clickDialog(AlertDialog.BUTTON_NEGATIVE)
+        clickTag("action:anchor:phrase:${first.id}:删除")
+        assertEquals(listOf("second fixture"), content.phrases().map { it.text })
+        content.addClipboard("clipboard fixture")
+        val clip = content.clipboard().single()
+        openSettings("clipboard")
+        clickTag("action:anchor:clipboard:${clip.id}:删除这条记录")
+        assertTrue(content.clipboard().isEmpty())
+        content.addDictionary("词库测试", "test")
+        openSettings("dictionary")
+        onMain {
+            val row = allViews().filterIsInstance<DictionaryEntryRow>().single()
+            assertTrue(row.wordView.bottom <= row.codeView.top)
+            assertTrue(row.editAction.right <= row.deleteAction.left)
+            assertTrue(row.height >= dp(56))
+            if (current().resources.configuration.fontScale <= 1.1f) assertTrue(row.height <= dp(64))
+        }
     }
 
     /** Re-run only this bounded set at native 320dp, short landscape, 840dp and large font. */
@@ -492,7 +542,12 @@ class SettingsRedesignScreensTest : InstrumentationTestCase() {
     }
 
     private fun scrollBottom(): Int {
-        onMain { findTag<ScrollView>("settings_scroll").fullScroll(View.FOCUS_DOWN) }
+        onMain { findTag<ScrollView>("settings_scroll").apply {
+            // Measure the final position, not an intermediate 250ms scroll animation.
+            isSmoothScrollingEnabled = false
+            fullScroll(View.FOCUS_DOWN)
+            isSmoothScrollingEnabled = true
+        } }
         settle()
         return scrollY()
     }

@@ -89,7 +89,7 @@ class VoiceSetupActivity : Activity() {
         status.tag = "voice_status"
         status.accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE
         target = layout
-        button("开源许可与声明") { showLicenses() }.tag = "voice_licenses"
+        ui.actionRow(target, "开源许可与声明") { showLicenses() }.tag = "voice_licenses"
         button("完成，返回") { finish() }
         refreshStatus()
         ui.restoreScroll(savedInstanceState?.getInt("voice_scroll") ?: 0)
