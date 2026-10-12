@@ -39,6 +39,24 @@ class DictionaryEngineDeviceTest : InstrumentationTestCase() {
         assertEquals(engine.completeEnglish("compu"), second.completeEnglish("compu"))
     }
 
+    fun testApprovedEmojiMatchesBothInputMethodsWithoutReplacingText() {
+        val engine = OfflineEngine(instrumentation.targetContext)
+        engine.load()
+        for (code in listOf("gany", "kaixin", "kait", "weixiao")) {
+            val words = engine.candidates(code, false).map { it.text }
+            val result = engine.appendEmoji(words)
+            assertEquals(words.take(3), result.take(minOf(3, words.size)))
+            assertEquals(words, result.filter { it in words })
+            if (code == "gany" || code == "kaixin") {
+                assertTrue("Expected 开心 for $code", words.take(3).contains("开心"))
+                assertTrue(result.contains("😀"))
+            }
+        }
+        assertFalse(engine.exactWubi("gany").any { it.text == "😀" })
+        assertTrue(engine.appendEmoji(emptyList()).isEmpty())
+        assertEquals(listOf("赞", "👍"), engine.appendEmoji(listOf("赞")))
+    }
+
     fun testMappedWubiIncludesCompleteLargeExactBucket() {
         val assets = instrumentation.targetContext.assets
         // openFd fails for compressed assets, detecting accidental packaging regressions.

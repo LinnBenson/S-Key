@@ -825,10 +825,10 @@ class OfflineKeyboardService : InputMethodService() {
                     val baseline =
                         base.filter { it.source == Source.WUBI }.map { it.text } +
                             base.filter { it.source != Source.WUBI }.map { it.text }
-                    CustomCandidateRanking.merge(
+                    engine.appendEmoji(CustomCandidateRanking.merge(
                         query, baseline, user,
                         reading = { it.reading }, text = { it.word },
-                    )
+                    ))
                 } else EnglishCustomCandidateRanking.merge(
                     query, engine.completeEnglish(query, 12).map { it.text }, user,
                     reading = { it.reading }, text = { it.word },

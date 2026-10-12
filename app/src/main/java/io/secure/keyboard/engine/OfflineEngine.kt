@@ -31,9 +31,12 @@ class OfflineEngine(context: Context) {
                     DictionaryEngine(wubi, p, EnglishLexicon(e))
                 }
             }
+            packagedEmoji = assets.open("dictionaries/emoji_keywords.tsv").reader(Charsets.UTF_8).use { EmojiLexicon(it) }
             packagedDictionary = parsed
         }
     }
+
+    fun appendEmoji(words: List<String>): List<String> = packagedEmoji?.appendTo(words) ?: words
 
     fun exactWubi(code: String, limit: Int = 40): List<Candidate> =
         packagedDictionary?.exactWubi(code, limit).orEmpty()
@@ -52,6 +55,7 @@ class OfflineEngine(context: Context) {
         private val initializationLock = Any()
         // Only immutable bundled dictionary tables live here. Never editor text, a query,
         // candidates, user frequencies, imported words, Context, or a learning/history model.
+        @Volatile private var packagedEmoji: EmojiLexicon? = null
         @Volatile private var packagedDictionary: DictionaryEngine? = null
     }
 }
