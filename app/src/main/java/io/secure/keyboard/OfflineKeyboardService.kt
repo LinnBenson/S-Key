@@ -771,14 +771,15 @@ class OfflineKeyboardService : InputMethodService() {
 
     private fun readEnglishPrefix(connection: InputConnection?): String {
         fun continuesToken(c: Char) = c in 'a'..'z' || c in 'A'..'Z' || c.isDigit() || c in "_'’"
-        if (
-            !connection?.getSelectedText(0).isNullOrEmpty() ||
-                connection?.getTextAfterCursor(1, 0)?.firstOrNull()?.let { continuesToken(it) } ==
-                    true
-        )
-            return ""
+        if (connection == null || !connection.getSelectedText(0).isNullOrEmpty()) return ""
+        // Read the prefix before validating the boundary. An asynchronous host can move the
+        // cursor while servicing these calls; never combine an old end-of-word boundary with
+        // a newer prefix from the middle of a word. Unknown host state suppresses completion.
+        val before = connection.getTextBeforeCursor(41, 0)?.toString() ?: return ""
+        val after = connection.getTextAfterCursor(1, 0) ?: return ""
+        if (after.firstOrNull()?.let { continuesToken(it) } == true ||
+            !connection.getSelectedText(0).isNullOrEmpty()) return ""
         // One extra character distinguishes a complete 40-letter code from a longer token's tail.
-        val before = connection?.getTextBeforeCursor(41, 0)?.toString() ?: return ""
         val prefix = before.takeLastWhile { it in 'a'..'z' || it in 'A'..'Z' }
         if (prefix.length > 40) return ""
         val preceding = before.getOrNull(before.length - prefix.length - 1)
@@ -1043,9 +1044,12 @@ class OfflineKeyboardService : InputMethodService() {
             refreshCandidates()
             if (settings.fourCodeAutoCommit && code.length == 4 && loaded) {
                 engine.exactWubi(code, 1).firstOrNull()?.let {
-                    currentInputConnection?.commitText(it.text, 1)
-                    clearComposition()
-                    renderHeader()
+                    // A detached or temporarily unavailable host may reject the edit.
+                    // Retain composition and candidates so the user can retry explicitly.
+                    if (currentInputConnection?.commitText(it.text, 1) == true) {
+                        clearComposition()
+                        renderHeader()
+                    }
                 }
             }
         } else {

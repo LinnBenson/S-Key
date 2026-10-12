@@ -186,10 +186,9 @@ class KeyboardUiTest : InstrumentationTestCase() {
         val idleBounds = keyDescriptions.associateWith { imeBounds(it) }
         fun assertKeysUnmoved() {
             keyDescriptions.forEach { description ->
-                assertTrue(
-                    "Letter-key bounds must be identical across idle and composition",
-                    idleBounds[description] == imeBounds(description),
-                )
+                val actual = imeBounds(description)
+                assertEquals("Letter-key bounds for $description across idle and composition",
+                    idleBounds[description], actual)
             }
         }
         typeChinese("nihao") { assertKeysUnmoved() }
@@ -1759,6 +1758,10 @@ class KeyboardUiTest : InstrumentationTestCase() {
     private data class MemorySnapshot(val pssKb: Int, val javaUsedBytes: Long)
 
     private fun saveValidationScreenshot(name: String) {
+        // Some emulator graphics drivers crash inside UiAutomation screen capture.
+        // Allow behavioral tests to run without invoking that optional native path.
+        if ((instrumentation as? android.test.InstrumentationTestRunner)
+                ?.arguments?.getString("skipScreenshots") == "true") return
         // Called only for synthetic fixtures in this dedicated emulator test. Never
         // used by production code; files remain in app-specific external storage.
         instrumentation.waitForIdleSync()
@@ -1841,13 +1844,21 @@ class KeyboardUiTest : InstrumentationTestCase() {
             .showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT)
     }
 
-    private fun waitForKeyboard() =
-        waitFor(
-            "IME accessibility window and touch keys appear (automation must expose input-method windows)",
-            60000,
-        ) {
-            hasImeDescription("切换中文和英文") && hasImeDescription("q")
+    private fun waitForKeyboard() {
+        var previous: List<Rect>? = null
+        var stableSince = 0L
+        waitFor("IME keys finish their opening animation and stay within the display", 60000) {
+            if (!hasImeDescription("切换中文和英文") || !hasImeDescription("q")) return@waitFor false
+            val bounds = listOf("q", "回车").map { imeBounds(it) }
+            val displayHeight = context.resources.displayMetrics.heightPixels
+            val now = SystemClock.uptimeMillis()
+            if (bounds.any { it.isEmpty || it.top < 0 || it.bottom > displayHeight } || bounds != previous) {
+                previous = bounds
+                stableSince = now
+                false
+            } else now - stableSince >= 250L
         }
+    }
 
     private fun waitForHost(expected: String) =
         waitFor("synthetic host editor reaches expected state") { readHost() == expected }
@@ -1997,6 +2008,9 @@ class KeyboardUiTest : InstrumentationTestCase() {
         node: AccessibilityNodeInfo,
         predicate: (AccessibilityNodeInfo) -> Boolean,
     ): AccessibilityNodeInfo? {
+        // UiAutomation caches nodes across hide/show and text/selection updates.
+        // Assertions must inspect the current tree, not a previously visible toolbar.
+        if (!node.refresh()) { node.recycle(); return null }
         if (node.isVisibleToUser && predicate(node)) return node
         for (index in 0 until node.childCount) {
             val child = node.getChild(index) ?: continue

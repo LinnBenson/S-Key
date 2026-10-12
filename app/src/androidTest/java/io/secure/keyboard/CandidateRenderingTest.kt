@@ -76,10 +76,12 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         @Volatile var before = ""
         val committed = mutableListOf<String>()
         var deleted = 0
+        var acceptCommits = true
         override fun getTextBeforeCursor(n: Int, flags: Int): CharSequence = before.takeLast(n)
         override fun getTextAfterCursor(n: Int, flags: Int): CharSequence = ""
         override fun getSelectedText(flags: Int): CharSequence? = null
         override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
+            if (!acceptCommits) return false
             committed.add(text.toString())
             before += text
             return true
@@ -917,6 +919,75 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testEnglishBoundaryIsRecheckedAfterAsynchronousPrefixRead() {
+        onMainChecked {
+            val movingHost = object : BaseInputConnection(View(activity), true) {
+                var prefixRead = false
+                override fun getSelectedText(flags: Int): CharSequence? = null
+                override fun getTextBeforeCursor(n: Int, flags: Int): CharSequence {
+                    prefixRead = true
+                    return "he"
+                }
+                override fun getTextAfterCursor(n: Int, flags: Int): CharSequence =
+                    if (prefixRead) "l" else ""
+            }
+            service.onCreateInputMethodInterface().startInput(movingHost,
+                EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT })
+            setField("chinese", false)
+            setField("active", true)
+            invoke("refreshCandidates")
+        }
+        waitFor("Current middle-of-word query finishes") {
+            field<Int>("candidateGeneration") == field<Int>("generation")
+        }
+        onMainChecked { assertTrue(field<List<String>>("candidateTexts").isEmpty()) }
+    }
+
+    fun testEmojiCandidateCanBeChosenButSpaceAndFourCodeStillCommitText() {
+        for (code in listOf("gany", "kaixin")) {
+            query(true, code)
+            onMainChecked {
+                val candidates = field<List<String>>("candidateTexts")
+                assertTrue(candidates.contains("😀"))
+                assertTrue(candidates.indexOf("😀") in 1..3)
+                invoke("space")
+                assertEquals("开心", connection.committed.last())
+            }
+            query(true, code)
+            onMainChecked {
+                assertEquals(true, invoke("choose", "😀"))
+                assertEquals("😀", connection.committed.last())
+                assertEquals("", field<String>("code"))
+            }
+        }
+        SettingsStore(context).fourCodeAutoCommit = true
+        onMainChecked {
+            "gany".forEach { invoke("type", it.toString()) }
+            assertEquals("开心", connection.committed.last())
+            assertEquals("", field<String>("code"))
+        }
+    }
+
+    fun testRejectedFourCodeAutoCommitKeepsCodeAndAllowsExplicitRetry() {
+        SettingsStore(context).fourCodeAutoCommit = true
+        onMainChecked {
+            connection.acceptCommits = false
+            "gany".forEach { invoke("type", it.toString()) }
+            assertEquals("Rejected submission must retain the user's code", "gany", field<String>("code"))
+            assertTrue(connection.committed.isEmpty())
+        }
+        waitFor("Candidates remain available after rejected automatic commit") {
+            field<List<String>>("candidateTexts").contains("开心") &&
+                field<Int>("candidateGeneration") == field<Int>("generation")
+        }
+        onMainChecked {
+            connection.acceptCommits = true
+            invoke("space")
+            assertEquals(listOf("开心"), connection.committed)
+            assertEquals("", field<String>("code"))
+        }
+    }
+
     fun testFourCodeAutoCommitKeepsFirstWubiWithExactCustomMatches() {
         val word = "四码自定候选${SystemClock.uptimeMillis()}"
         val store = ContentStore(context)
@@ -1456,6 +1527,8 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     private fun saveFocusScreenshot(theme: String) {
+        if ((instrumentation as? android.test.InstrumentationTestRunner)
+                ?.arguments?.getString("skipScreenshots") == "true") return
         instrumentation.waitForIdleSync()
         val directory = File(requireNotNull(context.getExternalFilesDir(null)), "validation")
         check(directory.isDirectory || directory.mkdirs())
