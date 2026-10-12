@@ -1,0 +1,9 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.jks
+.gradle-home/
+
+# Restored from the lossless source archive
+/app/src/main/assets/fonts/OfflineKeyboardCjkSupplement.ttf

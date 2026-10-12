@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Base.Theme.SKey.Settings" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/settings_background</item>
+        <item name="android:colorBackground">@color/settings_background</item>
+        <item name="android:colorAccent">@color/settings_accent</item>
+        <item name="android:colorControlNormal">@color/settings_outline</item>
+        <item name="android:colorControlActivated">@color/settings_accent</item>
+        <item name="android:colorControlHighlight">#1F2B2B2B</item>
+        <item name="android:textColorPrimary">@color/settings_ink</item>
+        <item name="android:textColorSecondary">@color/settings_secondary_text</item>
+        <item name="android:textColorHint">@color/settings_secondary_text</item>
+        <item name="android:colorError">@color/settings_error</item>
+        <item name="android:statusBarColor">@color/settings_background</item>
+        <item name="android:navigationBarColor">@color/settings_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:alertDialogTheme">@style/Theme.SKey.Settings.Dialog</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="Theme.SKey.Settings" parent="Base.Theme.SKey.Settings" />
+    <style name="Base.Theme.SKey.Settings.Dialog" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/settings_dialog_background</item>
+        <item name="android:colorBackground">@color/settings_surface</item>
+        <item name="android:colorAccent">@color/settings_accent</item>
+        <item name="android:colorControlNormal">@color/settings_outline</item>
+        <item name="android:colorControlActivated">@color/settings_accent</item>
+        <item name="android:colorControlHighlight">#1F2B2B2B</item>
+        <item name="android:textColorPrimary">@color/settings_ink</item>
+        <item name="android:textColorSecondary">@color/settings_secondary_text</item>
+        <item name="android:textColorHint">@color/settings_secondary_text</item>
+        <item name="android:colorError">@color/settings_error</item>
+        <item name="android:windowMinWidthMajor">0dp</item>
+        <item name="android:windowMinWidthMinor">0dp</item>
+    </style>
+    <style name="Theme.SKey.Settings.Dialog" parent="Base.Theme.SKey.Settings.Dialog" />
+</resources>

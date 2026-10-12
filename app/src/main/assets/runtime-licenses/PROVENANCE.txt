@@ -1,0 +1,31 @@
+Runtime notice provenance
+
+Official Kotlin release tag: v2.0.21
+Upstream inventory: https://raw.githubusercontent.com/JetBrains/kotlin/v2.0.21/license/README.md
+
+KOTLIN-LICENSE.txt
+https://raw.githubusercontent.com/JetBrains/kotlin/v2.0.21/license/LICENSE.txt
+SHA-256: cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+
+KOTLIN-COPYRIGHT.txt
+https://raw.githubusercontent.com/JetBrains/kotlin/v2.0.21/license/COPYRIGHT.txt
+SHA-256: 8f1a1700adb5490604c6094fb137bf73f6c28d3ee554b58f3ff8ef975a79672d
+
+KOTLIN-GUAVA-LICENSE.txt
+https://raw.githubusercontent.com/JetBrains/kotlin/v2.0.21/license/third_party/guava_license.txt
+SHA-256: cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+
+KOTLIN-GWT-LICENSE.txt
+https://raw.githubusercontent.com/JetBrains/kotlin/v2.0.21/license/third_party/gwt_license.txt
+SHA-256: cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+
+KOTLIN-BOOST-LICENSE.txt
+https://raw.githubusercontent.com/JetBrains/kotlin/v2.0.21/license/third_party/boost_LICENSE.txt
+SHA-256: 8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b
+
+https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.0.21/kotlin-stdlib-2.0.21-sources.jar
+SHA-256: 5995c780c3ac742fb277ced561ebd7b0739227ea7c93a6bd9c7cee6593493fce
+
+https://repo.maven.apache.org/maven2/org/jetbrains/annotations/13.0/annotations-13.0-sources.jar
+SHA-256: 42a5e144b8e81d50d6913d1007b695e62e614705268d8cf9f13dbdc478c2c68e
+

@@ -1,0 +1,41 @@
+LOCAL BUILT-IN WUBI ENTRIES (2026-10-12, app 0.1.8)
+
+Source: the user's explicit request to add these eight pairs to the built-in
+dictionary. These are locally maintained plain data, not downloaded upstream
+data, a user dictionary export, learned input, or inferred Wubi encodings.
+
+Requested pairs, preserved exactly:
+  微信 tmwy
+  安卓 pvhj
+  北川 uxkt
+  美团 uglt
+  抖音 ruuj
+  支付宝 fwpg
+  滴滴 iuiu
+  微博 tmfg
+
+Maintained source: wubi86_high_priority.dict.yaml
+Manifest role: supplement, exact_priority=true; all eight rows have effective weight zero.
+Merge/tie order: unchanged Rime baseline, high-priority source, IT,
+administrative divisions, general words, historic/cultural cities, then idioms.
+Static weight remains the primary ordinary sort key. Deduplicate exact
+(text, code) pairs only, first occurrence wins;
+preserve alternate codes and other words. All eight requested exact pairs were
+absent from the preceding six-source build, so all eight are newly retained.
+
+Priority: the offline builder reads every row in the marked source and puts
+its existing matching word first in that complete-code group. Multiple words
+for the same code retain source/file order, with exact pair deduplication.
+Other exact candidates retain the order produced by current static weights
+and the source order above. Partial-prefix selection uses those same weights
+and the new tie order; it can differ from prior releases. Full-code promotion
+itself does not reweight prefixes.
+No separately hardcoded eight-word runtime mapping is used.
+
+Runtime: compiled into the read-only compact-wubi.skwb asset. These rows use
+the existing Wubi query path and do not depend on mutable user content; clearing
+either user dictionary or all user content does not remove the built-in data.
+No networking, learning, input-history recording, or new runtime storage is added.
+
+This local-source notice does not relicense the baseline or upstream supplements.
+The original upstream licensing notices and private-testing restriction remain.

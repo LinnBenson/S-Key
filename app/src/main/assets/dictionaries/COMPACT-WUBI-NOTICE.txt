@@ -1,0 +1,97 @@
+COMPACT WUBI86 DATA: PROVENANCE AND PRIVATE-TESTING RESTRICTION
+
+This asset combines the app's original Rime Wubi86 table with five plain-data
+supplements from xianghongai/rime-wubi-dict and eight explicitly requested local
+built-in word/code pairs. It does not import or execute any
+Rime schema, history-encoding, user dictionary, or learning configuration.
+No learned input or frequency data is added.
+
+Original baseline: rime/rime-wubi, LGPL-3.0
+https://github.com/rime/rime-wubi/tree/152a0d3f3efe40cae216d1e3b338242446848d07
+The original wubi86.dict.yaml, its author comments, NOTICE.txt,
+LICENSE-WUBI-LGPL-3.0.txt and LICENSE-GPL-3.0.txt remain available in the app's
+dictionaries assets. Baseline attribution includes Wozy, Chen Xing, Yu Yuwei,
+and Gong Chen. Its 136,916 valid rows are all retained.
+
+Supplement repository:
+https://github.com/xianghongai/rime-wubi-dict/tree/1e6afaaa8c7bd605b604d9dc1314d496a8220b92
+Pinned commit: 1e6afaaa8c7bd605b604d9dc1314d496a8220b92
+Complete source order for first-wins deduplication and equal-weight ties:
+  wubi86.dict.yaml (baseline)
+  wubi86_high_priority.dict.yaml (local; exact_priority=true)
+  wubi86_dict_it.dict.yaml
+  wubi86_dict_xzqh.dict.yaml
+  wubi86_dict_ciyu.dict.yaml
+  wubi86_dict_china_cultural_cities.dict.yaml
+  wubi86_dict_chengyu.dict.yaml
+
+Local high-priority source, immediately after the baseline:
+  wubi86_high_priority.dict.yaml (manifest source exact_priority=true)
+The user explicitly supplied these eight pairs on 2026-10-12:
+  微信 tmwy; 安卓 pvhj; 北川 uxkt; 美团 uglt; 抖音 ruuj;
+  支付宝 fwpg; 滴滴 iuiu; 微博 tmfg
+All codes are preserved literally, without inferred corrections. All eight were
+added in app 0.1.7 and remain the same retained pairs in app 0.1.8. The latter
+promotes them only in their complete-code exact groups during offline generation.
+This is a local source,
+not an upstream download or a mutable user dictionary. Clearing user content
+cannot remove it from the read-only compiled asset. Its separate provenance is
+third_party/wubi_supplements/provenance/LOCAL-BUILTIN-NOTICE.txt.
+
+IMPORTANT: The pinned supplement repository has no LICENSE file. Its README
+attributes the chengyu (idiom) and ciyu (word) data to 汉典 / https://www.zdic.net/.
+Their availability on GitHub is not a grant of redistribution rights. Their
+license is UNKNOWN, and they must not be described as LGPL, Apache, or public
+domain. This integration is for the requested private testing only; public or
+commercial redistribution requires resolving permission for the supplements.
+The baseline's LGPL notice does not license these additional sources.
+
+Reproducible transformation:
+- Strict UTF-8 tab-delimited rows are read after the standalone header terminator.
+- Source rows are read in the complete order above: baseline, local high-priority,
+  IT, administrative divisions, words, historical-cultural cities, then idioms.
+- Exact (text, code) duplicates are removed, first occurrence wins. Different
+  codes for the same text are retained; no frequency/rare-character filtering.
+- Baseline effective weights preserve the existing engine's stable descending
+  order. The one upstream non-integer weight, χ/zzxx/450.5, remains effective
+  weight zero, matching the previous Kotlin toLongOrNull() fallback.
+- Supplements have weight zero. No additional frequency is inferred.
+- All rows of sources marked exact_priority=true are prioritized during offline
+  generation in their complete-code exact groups, in priority-source/file order.
+  The current eight are four-letter codes. Future valid 1-4-letter complete codes
+  use the same generic rule. Same-code priority rows retain file order, and an
+  already-retained ordinary-source duplicate can still receive priority.
+- Static weight descending remains the primary ordinary ordering key; equal
+  weights follow current source order, then row order within each source.
+  Exact-only promotion preserves other candidates' relative ordinary order.
+  Prefix references are selected before exact groups are promoted. Equal-weight
+  proper-prefix candidates can change when source order changes; promotion alone
+  does not affect prefix selection. There is no runtime special-case word map.
+  Existing user exact matches still follow the first built-in candidate, and the
+  final Extension B tail rule is unchanged.
+- Every exact-code row is retained. Proper-prefix completion stores the first
+  30 rows in current stable weight/source/row order, preserving the limit.
+- Stored bytes are deterministic, big-endian SKWB0001; source strings are not
+  normalized. The query engine can access indexed bytes without allocating all
+  dictionary strings at startup.
+
+Counts: 488,444 input rows, 46,648 exact duplicate rows, 441,796 retained rows;
+304,880 unique supplement additions (304,872 upstream + 8 local);
+185,875 exact groups; 16,103 prefix groups; 305,579 prefix references.
+Rejected/filtered source rows: zero.
+
+Asset: compact-wubi.skwb, 8,624,375 bytes
+SHA-256: 922caacc74bfdd0a41fdf13d322446889693e3a46bd27aac91ee479e896d25d1
+
+Full source/rebuild material in the source package:
+  scripts/build_compact_wubi.py
+  tests/test_compact_wubi_builder.py
+  third_party/wubi_supplements/source-manifest.json
+  third_party/wubi_supplements/*.dict.yaml
+  third_party/wubi_supplements/provenance/README.upstream.md
+  third_party/wubi_supplements/provenance/LOCAL-BUILTIN-NOTICE.txt
+  third_party/wubi_supplements/FORMAT.md
+
+All six raw supplement sources stay outside Android assets to avoid packaging a
+second copy in the APK. Their exact pinned bytes and source hashes remain in the source
+package for review and rebuilding. skrik2 pinyin JSON is not an input.

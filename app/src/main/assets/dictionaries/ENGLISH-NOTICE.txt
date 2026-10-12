@@ -1,0 +1,84 @@
+OFFLINE ENGLISH CURRENT-WORD COMPLETION
+=======================================
+
+Asset: english_frequency.tsv
+Entries: 25,000
+
+The adapted word-frequency data in this asset is distributed under the
+Creative Commons Attribution-ShareAlike 4.0 International license (CC BY-SA 4.0):
+https://creativecommons.org/licenses/by-sa/4.0/
+The complete license is included as LICENSE-ENGLISH-CC-BY-SA-4.0.txt.
+Retain this notice, the asset's attribution header, the accompanying upstream
+notices, and the license with redistributions of this data or adaptations.
+
+1. FREQUENCYWORDS / OPENSUBTITLES
+
+FrequencyWords by Hermit Dave and contributors.
+Source: https://github.com/hermitdave/FrequencyWords
+Revision: 525f9b560de45753a5ea01069454e72e9aa541c6
+File: content/2018/en/en_50k.txt
+Pinned source:
+https://raw.githubusercontent.com/hermitdave/FrequencyWords/525f9b560de45753a5ea01069454e72e9aa541c6/content/2018/en/en_50k.txt
+Source SHA-256:
+5351ff405b1126ef555791dd4d9798a48e3e9a501a9fc481a9da957752cfb458
+
+The frequencies are derived from the OpenSubtitles 2018 corpus through OPUS.
+Credit: OpenSubtitles (https://www.opensubtitles.org/), OPUS, and Hermit Dave.
+Corpus: https://opus.nlpl.eu/OpenSubtitles2018.php
+Upstream explicitly licenses its content CC BY-SA 4.0 and its code separately
+under MIT. No FrequencyWords generator code is included in this application.
+The upstream README, including that license distinction, is reproduced in
+ENGLISH-FREQUENCYWORDS-README.txt.
+
+2. SCOWL SPELLING FILTER
+
+SCOWL (Spell Checker Oriented Word Lists) 2020.12.07 by Kevin Atkinson and
+contributors, including Alan Beale. The collective work is Copyright
+2000-2018 by Kevin Atkinson, plus the copyrights in the accompanying notice.
+Home: https://wordlist.aspell.net/
+Source: https://downloads.sourceforge.net/wordlist/scowl-2020.12.07.tar.gz
+Source SHA-256:
+5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc
+
+SCOWL is freely redistributable under its MIT-like permission notice and the
+included notices for its constituent sources. The complete release Copyright
+file is reproduced without changes as ENGLISH-SCOWL-COPYRIGHT.txt. This
+includes the Princeton WordNet, VarCon, Ispell, and other applicable credits
+and disclaimers. No upstream contributor endorses this application.
+
+3. MODIFICATIONS AND REPRODUCTION
+
+This is a modified selection, not an unmodified upstream word list. Offline
+Keyboard generated it on 2026-10-11 with these deterministic steps:
+
+- Read SCOWL final/{english,american,british,british_z}-words.{10,20,35,40,50,55,60}.
+- Keep only existing lowercase ASCII words of 2 through 40 letters; do not
+  import upper/proper-name lists, abbreviations, contractions, possessives,
+  punctuation, digits, multiword phrases, or special jargon lists.
+- Explicitly admit the seven weekday names and twelve month names, which are
+  ordinary keyboard vocabulary but capitalized in SCOWL. This does not admit
+  personal-name lists or change/boost any frequency count.
+- Intersect that spelling set with FrequencyWords' 2018 English top-50k list.
+- For duplicate spellings keep the highest existing occurrence count.
+- Rank by occurrence count descending, then ASCII spelling ascending.
+- Keep the first 25,000 words. Store spelling and the unchanged count as TSV.
+
+SCOWL allowed spellings: 79,643. FrequencyWords intersection: 31,182.
+The data is not censored; normal dictionary words and colloquial language may
+appear. Some words also have uses as names. It is not an exhaustive dictionary,
+spelling-correction system, or a claim about present-day population frequencies.
+
+The source distribution includes third_party/english/rebuild.py, a standalone
+Python standard-library build-time generator, and manifest.json with the input
+and output hashes. The packaged Android application never runs that generator,
+downloads a dictionary, reads user history, learns frequencies, or predicts a
+next word. EnglishLexicon uses only the supplied current word and this fixed
+packaged asset.
+
+Asset SHA-256:
+e818b1f3ea72bc7a391abaa171f717bc5d2f90397fdeef60cad8862202a6d290
+
+CC BY-SA 4.0 full license text, retrieved from Creative Commons' official repo:
+https://raw.githubusercontent.com/creativecommons/cc-legal-tools-data/main/docs/licenses/by-sa/4.0/legalcode.txt
+License text SHA-256:
+28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5

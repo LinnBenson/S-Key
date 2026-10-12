@@ -7,6 +7,18 @@
 当前源码为0.1.8（versionCode 9），包含固定浅色设置改版、HSV调色器、输入框首屏策略、双语手工词库及资源生命周期修复。用户已接管最终实机测试并取消余下模拟器检查；完整验证边界见 TEST_RESULTS.md。0.1.5是未单独交付的内部基线，使用相同签名的本版APK可覆盖更新已安装的 S Key。
 
 
+## 首次从 GitHub 获取源码
+
+仓库中的大型补充字体使用 **XZ 无损压缩** 保存，以满足上传接口的单次请求大小限制。构建前在项目根目录运行：
+
+```bash
+python3 scripts/restore_source_assets.py
+```
+
+仅使用 Python 3 标准库 `lzma`，不联网。脚本从 `third_party/fonts/OfflineKeyboardCjkSupplement.ttf.xz` 还原到 `app/src/main/assets/fonts/OfflineKeyboardCjkSupplement.ttf`，校验压缩文件和还原文件的 SHA-256；已有正确文件会直接通过，有不同内容则停止而不覆盖。还原字体为 22,187,516 字节，SHA-256 为 `aae5668d88fb85be170cb07171e92c3bfe52d328390c167ffcf6c48fe054cffb`，与构建53完全一致。字体许可与来源仍见 `app/src/main/assets/fonts/` 中的原有说明。
+
+`SOURCE_MANIFEST.sha256` 校验 GitHub 中保存的压缩形式；还原文件由脚本另外校验，并被 `.gitignore` 忽略。随后按下方“开发与构建”准备依赖、编译即可。已交付 APK 不受此源码存储形式影响。
+
 ## 项目信息
 
 | 项目 | 当前值 |
@@ -416,7 +428,7 @@ python3 third_party/english/rebuild.py --cache /path/to/source-cache
 
 1. 设置 JAVA_HOME 指向 JDK 17，并设置 ANDROID_HOME 指向 Android SDK；也可在本机创建 local.properties，填写 sdk.dir。
 2. 安装所需 SDK：`sdkmanager "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools"`，自行阅读并接受 SDK 许可。
-3. 运行 `python3 scripts/fetch_voice_dependency.py`。脚本只下载官方 sherpa-onnx 1.13.8 固定版本，校验50,129,134字节大小和下列 SHA-256 后才写入 app/libs；已有正确文件时不会重新下载。
+3. 先运行 `python3 scripts/restore_source_assets.py` 还原并校验大型字体，再运行 `python3 scripts/fetch_voice_dependency.py`。脚本只下载官方 sherpa-onnx 1.13.8 固定版本，校验50,129,134字节大小和下列 SHA-256 后才写入 app/libs；已有正确文件时不会重新下载。
 4. 运行 `python3 scripts/fetch_voice_dependency.py --verify-only` 再次核验依赖；此命令不访问网络。
 5. 运行 `./gradlew assembleDebug testDebugUnitTest lintDebug assembleDebugAndroidTest`。
 6. 运行 `python3 tests/privacy_audit.py`。设备测试见 tests/VOICE_DEVICE_TESTS.md；测试模型与音频需另外准备，不能把测试素材打包进应用。
@@ -432,6 +444,7 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME
 
 sdkmanager "platforms;android-35" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools"
 sdkmanager --licenses
+python3 scripts/restore_source_assets.py
 python3 scripts/fetch_voice_dependency.py
 python3 scripts/fetch_voice_dependency.py --verify-only
 chmod +x gradlew

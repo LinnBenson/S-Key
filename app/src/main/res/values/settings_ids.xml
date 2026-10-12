@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item type="id" name="settings_launcher_test_input" />
+    <item type="id" name="settings_numeric_input" />
+    <item type="id" name="settings_dictionary_word" />
+    <item type="id" name="settings_dictionary_reading" />
+    <item type="id" name="settings_phrase_input" />
+</resources>
