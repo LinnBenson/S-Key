@@ -200,15 +200,15 @@ constructor(
             "drag_handle" -> {
                 val previous = p.strokeWidth
                 p.strokeWidth = 3f
-                line(6f, 12f, 18f, 12f)
+                line(-6f, 12f, 30f, 12f)
                 p.strokeWidth = previous
             }
             "resize" -> {
-                line(5f, 19f, 19f, 5f)
-                line(13f, 5f, 19f, 5f)
-                line(19f, 5f, 19f, 11f)
-                line(5f, 13f, 5f, 19f)
-                line(5f, 19f, 11f, 19f)
+                line(5f, 5f, 19f, 19f)
+                line(5f, 5f, 11f, 5f)
+                line(5f, 5f, 5f, 11f)
+                line(13f, 19f, 19f, 19f)
+                line(19f, 13f, 19f, 19f)
             }
             "quickedit" -> {
                 // Selected C text-and-pencil SVG; retain the palette tint and view bounds.

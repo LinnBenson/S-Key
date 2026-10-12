@@ -35,9 +35,9 @@
       "filename": "wubi86_high_priority.dict.yaml",
       "origin": "Explicit user-requested local built-in entries and full-code priority, 2026-10-12; no upstream download",
       "provenance_file": "provenance/LOCAL-BUILTIN-NOTICE.txt",
-      "sha256": "0a1f37db73a00f71577860b622fd8b175574e8dc6c0a6b6ce3542f3a232deee1",
-      "bytes": 583,
-      "valid_rows": 8,
+      "sha256": "2d7a9a5f806ce70d90a74cbe1bfea0fe59de98465ae223aae544c96be72279c1",
+      "bytes": 619,
+      "valid_rows": 11,
       "license_notice": "Locally supplied explicit word/code pairs; does not change upstream licensing or private-testing restrictions",
       "exact_priority": true
     },
@@ -98,12 +98,12 @@
     }
   ],
   "expected": {
-    "merged_rows": 441796,
+    "merged_rows": 441799,
     "baseline_rows": 136916,
-    "added_supplement_rows": 304880,
+    "added_supplement_rows": 304883,
     "exact_groups": 185875,
     "prefix_groups": 16103,
-    "prefix_references": 305579
+    "prefix_references": 305580
   },
   "provenance_files": [
     {

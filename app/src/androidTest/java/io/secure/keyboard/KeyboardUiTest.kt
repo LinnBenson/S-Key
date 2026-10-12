@@ -928,9 +928,10 @@ class KeyboardUiTest : InstrumentationTestCase() {
                 kotlin.math.abs((shortRow.first().left + shortRow.last().right) / 2f - center) <= 2f,
             )
             val referenceWidth = fullRow.first().width()
-            assertTrue("Symbol rows retain the same ten-key cell width", bounds.flatten().all {
+            assertTrue("First two symbol rows retain ten-key cell widths", bounds.take(2).flatten().all {
                 kotlin.math.abs(it.width() - referenceWidth) <= 2
             })
+            assertTrue("Third-row symbols expand like the seven-letter row", shortRow.all { it.width() >= referenceWidth })
             assertEquals("Page toggle remains at the left edge", fullRow.first().left, imeBounds("=\\<").left)
             assertEquals("Backspace remains at the right edge", fullRow.last().right, imeBounds("删除").right)
             assertTrue("Return-to-letters key remains available", hasImeDescription("ABC"))

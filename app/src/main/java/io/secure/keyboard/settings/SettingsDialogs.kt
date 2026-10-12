@@ -47,7 +47,7 @@ internal object SettingsDialogs {
         } else 0
         val available = screenWidth - horizontalInsets - dp(32)
         val width = min(dp(560), available.coerceAtLeast(dp(48)))
-        window.setBackgroundDrawable(SettingsPalette.shape(context, SettingsPalette.surface, 16))
+        window.setBackgroundDrawable(SettingsPalette.shape(context, SettingsPalette.surface, 24))
         window.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         if (Build.VERSION.SDK_INT >= 29) window.decorView.isForceDarkAllowed = false

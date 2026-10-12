@@ -165,6 +165,14 @@ class SettingsStore(context: Context) {
      * Strength as percentage, 1–100; uses amplitude when supported, short duration fallback
      * otherwise.
      */
+    var candidateTextSize: Int
+        get() = prefs.getInt("candidateTextSize", 20).coerceIn(12, 32)
+        set(value) { prefs.edit().putInt("candidateTextSize", value.coerceIn(12, 32)).apply() }
+
+    var expandedCandidateTextSize: Int
+        get() = prefs.getInt("expandedCandidateTextSize", 18).coerceIn(12, 32)
+        set(value) { prefs.edit().putInt("expandedCandidateTextSize", value.coerceIn(12, 32)).apply() }
+
     var vibrationStrength: Int
         get() = prefs.getInt("vibrationStrength", DEFAULT_VIBRATION_STRENGTH)
         set(value) {
@@ -213,7 +221,7 @@ class SettingsStore(context: Context) {
         }
 
     var fuzzyPinyin: Boolean
-        get() = prefs.getBoolean("fuzzyPinyin", false)
+        get() = prefs.getBoolean("fuzzyPinyin", true)
         set(value) {
             prefs.edit().putBoolean("fuzzyPinyin", value).apply()
         }
@@ -299,8 +307,8 @@ class SettingsStore(context: Context) {
 
         private val opaqueHex = Regex("#[0-9a-fA-F]{6}")
         val fuzzyPairIds = listOf("zh_z", "ch_c", "sh_s", "n_l", "r_l", "f_h", "an_ang", "en_eng", "in_ing")
-        // Existing defaults stay unchanged; the newly added r/l pair is opt-in.
-        val defaultFuzzyPairIds = (fuzzyPairIds - "r_l").toSet()
+        // Defaults apply only when no pair selection has been saved.
+        val defaultFuzzyPairIds = setOf("r_l", "en_eng", "in_ing")
         val themeTokenIds = listOf(
             "keyboardBackground", "normalKeyBackground", "specialKeyBackground", "text", "hint",
             "toolbarIcon", "candidate", "candidateSelected", "accent", "enterText", "preedit",

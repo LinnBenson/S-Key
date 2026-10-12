@@ -1,5 +1,8 @@
 package io.secure.keyboard
 
+import io.secure.keyboard.diagnostics.checkedMain
+import android.os.SystemClock
+import android.widget.ListView
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -56,7 +59,7 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
                 Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK,
             )
         )
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             harness = Harness()
             service = harness.create(context)
             setField("content", store)
@@ -80,7 +83,7 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
     }
 
     override fun tearDown() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             if (::harness.isInitialized) harness.close()
             if (::activity.isInitialized) activity.finish()
         }
@@ -95,20 +98,32 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
         store.addClipboard(longText)
         store.addClipboard("newer copy")
         val firstId = store.clipboard().first().id
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             showPanel("clipboard")
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertEquals(listOf("newer copy", longText), rows().map { it.textView.text.toString() })
             rows().last().textView.performClick()
             assertEquals(longText, editor.text.toString())
             rows().last().pinAction.performClick()
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertEquals(longText, editor.text.toString())
             assertEquals(longText, rows().first().textView.text.toString())
             assertEquals("取消置顶剪贴板记录", rows().first().pinAction.contentDescription)
             assertTrue(ContentStore(sandbox).clipboard().first().pinned)
             showPanel("keys")
             showPanel("clipboard")
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertEquals(longText, rows().first().textView.text.toString())
             rows().first().deleteAction.performClick()
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertEquals("Deleting a row must not insert its text", longText, editor.text.toString())
             assertEquals(listOf("newer copy"), rows().map { it.textView.text.toString() })
             assertFalse(store.clipboard().any { it.id == firstId })
@@ -121,21 +136,36 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
         store.addPhrase(longText)
         store.addPhrase("last phrase")
         val pinnedId = store.phrases()[1].id
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             showPanel("phrases")
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             rows()[1].pinAction.performClick()
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertEquals("", editor.text.toString())
             assertEquals(longText, rows().first().textView.text.toString())
             assertEquals("取消置顶常用语", rows().first().pinAction.contentDescription)
             rows().first().textView.performClick()
             assertEquals(longText, editor.text.toString())
             rows().first().pinAction.performClick()
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertEquals(listOf("first phrase", longText, "last phrase"), rows().map { it.textView.text.toString() })
             assertFalse(ContentStore(sandbox).phrases()[1].pinned)
             store.movePhrase(pinnedId, 0)
             showPanel("phrases")
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertEquals(longText, rows().first().textView.text.toString())
             rows().first().deleteAction.performClick()
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertEquals(longText, editor.text.toString())
             assertEquals(listOf("first phrase", "last phrase"), rows().map { it.textView.text.toString() })
         }
@@ -146,21 +176,120 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
         store.addPhrase("phrase")
         store.setClipboardPinned(store.clipboard().single().id, true)
         store.setPhrasePinned(store.phrases().single().id, true)
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             showPanel("clipboard")
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertEquals(1, rows().size)
             store.clearClipboard()
             showPanel("keys")
             showPanel("clipboard")
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertTrue(rows().isEmpty())
             showPanel("phrases")
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertEquals(1, rows().size)
             store.clearPhrases()
             showPanel("keys")
             showPanel("phrases")
+        }
+        awaitContent()
+        instrumentation.checkedMain {
             assertTrue(rows().isEmpty())
             assertEquals("", editor.text.toString())
         }
+    }
+
+
+    fun testThousandRowsStayVirtualizedAcrossRepeatedOpenAndClose() {
+        SettingsStore(sandbox).clipboardLimit = 1000
+        val values = org.json.JSONArray()
+        repeat(1000) { values.put(org.json.JSONObject().put("id", "fixture-$it").put("text", "copy-$it")) }
+        File(sandbox.noBackupFilesDir, "content/content.json").writeText(
+            org.json.JSONObject().put("clipboard", values).toString())
+        val samples = mutableListOf<String>()
+        repeat(20) { cycle ->
+            instrumentation.checkedMain { showPanel("clipboard") }
+            awaitContent()
+            instrumentation.checkedMain {
+                assertTrue("Only viewport rows may be attached", rows().size in 1..30)
+                val list = rows().first().parent as ListView
+                assertEquals(1000, list.count)
+                list.setSelection(999)
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.checkedMain {
+                assertTrue(rows().size in 1..30)
+                service.onFinishInputView(false)
+                assertTrue(rows().isEmpty())
+                setField("active", true)
+            }
+            if (cycle % 5 == 4) {
+                val memory = android.os.Debug.MemoryInfo()
+                android.os.Debug.getMemoryInfo(memory)
+                samples.add("cycle=${cycle + 1},pssKiB=${memory.totalPss},nativeBytes=${android.os.Debug.getNativeHeapAllocatedSize()}")
+            }
+        }
+        instrumentation.sendStatus(0, android.os.Bundle().apply {
+            putString("skey_content_memory", samples.joinToString("; "))
+        })
+    }
+
+    fun testLateBackgroundLoadCannotRestoreHiddenPanel() {
+        store.addClipboard("fixture")
+        val worker = OfflineKeyboardService::class.java.getDeclaredField("worker").apply {
+            isAccessible = true
+        }.get(service) as java.util.concurrent.ExecutorService
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        worker.execute { entered.countDown(); release.await(30, java.util.concurrent.TimeUnit.SECONDS) }
+        assertTrue(entered.await(60, java.util.concurrent.TimeUnit.SECONDS))
+        try {
+            instrumentation.checkedMain {
+                showPanel("clipboard")
+                service.onFinishInputView(false)
+                assertTrue(rows().isEmpty())
+            }
+        } finally { release.countDown() }
+        awaitContent()
+        instrumentation.checkedMain { assertTrue(rows().isEmpty()) }
+    }
+
+    private fun awaitContent() {
+        val worker = OfflineKeyboardService::class.java.getDeclaredField("worker").apply {
+            isAccessible = true
+        }.get(service) as java.util.concurrent.ExecutorService
+        worker.submit {}.get(60, java.util.concurrent.TimeUnit.SECONDS)
+        instrumentation.waitForIdleSync()
+        worker.submit {}.get(60, java.util.concurrent.TimeUnit.SECONDS)
+        val deadline = SystemClock.elapsedRealtime() + 60_000
+        while (SystemClock.elapsedRealtime() < deadline) {
+            instrumentation.waitForIdleSync()
+            var ready = false
+            instrumentation.checkedMain {
+                val body = OfflineKeyboardService::class.java.getDeclaredField("body").apply {
+                    isAccessible = true
+                }.get(service) as View
+                fun loading(view: View): Boolean =
+                    (view is TextView && view.text.toString() == "正在读取…") ||
+                    (view is ViewGroup && (0 until view.childCount).any { loading(view.getChildAt(it)) })
+                ready = !loading(body)
+                if (ready && rows().isEmpty()) {
+                    fun listPending(view: View): Boolean =
+                        (view is ListView && view.count > 0 && view.childCount == 0) ||
+                        (view is ViewGroup && (0 until view.childCount).any { listPending(view.getChildAt(it)) })
+                    ready = !listPending(body)
+                }
+            }
+            if (ready) return
+            SystemClock.sleep(30)
+        }
+        fail("Content panel failed to load")
     }
 
     private fun showPanel(panel: String) {

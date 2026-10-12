@@ -1,28 +1,28 @@
 {
   "format": "SKWB0001",
   "endian": "big",
-  "sha256": "922caacc74bfdd0a41fdf13d322446889693e3a46bd27aac91ee479e896d25d1",
+  "sha256": "cdef877c01c7fa02816df4f54608ec0ae521d78def2c010d67f5f0a68b256cfb",
   "max_prefix_count": 30,
   "counts": {
-    "merged_rows": 441796,
+    "merged_rows": 441799,
     "exact_groups": 185875,
     "prefix_groups": 16103,
-    "prefix_references": 305579,
-    "file_bytes": 8624375,
+    "prefix_references": 305580,
+    "file_bytes": 8624407,
     "exact_index_bytes": 2230500,
     "prefix_index_bytes": 193236,
-    "prefix_reference_bytes": 2444632,
-    "text_data_bytes": 3755943,
+    "prefix_reference_bytes": 2444640,
+    "text_data_bytes": 3755967,
     "exact_index_offset": 64,
     "prefix_index_offset": 2230564,
     "prefix_references_offset": 2423800,
-    "text_data_offset": 4868432,
+    "text_data_offset": 4868440,
     "validated_exact_groups": 185875,
     "validated_prefix_groups": 16103,
-    "validated_exact_rows": 441796,
-    "validated_prefix_references": 305579,
+    "validated_exact_rows": 441799,
+    "validated_prefix_references": 305580,
     "baseline_rows": 136916,
-    "added_supplement_rows": 304880
+    "added_supplement_rows": 304883
   },
   "sources": [
     {
@@ -55,19 +55,19 @@
     {
       "filename": "wubi86_high_priority.dict.yaml",
       "role": "supplement",
-      "sha256": "0a1f37db73a00f71577860b622fd8b175574e8dc6c0a6b6ce3542f3a232deee1",
-      "bytes": 583,
-      "retained_rows": 8,
+      "sha256": "2d7a9a5f806ce70d90a74cbe1bfea0fe59de98465ae223aae544c96be72279c1",
+      "bytes": 619,
+      "retained_rows": 11,
       "duplicate_rows": 0,
       "duplicates_within_source": 0,
       "duplicates_previous_sources": 0,
       "line_accounting": {
-        "total_lines": 17,
+        "total_lines": 20,
         "header_lines": 8,
         "delimiter_lines": 1,
         "blank_lines": 0,
         "comment_lines": 0,
-        "valid_rows": 8
+        "valid_rows": 11
       },
       "weight_zero_fallbacks": [],
       "exact_priority": true,
@@ -103,6 +103,18 @@
         {
           "text": "微博",
           "code": "tmfg"
+        },
+        {
+          "text": "嗯嗯",
+          "code": "klkl"
+        },
+        {
+          "text": "哦哦",
+          "code": "ktkt"
+        },
+        {
+          "text": "好吧",
+          "code": "vbkc"
         }
       ]
     },
@@ -202,7 +214,7 @@
       "weight_zero_fallbacks": []
     }
   ],
-  "input_rows": 488444,
+  "input_rows": 488447,
   "duplicate_rows": 46648,
   "rejected_rows": 0,
   "frequency_filtered_rows": 0,
@@ -239,6 +251,18 @@
     {
       "text": "微博",
       "code": "tmfg"
+    },
+    {
+      "text": "嗯嗯",
+      "code": "klkl"
+    },
+    {
+      "text": "哦哦",
+      "code": "ktkt"
+    },
+    {
+      "text": "好吧",
+      "code": "vbkc"
     }
   ],
   "exact_priority_policy": "At build time only, rows from sources marked exact_priority=true lead their complete-code exact groups in priority-source and row order; retain every other row's relative order. Prefixes use static weight descending, then the current manifest source order and source row order for ties; exact-only promotion does not affect prefix selection.",

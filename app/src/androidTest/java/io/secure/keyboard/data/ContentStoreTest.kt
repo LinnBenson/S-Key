@@ -29,13 +29,83 @@ class ContentStoreTest : AndroidTestCase() {
         super.tearDown()
     }
 
+    fun testClipboardCharacterBudgetPreservesPinsAndNewestCopy() {
+        config.clipboardLimit = 1000
+        val text = "x".repeat(60_000)
+        store.addClipboard("pinned")
+        store.setClipboardPinned(store.clipboard().single().id, true)
+        repeat(30) { store.captureClipboard(text + it, 20_000L + it, true) }
+        val rows = store.clipboard()
+        assertTrue(rows.sumOf { it.text.length } <= ContentStore.MAX_CLIPBOARD_CHARACTERS)
+        assertTrue(rows.first().pinned)
+        assertEquals(text + 29, rows.last().text)
+        assertFalse(store.captureClipboard("x".repeat(65_537), 30_000L, true))
+        assertEquals(rows, store.clipboard())
+    }
+
+    fun testPhraseAndCumulativeDictionaryBudgetRejectAtomically() {
+        store.addPhrase("x".repeat(ContentStore.MAX_PHRASE_CHARACTERS))
+        try { store.addPhrase("overflow"); fail() } catch (_: IllegalArgumentException) {}
+        assertEquals(1, store.phrases().size)
+        val id = store.phrases().single().id
+        store.updatePhrase(id, "shorter")
+        store.addPhrase("allowed again")
+        val word = "x".repeat(ContentStore.MAX_DICTIONARY_CHARACTERS - 1)
+        store.addDictionary(word, "a")
+        try { store.importDictionary("extra\tb"); fail() } catch (_: IllegalArgumentException) {}
+        assertEquals(word, store.dictionary().single().word)
+        store.deleteDictionary(store.dictionary().single().id)
+        assertTrue(store.dictionary().isEmpty())
+    }
+
+    fun testLegacyOversizedPhrasesCanBePinnedAndReducedWithoutDataLoss() {
+        val text = "x".repeat(ContentStore.MAX_PHRASE_CHARACTERS + 1)
+        val row = org.json.JSONObject().put("id", "legacy").put("text", text)
+        File(sandbox.noBackupFilesDir, "content/content.json").writeText(
+            org.json.JSONObject().put("phrases", org.json.JSONArray().put(row)).toString())
+        store.setPhrasePinned("legacy", true)
+        assertEquals(text, store.phrases().single().text)
+        assertTrue(store.phrases().single().pinned)
+        try { store.updatePhrase("legacy", text + "x"); fail() } catch (_: IllegalArgumentException) {}
+        assertEquals(text, store.phrases().single().text)
+        store.updatePhrase("legacy", "reduced")
+        assertEquals("reduced", store.phrases().single().text)
+    }
+
+    fun testStreamedJsonPreservesEscapesUnicodeAndPinnedState() {
+        val text = "quotes \" slash \\ newline\n tab\t emoji🙂 control\u0001"
+        store.addClipboard(text)
+        store.addPhrase(text)
+        store.setClipboardPinned(store.clipboard().single().id, true)
+        val reopened = ContentStore(sandbox)
+        assertEquals(text, reopened.clipboard().single().text)
+        assertTrue(reopened.clipboard().single().pinned)
+        assertEquals(text, reopened.phrases().single().text)
+    }
+
     fun testClipboardDuplicatesAndPollingDeduplication() {
         assertTrue(store.captureClipboard("same", 100L))
         assertFalse(store.captureClipboard("same", 100L))
         assertTrue(store.captureClipboard("same", 101L))
         assertTrue(store.captureClipboard("same", 102L, newCopyEvent = true))
-        assertEquals(listOf("same", "same", "same"), store.clipboard().map { it.text })
-        assertEquals(3, store.clipboard().map { it.id }.distinct().size)
+        assertEquals(listOf("same"), store.clipboard().map { it.text })
+        assertEquals(1, store.clipboard().map { it.id }.distinct().size)
+    }
+
+    fun testRecopyMovesExistingItemWithoutLosingPinOrEvictingOtherItems() {
+        config.clipboardLimit = 2
+        store.addClipboard("same")
+        val original = store.clipboard().single()
+        store.setClipboardPinned(original.id, true)
+        store.addClipboard("other")
+        store.addClipboard("same")
+        assertEquals(listOf("other", "same"), store.clipboard().map { it.text })
+        assertEquals(original.id, store.clipboard().last().id)
+        assertTrue(store.clipboard().last().pinned)
+        config.clipboardLimit = 10
+        store.addClipboard("same ")
+        store.addClipboard("same\n")
+        assertEquals(4, store.clipboard().size)
     }
 
     fun testClipboardClearSuppressesOldCopyAndLeavesSystemClipboard() {
@@ -364,8 +434,8 @@ class ContentStoreTest : AndroidTestCase() {
     fun testFuzzyPairChoicesPersistIndependentOfMasterAndClearing() {
         assertEquals(SettingsStore.defaultFuzzyPairIds, config.fuzzyPairs)
         assertTrue("r_l" in SettingsStore.fuzzyPairIds)
-        assertFalse("r_l" in config.fuzzyPairs)
-        assertFalse(config.fuzzyPinyin)
+        assertEquals(setOf("r_l", "en_eng", "in_ing"), config.fuzzyPairs)
+        assertTrue(config.fuzzyPinyin)
         config.fuzzyPairs = setOf("r_l", "en_eng", "in_ing", "invalid")
         assertEquals(setOf("r_l", "en_eng", "in_ing"), SettingsStore(sandbox).fuzzyPairs)
         assertFalse("n_l" in SettingsStore(sandbox).fuzzyPairs)

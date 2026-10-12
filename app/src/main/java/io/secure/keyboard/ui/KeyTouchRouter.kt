@@ -17,6 +17,7 @@ internal class KeyTouchRouter(
     private val completeTap: (Long) -> Unit,
     private val horizontalCancelDistance: Float,
     private val verticalCancelSlop: Float,
+    private val onAdditionalPress: () -> Unit = {},
 ) : View.OnTouchListener {
     private data class Tap(val downX: Float, var canceled: Boolean)
     private var originalPointer = -1
@@ -53,6 +54,7 @@ internal class KeyTouchRouter(
             // Do not turn a deliberate row/split-layout spacer into this key.
             taps[event.getPointerId(index)] = Tap(x,
                 !x.isFinite() || !y.isFinite() || x < 0 || y < 0 || x >= view.width || y >= view.height)
+            if (taps[event.getPointerId(index)]?.canceled == false) onAdditionalPress()
             view.alpha = .65f
             return true
         }

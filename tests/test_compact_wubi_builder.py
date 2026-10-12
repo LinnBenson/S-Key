@@ -450,7 +450,7 @@ class FullPinnedSourceTests(unittest.TestCase):
             (ROOT / "app/src/main/assets/dictionaries/compact-wubi.skwb").read_bytes())
         self.assertEqual(exact, expected_exact)
         self.assertEqual(prefixes, expected_prefix)
-        self.assertEqual(len(retained), 441796)
+        self.assertEqual(len(retained), 441799)
 
     def test_all_pinned_rows_all_keys_and_two_identical_builds(self):
         base = Path(os.environ.get("WUBI_BASE", ROOT / "app/src/main/assets/dictionaries/wubi86.dict.yaml"))
@@ -460,15 +460,15 @@ class FullPinnedSourceTests(unittest.TestCase):
             self.skipTest("Set WUBI_BASE, WUBI_SUPPLEMENTS and WUBI_MANIFEST to run pinned-source integration")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         binary, report = builder.compile_sources(base, supplements, manifest)
-        self.assertEqual(report["counts"]["merged_rows"], 441796)
+        self.assertEqual(report["counts"]["merged_rows"], 441799)
         self.assertEqual(report["counts"]["validated_exact_groups"], 185875)
         self.assertEqual(report["counts"]["validated_prefix_groups"], 16103)
-        self.assertEqual(report["counts"]["validated_prefix_references"], 305579)
-        self.assertEqual(report["input_rows"], 488444)
+        self.assertEqual(report["counts"]["validated_prefix_references"], 305580)
+        self.assertEqual(report["input_rows"], 488447)
         self.assertEqual(report["duplicate_rows"], 46648)
         self.assertEqual(report["rejected_rows"], 0)
-        self.assertEqual(report["counts"]["file_bytes"], 8624375)
-        self.assertEqual(report["sha256"], "922caacc74bfdd0a41fdf13d322446889693e3a46bd27aac91ee479e896d25d1")
+        self.assertEqual(report["counts"]["file_bytes"], 8624407)
+        self.assertEqual(report["sha256"], "cdef877c01c7fa02816df4f54608ec0ae521d78def2c010d67f5f0a68b256cfb")
         existing = ROOT / "app/src/main/assets/dictionaries/compact-wubi.skwb"
         self.assertEqual(existing.read_bytes(), binary)
         binary_again, report_again = builder.compile_sources(base, supplements, manifest)
@@ -481,7 +481,8 @@ class FullPinnedSourceTests(unittest.TestCase):
         manifest = json.loads((supplements / "source-manifest.json").read_text(encoding="utf-8"))
         requested = [E("微信", "tmwy", 0), E("安卓", "pvhj", 0), E("北川", "uxkt", 0),
                      E("美团", "uglt", 0), E("抖音", "ruuj", 0), E("支付宝", "fwpg", 0),
-                     E("滴滴", "iuiu", 0), E("微博", "tmfg", 0)]
+                     E("滴滴", "iuiu", 0), E("微博", "tmfg", 0),
+                     E("嗯嗯", "klkl", 0), E("哦哦", "ktkt", 0), E("好吧", "vbkc", 0)]
         local = next(item for item in manifest["sources"]
                      if item["filename"] == "wubi86_high_priority.dict.yaml")
         self.assertEqual(local["filename"], "wubi86_high_priority.dict.yaml")
@@ -508,7 +509,7 @@ class FullPinnedSourceTests(unittest.TestCase):
         self.assertEqual([entry for entry in merged if (entry.text, entry.code) not in requested_pairs],
                          original)
         local_report = next(item for item in reports if item["filename"] == local["filename"])
-        self.assertEqual(local_report["retained_rows"], 8)
+        self.assertEqual(local_report["retained_rows"], 11)
         self.assertEqual(local_report["duplicate_rows"], 0)
 
         binary = (ROOT / "app/src/main/assets/dictionaries/compact-wubi.skwb").read_bytes()

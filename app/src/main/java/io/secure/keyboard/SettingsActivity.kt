@@ -42,6 +42,7 @@ class SettingsActivity : Activity() {
     private lateinit var ui: SettingsScreen
     private var group: LinearLayout? = null
     private val navigation = SettingsNavigation()
+    private val contentPageIndices = mutableMapOf<String, Int>()
     private val dictionaryPageIndices = mutableMapOf<DictionaryKind, Int>()
     private var currentDictionaryKind: DictionaryKind? = null
     private lateinit var dictionaryTransfer: DictionaryTransfer
@@ -49,6 +50,7 @@ class SettingsActivity : Activity() {
     private var transferDialog: AlertDialog? = null
     private var editor: KeyboardThemeEditor? = null
     private var restoredEditorDraft: Bundle? = null
+    private var toolbarEditor: io.secure.keyboard.settings.ToolbarEditor? = null
     private var activeDialog: AlertDialog? = null
     private var activeDraft: Bundle? = null
     private var draftFields = emptyList<EditText>()
@@ -75,6 +77,9 @@ class SettingsActivity : Activity() {
         lifetimeState.editableDraft = null
         DictionaryKind.values().forEach { kind ->
             dictionaryPageIndices[kind] = savedInstanceState?.getInt("dictionary_page_${kind.name}") ?: 0
+        }
+        for (route in listOf("clipboard", "phrases")) {
+            contentPageIndices[route] = savedInstanceState?.getInt("content_page_$route") ?: 0
         }
         recoveryMessage = savedInstanceState?.getString("recovery_message")
         if (savedInstanceState?.containsKey("settings_route") == true) {
@@ -113,6 +118,8 @@ class SettingsActivity : Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         closeDialogs()
+        toolbarEditor?.close()
+        toolbarEditor = null
         editor?.close()
         editor = null
         restoredEditorDraft = null
@@ -154,6 +161,8 @@ class SettingsActivity : Activity() {
         suppressPositionCapture = false
         cancelLayoutRestore()
         closeDialogs()
+        toolbarEditor?.close()
+        toolbarEditor = null
         editor?.close()
         editor = null
         if (::ui.isInitialized) ui.dispose()
@@ -439,6 +448,10 @@ class SettingsActivity : Activity() {
         }.apply { visibility = if (config.theme == "system") View.GONE else View.VISIBLE }
         button("自定义浅色主题") { themeEditor(false) }
         button("自定义深色主题") { themeEditor(true) }
+        section("候选词字体")
+        slider("候选栏字号", config.candidateTextSize, 12, 32, 1, "sp") { config.candidateTextSize = it }
+        slider("展开候选字号", config.expandedCandidateTextSize, 12, 32, 1, "sp") { config.expandedCandidateTextSize = it }
+        label("默认候选栏为20 sp，展开候选为18 sp；修改后重新打开键盘生效，并跟随系统字体缩放。")
         section("按键角标")
         val hintModes = arrayOf("all", "digits", "hidden")
         val hintLabels = arrayOf("全部", "仅数字", "隐藏")
@@ -546,43 +559,13 @@ class SettingsActivity : Activity() {
     }
 
     private fun toolbar() {
-        page("toolbar", "工具栏固定项")
-        notice("「更多」与「收起」固定显示。其他工具可以开关，并调整固定项的顺序。所有更改立即保存。")
-        val pins = config.toolbarPins
-        (pins + SettingsStore.availablePins.filter { it !in pins }).forEachIndexed { position, pin ->
-            if (position == 0 || position == pins.size) {
-                group = null
-                ui.text(body, if (pin in pins) "已固定 · 按显示顺序" else "可添加的工具", 16f, true)
-            }
-            group = ui.card(body).apply { tag = "anchor:tool:$pin" }
-            toggle(toolName(pin), pin in pins) { enabled ->
-                config.toolbarPins = if (enabled) config.toolbarPins + pin else config.toolbarPins - pin
-                keepItemVisible("anchor:tool:$pin")
-                toolbar()
-            }
-            val index = pins.indexOf(pin)
-            if (index > 0) button("${toolName(pin)}：向前移动") {
-                val next = config.toolbarPins.toMutableList()
-                next.removeAt(index)
-                next.add(index - 1, pin)
-                config.toolbarPins = next
-                keepItemVisible("anchor:tool:$pin")
-                toolbar()
-            }
-            if (index >= 0 && index < pins.lastIndex) button("${toolName(pin)}：向后移动") {
-                val next = config.toolbarPins.toMutableList()
-                next.removeAt(index)
-                next.add(index + 1, pin)
-                config.toolbarPins = next
-                keepItemVisible("anchor:tool:$pin")
-                toolbar()
-            }
-        }
+        page("toolbar", "定制工具栏")
+        toolbarEditor = io.secure.keyboard.settings.ToolbarEditor(this, config, ui, ::toolName).also { it.show(body) }
     }
 
     private fun clipboard() {
         page("clipboard", "剪贴板")
-        notice("置顶仅改变顺序；超出上限优先删除最旧未置顶，全部置顶时删除最旧记录。不自动过期，重复复制也会保留。置顶记录也会随内容清空。仅在 Android 允许访问时响应复制事件，不在后台轮询，不收集密码输入场景的内容。清空不会修改 Android 系统剪贴板，旧内容也不会再次收集，直到您重新复制。")
+        notice("置顶仅改变顺序；超出上限优先删除最旧未置顶，全部置顶时删除最旧记录。不自动过期，重复复制也会保留。置顶记录也会随内容清空。仅在 Android 允许访问时响应复制事件，不在后台轮询，不收集密码输入场景或带敏感标记的内容。单条最多65536字符，历史合计最多100万字符；超长或短时大量复制可能跳过自动保存，系统剪贴板仍可粘贴。清空不会修改 Android 系统剪贴板，旧内容也不会再次收集，直到您重新复制。")
         section("保存设置")
         number("保存条数上限", config.clipboardLimit, 1, 1000) {
             config.clipboardLimit = it
@@ -593,7 +576,7 @@ class SettingsActivity : Activity() {
         group = null
         ui.text(body, "已保存 ${records.size} 条", 16f, true)
         if (records.isEmpty()) notice("还没有保存的剪贴板记录。")
-        records.forEachIndexed { index, item ->
+        contentPage(records, "clipboard", ::clipboard).forEach { (index, item) ->
             group = ui.card(body).apply { tag = "anchor:clipboard:${item.id}" }
             label(item.text, 15f).setTextColor(ui.ink)
             button("删除这条记录") {
@@ -613,23 +596,47 @@ class SettingsActivity : Activity() {
         }
     }
 
+    /** Bound management-page view creation while retaining global move/delete indices. */
+    private fun <T> contentPage(values: List<T>, route: String, refresh: () -> Unit): List<IndexedValue<T>> {
+        val lastPage = ((values.size - 1) / 100).coerceAtLeast(0)
+        val pageIndex = (contentPageIndices[route] ?: 0).coerceIn(0, lastPage)
+        contentPageIndices[route] = pageIndex
+        if (lastPage > 0) {
+            section("第 ${pageIndex + 1} / ${lastPage + 1} 页 · 每页最多100条")
+            if (pageIndex > 0) button("上一页") {
+                contentPageIndices[route] = pageIndex - 1
+                refresh()
+            }
+            if (pageIndex < lastPage) button("下一页") {
+                contentPageIndices[route] = pageIndex + 1
+                refresh()
+            }
+        }
+        val start = pageIndex * 100
+        return values.subList(start, minOf(start + 100, values.size)).mapIndexed { offset, value ->
+            IndexedValue(start + offset, value)
+        }
+    }
+
     private fun phrases() {
         page("phrases", "常用语")
         notice("只保存您手动添加的常用语。不自动收集，不分类，不导入。编辑点击「保存」后生效；移动顺序立即保存。")
         button("添加常用语", true) { editPhrase(null) }
         val phrases = content.phrases()
         if (phrases.isEmpty()) notice("还没有常用语，添加一条常用内容即可开始。")
-        phrases.forEachIndexed { index, item ->
+        contentPage(phrases, "phrases", ::phrases).forEach { (index, item) ->
             group = ui.card(body).apply { tag = "anchor:phrase:${item.id}" }
             label(item.text, 15f).setTextColor(ui.ink)
             button("编辑") { editPhrase(item.id) }
             if (index > 0) button("上移") {
                 content.movePhrase(item.id, index - 1)
+                contentPageIndices["phrases"] = (index - 1) / 100
                 keepItemVisible("anchor:phrase:${item.id}")
                 phrases()
             }
             if (index < phrases.lastIndex) button("下移") {
                 content.movePhrase(item.id, index + 1)
+                contentPageIndices["phrases"] = (index + 1) / 100
                 keepItemVisible("anchor:phrase:${item.id}")
                 phrases()
             }
@@ -854,7 +861,10 @@ class SettingsActivity : Activity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 if (input.text.isBlank()) SettingsInputs.error(input, "请输入内容")
                 else safely {
-                    if (itemId == null) content.addPhrase(input.text.toString())
+                    if (itemId == null) {
+                        content.addPhrase(input.text.toString())
+                        contentPageIndices["phrases"] = (content.phrases().size - 1) / 100
+                    }
                     else content.updatePhrase(itemId, input.text.toString())
                     dialog.dismiss()
                     phrases()
@@ -1033,6 +1043,9 @@ class SettingsActivity : Activity() {
         }
         outState.putBundle("editor_draft", editor?.saveDraft())
         outState.putString("recovery_message", recoveryMessage)
+        for (route in listOf("clipboard", "phrases")) {
+            outState.putInt("content_page_$route", contentPageIndices[route] ?: 0)
+        }
         currentDictionaryKind?.let { outState.putString("dictionary_kind", it.name) }
         DictionaryKind.values().forEach { kind ->
             outState.putInt("dictionary_page_${kind.name}", dictionaryPageIndices[kind] ?: 0)
@@ -1055,6 +1068,8 @@ class SettingsActivity : Activity() {
         transferDialog?.dismiss()
         transferDialog = null
         dismissOwnedDialogs(keepRetainedDraft = isChangingConfigurations)
+        toolbarEditor?.close()
+        toolbarEditor = null
         editor?.close()
         editor = null
         numberEditors.clear()

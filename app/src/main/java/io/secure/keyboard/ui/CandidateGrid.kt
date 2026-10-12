@@ -26,6 +26,9 @@ class CandidateGrid(
     private val selectedColor: Int,
     private val cellColor: Int,
     private val selectionVersion: () -> Int? = { 0 },
+    private val feedback: () -> KeyboardPressFeedback = { KeyboardPressFeedback() },
+    private val textSizeSp: Float = 18f,
+    private val chooseWithFeedback: ((String, () -> Unit) -> Unit)? = null,
     private val choose: (String) -> Unit,
 ) : GridView(context) {
     private var displayed = emptyList<String>()
@@ -35,7 +38,7 @@ class CandidateGrid(
         KeyboardFeedback.disableAutomatic(this)
         contentDescription = "全部候选"
         numColumns = AUTO_FIT
-        columnWidth = dp(80)
+        columnWidth = dp((80 * (textSizeSp / 18f).coerceAtLeast(1f)).roundToInt())
         stretchMode = STRETCH_COLUMN_WIDTH
         horizontalSpacing = dp(6)
         verticalSpacing = dp(6)
@@ -81,12 +84,13 @@ class CandidateGrid(
         private var position = -1
         private var value = ""
         private var binding = 0
+        private val pressFeedback = feedback()
         private var touched = false
         private var pressedVersion: Int? = null
         private var pressedBinding = -1
 
         init {
-            textSize = 18f
+            textSize = textSizeSp.coerceIn(12f, 32f)
             gravity = Gravity.CENTER
             includeFontPadding = false
             maxLines = 2
@@ -101,7 +105,7 @@ class CandidateGrid(
             background = RippleDrawable(
                 ColorStateList.valueOf((candidateColor and 0x00ffffff) or 0x18000000), fill, null,
             )
-            KeyboardFeedback.disableAutomatic(this) // The validated service tap owns feedback.
+            KeyboardFeedback.disableAutomatic(this)
             setOnTouchListener { view, event ->
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
@@ -109,9 +113,11 @@ class CandidateGrid(
                         pressedVersion = selectionVersion()
                         pressedBinding = binding
                         if (pressedVersion == null) return@setOnTouchListener true
+                        pressFeedback.onTouch(event)
                     }
                     MotionEvent.ACTION_UP -> {
                         if (!validTouch()) {
+                            pressFeedback.cancel()
                             touched = false
                             view.cancelPendingInputEvents()
                             view.isPressed = false
@@ -119,6 +125,7 @@ class CandidateGrid(
                         }
                     }
                     MotionEvent.ACTION_CANCEL -> {
+                        pressFeedback.onTouch(event)
                         // Scrolling / collapsing cannot turn a canceled press into selection.
                         touched = false
                         pressedVersion = null
@@ -132,11 +139,15 @@ class CandidateGrid(
                     (!touched || validTouch()) &&
                     displayed.getOrNull(position) == value
                 touched = false
-                if (valid) choose(value) // Never commit the ellipsized display representation.
+                if (valid) {
+                    if (chooseWithFeedback != null) chooseWithFeedback.invoke(value, pressFeedback.takeClick())
+                    else { pressFeedback.click(); choose(value) } // Preserve complete text.
+                } else pressFeedback.cancel()
             }
         }
 
         override fun onDetachedFromWindow() {
+            pressFeedback.cancel()
             // A collapse/reopen (or a theme/editor rebuild) can reuse this cell with an equal
             // result and query generation. An old finger-up still must not become a new tap.
             binding++

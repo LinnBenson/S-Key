@@ -37,6 +37,20 @@ class ContentEntryRowTest : InstrumentationTestCase() {
         super.tearDown()
     }
 
+    fun testRecycledRowUsesOnlyNewTextAndCallbacks() {
+        instrumentation.runOnMainSync {
+            val events = mutableListOf<String>()
+            val row = createRow("old", false, { events.add("old") }, { events.add("old") }, { events.add("old") })
+            row.bind("new🙂", true, { events.add(it) }, { events.add("pin:$it") }, { events.add("delete:new") })
+            assertEquals("new🙂", row.textView.text.toString())
+            assertTrue(row.pinAction.isSelected)
+            row.textView.performClick()
+            row.pinAction.performClick()
+            row.deleteAction.performClick()
+            assertEquals(listOf("new🙂", "pin:false", "delete:new"), events)
+        }
+    }
+
     fun testSingleLinePreviewReservesBothIconTargetsAndInsertsFullStoredText() {
         val texts = listOf(
             "短句",

@@ -7,3 +7,14 @@ local.properties
 
 # Restored from the lossless source archive
 /app/src/main/assets/fonts/OfflineKeyboardCjkSupplement.ttf
+
+# Downloaded hash-verified dependency; source includes the bootstrap script.
+/app/libs/*.aar
+
+# Local release artifacts and private signing material
+/releases/
+*.apk
+*.idsig
+*.p12
+*.keystore
+keystore-password.txt

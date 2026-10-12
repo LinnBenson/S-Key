@@ -221,16 +221,16 @@ class SettingsRedesignScreensTest : InstrumentationTestCase() {
         assertSame("Immediate feedback toggle must not recreate the activity", previous, current())
         assertTrue(SettingsStore(fixture.context).keySound)
         openSettings("toolbar")
-        clickButton("英文词库：向前移动")
-        assertEquals(listOf("english_dictionary", "dictionary", "settings"), config.toolbarPins)
         onMain {
-            val chinese = allViews().filterIsInstance<Switch>().single { it.text == "中文词库" }
-            assertTrue(chinese.isChecked)
-            chinese.performClick()
+            assertTrue(allViews().single { it.tag == "toolbar_drag_english_dictionary" }
+                .performAccessibilityAction(0x01000001, null))
         }
         settle()
+        assertEquals(listOf("english_dictionary", "dictionary", "settings"), config.toolbarPins)
+        clickTag("toolbar_remove_dictionary")
         assertEquals(listOf("english_dictionary", "settings"), SettingsStore(fixture.context).toolbarPins)
-        onMain { assertFalse(allViews().filterIsInstance<Switch>().single { it.text == "中文词库" }.isChecked) }
+        clickTag("toolbar_add_dictionary")
+        assertEquals(listOf("english_dictionary", "settings", "dictionary"), SettingsStore(fixture.context).toolbarPins)
         assertLightShell()
     }
 
@@ -397,12 +397,13 @@ class SettingsRedesignScreensTest : InstrumentationTestCase() {
 
     private fun assertLightShell() = onMain {
         val root = findTag<View>("settings_shell")
-        assertEquals(SettingsPalette.background, (root.background as ColorDrawable).color)
-        assertEquals(SettingsPalette.ink, findTag<TextView>("settings_title").currentTextColor)
+        val launcher = current() is MainActivity
+        assertEquals(if (launcher) 0xFFF6F6F3.toInt() else SettingsPalette.background, (root.background as ColorDrawable).color)
+        assertEquals(if (launcher) SettingsPalette.accent else SettingsPalette.ink, findTag<TextView>("settings_title").currentTextColor)
         if (Build.VERSION.SDK_INT >= 29) assertFalse(root.isForceDarkAllowed)
         for (button in descendants(root).filterIsInstance<Button>()) {
             assertTrue("Unexpected chrome text color for ${button.text}", button.currentTextColor in setOf(
-                SettingsPalette.ink, SettingsPalette.secondaryText, SettingsPalette.onAccent, SettingsPalette.error))
+                SettingsPalette.ink, SettingsPalette.accent, SettingsPalette.secondaryText, SettingsPalette.onAccent, SettingsPalette.error))
         }
         assertHeaderVisible()
     }

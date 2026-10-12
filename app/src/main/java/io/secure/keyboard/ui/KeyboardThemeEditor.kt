@@ -94,6 +94,7 @@ internal class KeyboardThemeEditor(
         pageActions.forEach { it.setOnClickListener(null) }
         pageActions.clear()
         tokenRows.clear()
+        pagePreview?.onSelect = null
         pagePreview = null
         pageAdvice = null
         container?.let { (it.parent as? LinearLayout)?.removeView(it) }
@@ -108,33 +109,51 @@ internal class KeyboardThemeEditor(
         body.removeAllViews()
         val values = store.themeTokens(dark).asMap()
         val overview = ui.card(body)
-        ui.text(overview, "${if (dark) "深色" else "浅色"}键盘配色", 17f, true)
-        ui.text(overview, "点选颜色项目后拖动调色，或输入精确 HEX。预览仅在本页变化，点“保存”后才用于键盘。", 14f)
+        ui.text(overview, "点哪里，改哪里", 19f, true)
+        ui.text(overview, "点选预览中的按键、文字或工具栏，即可调整对应颜色。", 13f)
         pagePreview = PalettePreview(activity, values).also {
-            overview.addView(it, LinearLayout.LayoutParams(-1, ui.dp(222)).apply { topMargin = ui.dp(8); bottomMargin = ui.dp(8) })
+            it.onSelect = { id -> edit(id) }
+            it.tag = "theme_interactive_preview"
+            overview.addView(it, LinearLayout.LayoutParams(-1, -2).apply { topMargin = ui.dp(12); bottomMargin = ui.dp(8) })
         }
-        pageAdvice = ui.text(overview, contrastAdvice(values), 13f)
-        ui.text(overview, "浅色和深色配色独立保存，不改变当前键盘主题模式。清空用户内容不会清除配色。", 13f)
+        pageAdvice = ui.text(overview, contrastAdvice(values), 12f)
+        ui.text(body, "精细配色", 18f, true)
+        ui.text(body, "也可以从下方色块选择部位；浅色与深色独立保存。", 12f)
         groups.forEach { (heading, ids) ->
             val card = ui.card(body)
-            ui.text(card, heading, 17f, true)
-            ids.forEach { id ->
-                val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            ui.text(card, heading, 15f, true)
+            ids.chunked(2).forEach { pair ->
+                val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
                 card.addView(row, LinearLayout.LayoutParams(-1, -2))
-                val swatch = View(activity).apply {
-                    background = SettingsPalette.shape(context, Color.parseColor(values.getValue(id)), 10, SettingsPalette.outline)
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                pair.forEachIndexed { index, id ->
+                    val tile = ui.column().apply {
+                        setPadding(ui.dp(10), ui.dp(12), ui.dp(10), ui.dp(6))
+                        background = ui.shape(SettingsPalette.functional, 18)
+                    }
+                    row.addView(tile, LinearLayout.LayoutParams(0, -1, 1f).apply {
+                        setMargins(if (index == 0) 0 else ui.dp(8), ui.dp(6), 0, ui.dp(6))
+                    })
+                    val swatch = View(activity).apply {
+                        background = SettingsPalette.shape(context, Color.parseColor(values.getValue(id)), 12, SettingsPalette.divider)
+                        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    }
+                    tile.addView(swatch, LinearLayout.LayoutParams(-1, ui.dp(30)))
+                    val button = ui.button(tile, "${labels.getValue(id)}\n${values.getValue(id)}") { edit(id) }.apply {
+                        tag = "theme_token_$id"
+                        gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                        textSize = 12f
+                        setPadding(ui.dp(2), ui.dp(8), ui.dp(2), ui.dp(8))
+                        contentDescription = "${labels.getValue(id)}，${values.getValue(id)}，编辑颜色"
+                    }
+                    tile.isClickable = true
+                    tile.isFocusable = true
+                    tile.contentDescription = button.contentDescription
+                    tile.setOnClickListener { edit(id) }
+                    tokenRows[id] = swatch to button
+                    pageActions.add(button)
+                    pageActions.add(tile)
                 }
-                row.addView(swatch, LinearLayout.LayoutParams(ui.dp(32), ui.dp(40)).apply { marginEnd = ui.dp(12) })
-                val button = ui.button(row, "${labels.getValue(id)}\n${values.getValue(id)}") { edit(id) }.apply {
-                    tag = "theme_token_$id"
-                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                    textSize = 14f
-                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, ui.dp(4), 0, ui.dp(4)) }
-                    contentDescription = "${labels.getValue(id)}，${values.getValue(id)}，编辑颜色"
-                }
-                tokenRows[id] = swatch to button
-                pageActions.add(button)
+                if (pair.size == 1) row.addView(View(activity), LinearLayout.LayoutParams(0, 1, 1f).apply { marginStart = ui.dp(8) })
             }
         }
         pageActions.add(ui.button(body, "恢复${if (dark) "深色" else "浅色"}默认配色") { confirmReset() })
@@ -281,6 +300,18 @@ internal class KeyboardThemeEditor(
             newSwatch = next.first
             newLabel = next.second
             text(group, "饱和度与明度", 14f)
+            text(group, "快速选色", 13f)
+            val quick = LinearLayout(group.context)
+            group.addView(quick, LinearLayout.LayoutParams(-1, ui.dp(48)))
+            listOf("#2B2B2B", "#FFFFFF", "#F6F6F3", "#738675", "#70849A", "#BE9280", "#B49B65").forEach { hex ->
+                val chip = Button(group.context).apply {
+                    contentDescription = "选择颜色 $hex"
+                    minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
+                    background = SettingsPalette.shape(context, Color.parseColor(hex), 14, SettingsPalette.divider)
+                    setOnClickListener { state.typeHex(hex); sync(true) }
+                }
+                quick.addView(chip, LinearLayout.LayoutParams(0, -1, 1f).apply { setMargins(ui.dp(3), ui.dp(4), ui.dp(3), ui.dp(4)) })
+            }
             plane = ColorPickerView(group.context, ColorPickerView.Component.SATURATION_VALUE).apply { tag = "color_sv" }
             val planeHeight = if (group.resources.configuration.screenHeightDp < 480) 160 else 204
             group.addView(plane, LinearLayout.LayoutParams(-1, ui.dp(planeHeight)))
@@ -457,8 +488,76 @@ internal class KeyboardThemeEditor(
     }
 }
 
-/** Small non-interactive preview showing all editable color roles, never an input collector. */
-private class PalettePreview(activity: Activity, initial: Map<String, String>) : View(activity) {
+/** Small selectable preview showing all editable color roles, never an input collector. */
+internal class PalettePreview(activity: Activity, initial: Map<String, String>) : View(activity) {
+    var onSelect: ((String) -> Unit)? = null
+        set(value) { field = value; isClickable = value != null }
+    private var validTap = false
+    private var downX = 0f
+    private var downY = 0f
+    private var pressedRole = "keyboardBackground"
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val desired = (w * 222f / 340f).roundToInt()
+        setMeasuredDimension(w, resolveSize(desired, heightMeasureSpec))
+    }
+
+    override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+        if (onSelect == null) return super.onTouchEvent(event)
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                validTap = width > 0 && height > 0
+                downX = event.x; downY = event.y
+                pressedRole = roleAt(event.x * 340f / width, event.y * 222f / height)
+                return true
+            }
+            android.view.MotionEvent.ACTION_UP -> {
+                val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+                if (validTap && kotlin.math.abs(event.x - downX) <= slop && kotlin.math.abs(event.y - downY) <= slop) performClick()
+                validTap = false
+                return true
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+                if (kotlin.math.abs(event.x - downX) > slop || kotlin.math.abs(event.y - downY) > slop) validTap = false
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> { validTap = false; return true }
+        }
+        return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        onSelect?.invoke(pressedRole)
+        return true
+    }
+
+    internal fun roleAt(x: Float, y: Float): String {
+        if (y < 33) return if (x in 193f..283f) "preedit" else "toolbarIcon"
+        if (y in 33f..57f) return if (x < 78) "candidateSelected" else "candidate"
+        if (y in 57f..63f) return "divider"
+        for (row in 0..1) {
+            val count = if (row == 0) 10 else 9
+            val start = (340f - (count * 32f - 4f)) / 2
+            val localY = y - (64 + row * 49)
+            if (localY !in 0f..44f) continue
+            val index = ((x - start) / 32f).toInt()
+            val localX = x - start - index * 32
+            if (index !in 0 until count || localX !in 0f..28f) continue
+            if (localX >= 17 && localY < 15) return "hint"
+            val selected = row == 1 && index == 0
+            if (localX in 5f..22f && localY in 15f..35f) return if (selected) "selectedKeyText" else "text"
+            return if (selected) "selectedKeyBackground" else "normalKeyBackground"
+        }
+        if (y in 166f..209f) {
+            if (x in 10f..54f) return if (y in 177f..199f) "specialKeyText" else "specialKeyBackground"
+            if (x in 276f..330f) return if (x in 289f..318f && y in 177f..201f) "enterText" else "accent"
+            if (x in 60f..270f) return if (x in 110f..220f && y in 177f..199f) "text" else "normalKeyBackground"
+        }
+        return "keyboardBackground"
+    }
+
     var colors = initial.toMap()
         set(value) {
             field = value
@@ -468,7 +567,7 @@ private class PalettePreview(activity: Activity, initial: Map<String, String>) :
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     init {
-        contentDescription = "键盘配色预览：工具栏、候选文字、按键角标、普通键、功能键与回车"
+        contentDescription = "键盘配色预览，点选部位改色。也可使用下方配色按钮。"
     }
 
     override fun onDraw(canvas: Canvas) {

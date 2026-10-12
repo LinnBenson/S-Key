@@ -8,7 +8,6 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextPaint
 import android.text.style.MetricAffectingSpan
-import android.util.Log
 import android.widget.TextView
 
 /**
@@ -23,7 +22,6 @@ import android.widget.TextView
  * This does not install a system font or change the receiving app's rendering.
  */
 object CandidateFont {
-    private const val TAG = "CandidateFont"
     private val lock = Any()
 
     @Volatile private var parts: List<FontPart>? = null
@@ -99,9 +97,9 @@ object CandidateFont {
                         FontPart("OfflineKeyboardCjkBmp.ttf", readRanges(context, "bmp.ranges")),
                         FontPart("OfflineKeyboardCjkSupplement.ttf", readRanges(context, "supplement.ranges")),
                     )
-                } catch (error: Exception) {
+                } catch (_: Exception) {
                     // A corrupt install must not crash the IME or hide candidate text.
-                    Log.w(TAG, "Bundled candidate font coverage could not be loaded", error)
+                    // Fail silently: never forward exception payloads to system logs.
                     emptyList()
                 }
                 parts = loaded
@@ -141,9 +139,9 @@ object CandidateFont {
             return face ?: synchronized(this) {
                 face ?: if (loadFailed) null else try {
                     Typeface.createFromAsset(context.assets, "fonts/$filename").also { face = it }
-                } catch (error: Exception) {
+                } catch (_: Exception) {
                     loadFailed = true
-                    Log.w(TAG, "Bundled candidate font could not be loaded", error)
+                    // Fail silently: never forward exception payloads to system logs.
                     null
                 }
             }

@@ -30,7 +30,7 @@ object SymbolKeyLayout {
         else -> englishPrimary
     }
 
-    /** Keep ten-key widths; equal inner gaps center a short row between its two controls. */
+    /** Control rows use the same 1.3 : seven unit keys : 1.3 layout as the letter row. */
     fun sideSpacerWeight(symbolCount: Int, hasSideControls: Boolean): Float =
-        ((10f - symbolCount - (if (hasSideControls) 2.6f else 0f)) / 2f).coerceAtLeast(0f)
+        if (hasSideControls) 0f else ((10f - symbolCount) / 2f).coerceAtLeast(0f)
 }

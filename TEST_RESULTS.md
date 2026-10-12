@@ -1,3 +1,65 @@
+# 首页设计与候选字号验证（2026-10-12，Asia/Singapore）
+
+- 首页以#2b2b2b为主色，使用浅色背景、炭黑主卡片、原生键帽插画、圆角按钮及设置/语音入口卡片；显示实际启用/当前输入法状态，保留试打不落盘和全部原有入口。插画复用画笔、字形及渐变，不在每次绘制时创建这些对象。
+- 外观与按键新增候选栏和展开候选两项字号滑块，范围12–32sp，默认20/18sp，持久化并在重新打开键盘后生效。同步测量字体及候选栏/网格布局。
+- 候选反馈延续触摸按下立即请求的行为；无障碍和程序化点击在候选验证后反馈，异步英文选择保留每次点击的反馈状态，避免重复震动。
+- JVM187项通过；设备最终49项通过（39.541秒），包含字号持久化/边界/渲染、候选网格/候选栏、候选反馈及设置深链接返回导航。debug编译成功，lint无错误、28项原有警告，git diff --check通过。
+- 首轮候选测试受模拟器此前保存的英文模式影响超时，已隔离测试语言并恢复原值。完整自动截图回归另在BlueStacks图形驱动lib_renderControl_enc.so中触发am instrument进程SIGSEGV，随后UiAutomation断连；最终49项不含该自动截图测试及依赖截图的全页面捕获测试，不宣称这些测试通过。普通adb截屏和手动首页/设置入口检查成功。
+- 已安装debug测试版；未使用新建正式签名密钥。构建日志、初次失败记录、最终测试和界面截图见app/build/reports/home-candidate-size/。
+
+# 悬浮键盘缩放验证（2026-10-12，Asia/Singapore）
+
+- 拖动横条绘制长度约为原来的三倍，缩放图标改为左上—右下双向箭头，原触摸区域保留。
+- 缩放使用按下时实际布局边界：向右下放大，向左上缩小；高度与底部距离之和固定，横向尺寸不超过左侧锚点到屏幕右边缘的距离。
+- debug编译成功，JVM186项全部通过（新增4项锚点/边界测试）；BlueStacks的KeyboardBottomRowTest共8项通过，耗时9.479秒；git diff --check通过。
+- BlueStacks手动验证放大及缩小：两次均保持屏幕左上锚点不变。截图及日志保存于app/build/reports/floating-resize/。已安装新版。
+
+# 按下触感与面板间距验证（2026-10-12，Asia/Singapore）
+
+- 工具面板和快捷编辑的横纵卡片间距由6dp改为10dp，已在BlueStacks安装并查看。
+- 触摸震动请求提前到ACTION_DOWN；普通键、工具、表情、候选和内容操作在松手时不重复请求。输入/点击逻辑仍在确认点击后执行，保留系统震动开关、强度、长按功能反馈和无障碍点击反馈。同一按键多指重叠时新增手指也立即请求反馈。
+- JVM测试182项全部通过（含新增4项反馈时序测试）。BlueStacks设备回归52项全部通过，耗时55.472秒：HiddenPanelLifecycleTest、RapidTypingTest、CandidateGridTest、CandidateStripPagingTest、KeyboardFeedbackRoutingTest、KeyboardHapticsRoutingTest、ContentEntryRowTest。
+- 新增设备测试通过记录根视图的触觉请求，验证普通键、工具、快捷编辑、表情和剪贴板在DOWN时请求一次反馈且尚未执行操作，松手不重复请求；模拟器测试不代表真机马达启动延迟或主观震感。
+- 完成debug编译、lint及git diff --check。详细构建/设备日志保存在app/build/reports/press-feedback/。
+
+# 本地隐私与内存修复验证（2026-10-12，Asia/Singapore）
+
+基于 Git 提交 `a250226afdf996f8e11a3565c5c2befc4695903f` 的工作区修复。主应用版本标识仍为0.1.8/versionCode 9；本节对应本地修复版，不是下方历史build53的重新背书。没有提交或推送远端。SOURCE_MANIFEST.sha256仍是原始源码清单，不代表修改后工作区。
+
+## 修复内容
+
+- 采集前检查 `android.content.extra.IS_SENSITIVE`，敏感内容不进入剪贴板历史；超长文本不截断保存，系统剪贴板保持可粘贴。
+- 剪贴板单条最多65,536个UTF-16代码单元，历史合计最多1,000,000；待保存任务含执行中最多32个、合计262,144。溢出拒绝新任务，已接受的复制事件按顺序保存，保留重复复制和优先淘汰未置顶项的规则。
+- 常用语最多10,000条、1,000,000代码单元；每种用户词库的词条与编码合计最多4,000,000。超限操作原子拒绝；旧超限数据不自动删除，仍可缩短、删除或修改置顶状态。
+- 剪贴板采集代际读取改为原子读取，不在主线程等待内容I/O锁。键盘内容面板后台读取和修改、ListView复用可见行，过期结果不能恢复已关闭面板；管理页面每页最多100条。
+- JSON流式写入，避免完整JSON字符串和UTF-8字节数组同时存在。保留原有落盘同步与替换机制。
+- 测试APK补充版本名、版本号和应用元数据；BlueStacks Air 5.21.790.7505此前在无versionName的安装通知中触发原生SIGABRT，日志栈含 `xjsonGetString` / `plrOnAppInstalledHcall`。补齐元数据后安装及完整回归成功，未改变主应用权限。
+
+## 本次实际验证
+
+- `assembleDebug testDebugUnitTest lintDebug assembleDebugAndroidTest`：成功。JDK17/Homebrew、SDK35、Gradle8.9。
+- JVM：178项，0失败、0错误、0跳过（含新增4项有界队列测试）。
+- Python：34项词库测试通过；`tests/privacy_audit.py`通过；`git diff --check`通过。
+- lint：0错误、28警告。
+- BlueStacks ARM64 / Android13（模拟型号SM-G998B）：最终一次完整运行 **86项全部通过**，45.945秒。覆盖敏感标记、超长文本、总容量、超限原子拒绝、旧超限数据兼容、Unicode/转义往返、双语词库、置顶/删除/完整插入、视图复用、管理页分页、隐藏面板、密码框及语言生命周期。
+- 首轮85项通过、1项测试报错：旧同步测试未等待后台读取，出现空列表；补充异步等待后重跑整组86项通过，没有删除原有功能断言。
+- 原始日志保存在 `app/build/reports/privacy-memory/`；JVM XML在 `app/build/test-results/testDebugUnitTest/`。
+
+## 千条剪贴板场景内存采样
+
+最终设备回归中，1,000条合成记录连续20轮打开、滚动到末尾、收起。每轮验证列表总记录数为1,000、挂载行数在1–30之间、收起后无内容行残留。第5/10/15/20轮自然PSS分别为107,291 / 116,184 / 109,243 / 115,119 KiB；native已分配字节分别为20,671,888 / 24,186,352 / 22,109,872 / 25,624,096。
+
+这是同一回归进程中的短时采样，未强制GC、没有旧版本对照、没有堆转储归因。可确认该场景视图规模有界、PSS未逐次单调增长；不能据此宣称零泄漏或总体RAM下降。语音模型的长期native内存、真机长时间输入及旧超限数据的实际峰值未在本轮测量。
+
+## 产物与兼容边界
+
+- ARM64调试包：`app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
+- SHA-256：`6892e32222bf6f6718c2afa438439a3dda87a1b772d491c8bea498c648257c67`
+- 修复版已安装到BlueStacks。设备测试主要使用隔离数据；原有密码框剪贴板测试临时写入合成内容并在finally恢复系统剪贴板。
+- 未对已保存历史做敏感数据猜测或批量删除；旧版历史不含敏感标记，已有密码需用户自行删除。容量单位是UTF-16代码单元，普通输入、完整文本插入、词库查询和语音行为保持原有实现。
+
+---
+
 # S Key 0.1.8 验证报告
 
 日期：2026-10-12 UTC。最终构建53，包名 `io.secure.keyboard`，versionName `0.1.8`、versionCode `9`。已交付0.1.7/build49冻结；未交付的0.1.8/build51由本产物替代。遵循用户要求，本次只编译、JVM、Python和静态检查，**没有模拟器/设备测试或新增内存实验**。
@@ -198,3 +260,26 @@ Java已用堆、native分配、PSS/RSS、映射虚拟大小及对象归属含义
 未覆盖：真实OS深色设置矩阵、杀进程后的大草稿恢复、真实SAF阻塞取消/流关闭、10,000候选全量滚动、近400万字符累积极限、独立60秒语音上限、额外强制GC归因、Samsung马达/折叠/功耗/长期资源表现。最终边框/两默认色/彩蛋/符号页由用户实机验证。
 
 五份补充五笔词库上游未给出明确LICENSE，已披露且仅用于请求的私人测试，不作公开发布许可承诺。语音转换模型与上游权重许可区分见第三方说明，模型不随包分发。
+
+## 2026-10-12 — Unified settings design and direct theme editing
+- Shared settings palette, cards, headers, dialogs and inputs now use neutral paper backgrounds and #2B2B2B ink/accent, consistent with the launcher.
+- Theme editor supports tapping preview regions, two-column color swatches and quick colors, retaining explicit save/cancel and independent light/dark palettes.
+- Toolbar editor provides a real icon-order preview, explicit add/remove, long-press drag handles, position chooser and accessibility reorder actions. Owned dialogs are dismissed on navigation/destruction.
+- Validation: assembleDebug, assembleDebugAndroidTest, 187 JVM tests passed; lintDebug: 0 errors, 28 warnings.
+- BlueStacks instrumentation: KeyboardThemeEditorTest (9), toolbar persistence/add/remove/accessibility reorder (1), logical navigation across settings routes (1): OK (11 tests). Includes cancelled/scroll preview gestures and real tap opening.
+- Installed debug APK on BlueStacks; ADB screenshots reviewed for settings home, appearance, theme palette, picker and toolbar. Drag gesture itself was not automated; reorder persistence exercised through accessibility actions.
+- Evidence: app/build/reports/settings-unified/. Avoided vendor-unstable UiAutomation screenshot API; used adb screencap.
+
+## 2026-10-12 — Privacy/logging and memory follow-up (0.1.10)
+- Preserved user-authorized clipboard, phrases, custom dictionaries, recent emoji and settings. Removed the remaining two production font exception log calls.
+- 187 JVM tests passed; Debug/Release lint completed with zero errors.
+- 60 isolated panel cycles verified presentation cleanup and no typed sentinel in files/preferences; process logcat sentinel matches: zero.
+- 30 picker cycles / 20 orientation transitions and separate Activity/Dialog/Picker collectibility assertions passed.
+- Current candidate 1000-refresh stress, privacy cancellation, sensitive clipboard and 100 canceled voice-start checks passed.
+- 12 pinned native recognizer load/silence/decode/release cycles passed without microphone access; PSS 103172–105516 KiB, FD count 64 throughout. Temporary model removed.
+- Limitations include an older slow-host diagnostic timeout, one manually interrupted test sequence (rerun passed), unavailable nativeAllocatedBytes metrics on BlueStacks, and no live microphone stress. Full evidence/limitations: docs/privacy-memory-review-2026-10-12.txt.
+- Release APK signature, no-debug/test-code checks and packaged dictionary byte equality verified.
+
+## 2026-10-12 — Release 0.1.11
+- versionCode 12; consolidates the prior UI, privacy, clipboard, haptics, layout and dictionary updates.
+- Release APKs and private signing material are excluded from Git.

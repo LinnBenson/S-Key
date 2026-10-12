@@ -49,6 +49,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     private lateinit var harness: ServiceHarness
     private lateinit var connection: RecordingConnection
     private var originalCompletion = true
+    private var originalChinese = true
     private var originalFourCode = false
     private var originalKeySound = false
     private var originalVibration = true
@@ -95,6 +96,8 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     override fun setUp() {
         super.setUp()
         val settings = SettingsStore(context)
+        originalChinese = settings.lastChineseLanguage
+        settings.lastChineseLanguage = true
         originalCompletion = settings.englishCompletion
         originalFourCode = settings.fourCodeAutoCommit
         originalKeySound = settings.keySound
@@ -128,6 +131,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             if (::activity.isInitialized) activity.finish()
         }
         SettingsStore(context).englishCompletion = originalCompletion
+        SettingsStore(context).lastChineseLanguage = originalChinese
         SettingsStore(context).fourCodeAutoCommit = originalFourCode
         SettingsStore(context).keySound = originalKeySound
         SettingsStore(context).vibration = originalVibration

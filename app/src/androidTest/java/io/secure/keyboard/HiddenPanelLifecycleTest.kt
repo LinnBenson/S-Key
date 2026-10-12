@@ -18,6 +18,7 @@ import android.view.ViewGroup
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.widget.TextView
+import android.widget.ListView
 import io.secure.keyboard.data.ContentStore
 import io.secure.keyboard.data.SettingsStore
 import io.secure.keyboard.ui.ContentEntryRow
@@ -149,10 +150,14 @@ class HiddenPanelLifecycleTest : InstrumentationTestCase() {
                 startEditor()
                 set("active", true)
                 showPanel(panel)
+            }
+            await("content rows attached") { rows().isNotEmpty() }
+            onMainChecked {
                 val oldRoot = root
                 val oldChild = body.getChildAt(0)
                 val oldRows = rows()
-                assertEquals(10, oldRows.size)
+                assertTrue(oldRows.size in 1..10)
+                assertEquals(10, (oldRows.first().parent as ListView).count)
                 assertTrue(oldRows.all { it.isAttachedToWindow })
                 finish(endpoint)
                 assertSame(oldRoot, root)
@@ -174,17 +179,23 @@ class HiddenPanelLifecycleTest : InstrumentationTestCase() {
 
     fun testCategoryClearAfterHideDoesNotReintroduceOldRowsOrDeleteOtherCategory() {
         for (panel in listOf("clipboard", "phrases")) {
+            lateinit var copiesBefore: List<ContentStore.ClipboardItem>
+            lateinit var phrasesBefore: List<ContentStore.Phrase>
             onMainChecked {
                 // Refill the prior cleared category so both directions verify preservation.
                 if (panel == "phrases") store.addClipboard("fixture category-clear survivor")
-                val copiesBefore = store.clipboard()
-                val phrasesBefore = store.phrases()
+                copiesBefore = store.clipboard()
+                phrasesBefore = store.phrases()
                 assertTrue(copiesBefore.isNotEmpty() && phrasesBefore.isNotEmpty())
                 startEditor()
                 set("active", true)
                 showPanel(panel)
+            }
+            await("content rows attached") { rows().isNotEmpty() }
+            onMainChecked {
                 val oldRows = rows()
-                assertEquals(10, oldRows.size)
+                assertTrue(oldRows.size in 1..10)
+                assertEquals(10, (oldRows.first().parent as ListView).count)
                 finish("hide")
                 if (panel == "clipboard") store.clearClipboard() else store.clearPhrases()
                 assertEquals(0, body.childCount)
@@ -325,6 +336,7 @@ class HiddenPanelLifecycleTest : InstrumentationTestCase() {
     fun testRestartDuringHideRequestRestoresAlreadyReleasedBodyBeforeViewStart() {
         onMainChecked {
             set("chinese", false)
+            set("emojiCategory", 1)
             set("symbols", true)
             set("symbolPage", true)
             showPanel("phrases")
@@ -391,6 +403,72 @@ class HiddenPanelLifecycleTest : InstrumentationTestCase() {
         }
     }
 
+    fun testPressFeedbackPrecedesReleaseForKeysToolsEmojiAndContent() {
+        val recording = object : android.widget.FrameLayout(activity) {
+            var requests = 0
+            override fun isShown() = true
+            override fun performHapticFeedback(effect: Int): Boolean { requests++; return true }
+        }
+        val originalRoot = root
+        onMainChecked {
+            field<SettingsStore>("settings").apply {
+                vibration = true
+                vibrationStrength = 10
+            }
+            set("root", recording)
+            set("chinese", false)
+        }
+        try {
+            for (panel in listOf("keys", "more", "quickedit", "emoji", "clipboard")) {
+                onMainChecked { showPanel(panel) }
+                await("panel laid out: $panel") {
+                    body.height > 0 && if (panel == "clipboard") rows().isNotEmpty()
+                    else descendants(body).any { it.width > 0 && it.height > 0 }
+                }
+                instrumentation.waitForIdleSync()
+                lateinit var target: View
+                var x = 1f
+                var y = 1f
+                var before = 0
+                val time = SystemClock.uptimeMillis()
+                onMainChecked {
+                    target = when (panel) {
+                        "keys" -> descendants(body).filterIsInstance<KeyContainer>().first { it.contentDescription == "q" }
+                        "more" -> descendants(body).first { it.contentDescription == "快捷编辑" && it.isClickable }
+                        "quickedit" -> descendants(body).filterIsInstance<TextView>().first { it.text == "全选" }
+                        "clipboard" -> rows().first().textView
+                        else -> descendants(body).filterIsInstance<android.widget.GridView>().first()
+                    }
+                    if (target is android.widget.GridView) {
+                        val cell = (target as android.widget.GridView).getChildAt(0)
+                        x = (cell.left + cell.width / 2).toFloat()
+                        y = (cell.top + cell.height / 2).toFloat()
+                    } else {
+                        x = target.width / 2f
+                        y = target.height / 2f
+                    }
+                    before = recording.requests
+                    val commits = host.committed.size
+                    val actions = host.contextActions
+                    val down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, x, y, 0)
+                    try { target.dispatchTouchEvent(down) } finally { down.recycle() }
+                    assertEquals("$panel must request vibration on DOWN", before + 1, recording.requests)
+                    assertEquals(commits, host.committed.size)
+                    assertEquals(actions, host.contextActions)
+                    assertEquals(panel, field<String>("panel"))
+                    val up = MotionEvent.obtain(time, time + 20, MotionEvent.ACTION_UP, x, y, 0)
+                    try { target.dispatchTouchEvent(up) } finally { up.recycle() }
+                }
+                instrumentation.waitForIdleSync()
+                onMainChecked {
+                    assertEquals("$panel must not vibrate again on click", before + 1, recording.requests)
+                }
+            }
+        } finally {
+            onMainChecked { set("root", originalRoot) }
+        }
+    }
+
     fun testOrdinaryLetterKeyHierarchySurvivesFinishAndActiveRestart() {
         onMainChecked {
             showPanel("keys")
@@ -413,24 +491,39 @@ class HiddenPanelLifecycleTest : InstrumentationTestCase() {
     }
 
     fun testRestoredVisibleContentStillInsertsFullTextAndPreservesIndependentActions() {
-        for (panel in listOf("clipboard", "phrases")) onMainChecked {
-            startEditor()
-            set("active", true)
-            showPanel(panel)
-            service.onFinishInputView(false)
-            startEditor()
-            set("active", true)
-            showPanel(panel)
-            val fullText = rows().first().textView.text.toString()
-            val commitsBefore = host.committed.size
-            rows().first().textView.performClick()
-            assertEquals(commitsBefore + 1, host.committed.size)
-            assertEquals(fullText, host.committed.last())
-            rows().first().pinAction.performClick()
-            assertEquals(commitsBefore + 1, host.committed.size)
-            rows().first().deleteAction.performClick()
-            assertEquals(commitsBefore + 1, host.committed.size)
-            assertEquals(9, if (panel == "clipboard") store.clipboard().size else store.phrases().size)
+        for (panel in listOf("clipboard", "phrases")) {
+            onMainChecked {
+                startEditor()
+                set("active", true)
+                showPanel(panel)
+                service.onFinishInputView(false)
+                startEditor()
+                set("active", true)
+                showPanel(panel)
+            }
+            await("restored content loaded") { rows().isNotEmpty() }
+            var commitsBefore = 0
+            onMainChecked {
+                val fullText = rows().first().textView.text.toString()
+                commitsBefore = host.committed.size
+                rows().first().textView.performClick()
+                assertEquals(commitsBefore + 1, host.committed.size)
+                assertEquals(fullText, host.committed.last())
+                rows().first().pinAction.performClick()
+                assertEquals(commitsBefore + 1, host.committed.size)
+            }
+            await("pin persisted and content rebound") { rows().firstOrNull()?.pinAction?.isSelected == true }
+            onMainChecked {
+                rows().first().deleteAction.performClick()
+                assertEquals(commitsBefore + 1, host.committed.size)
+            }
+            await("delete persisted and content rebound") {
+                rows().isNotEmpty() && (rows().first().parent as ListView).count == 9
+            }
+            onMainChecked {
+                assertEquals(commitsBefore + 1, host.committed.size)
+                assertEquals(9, if (panel == "clipboard") store.clipboard().size else store.phrases().size)
+            }
         }
     }
 

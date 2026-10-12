@@ -2,6 +2,7 @@ package io.secure.keyboard.data
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.util.JsonWriter
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -155,7 +156,10 @@ class ContentStore(context: Context) {
             dir.mkdirs()
             val tmp = File(dir, "content.tmp")
             tmp.outputStream().use { output ->
-                output.write(root.toString().toByteArray(Charsets.UTF_8))
+                // Stream JSON to avoid a second full JSON string and UTF-8 byte array.
+                val writer = JsonWriter(output.bufferedWriter(Charsets.UTF_8))
+                writeJson(writer, root)
+                writer.flush()
                 output.fd.sync()
             }
             if (!tmp.renameTo(file)) {
@@ -177,6 +181,31 @@ class ContentStore(context: Context) {
         }
     }
 
+    private fun writeJson(writer: JsonWriter, value: Any?) {
+        when (value) {
+            null, JSONObject.NULL -> writer.nullValue()
+            is JSONObject -> {
+                writer.beginObject()
+                val keys = value.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    writer.name(key)
+                    writeJson(writer, value.get(key))
+                }
+                writer.endObject()
+            }
+            is JSONArray -> {
+                writer.beginArray()
+                for (index in 0 until value.length()) writeJson(writer, value.get(index))
+                writer.endArray()
+            }
+            is String -> writer.value(value)
+            is Boolean -> writer.value(value)
+            is Number -> writer.value(value)
+            else -> error("Unsupported content value")
+        }
+    }
+
     private fun array(root: JSONObject, key: String) = root.optJSONArray(key) ?: JSONArray()
 
     private fun objects(key: String): List<JSONObject> =
@@ -191,15 +220,47 @@ class ContentStore(context: Context) {
             val root = read()
             val values = array(root, key)
             val list = (0 until values.length()).map { values.getJSONObject(it) }.toMutableList()
+            if (key == "clipboard") deduplicateClipboard(list)
+            val oldCharacters = contentCharacters(list)
+            val oldCount = list.size
             operation(list)
+            if (key == "phrases") require(list.size <= maxOf(MAX_PHRASE_ENTRIES, oldCount)) {
+                "常用语最多保存 10000 条，请删除部分条目后重试。"
+            }
+            // Legacy oversized data stays readable/editable: allow reductions and metadata edits.
+            if (key != "clipboard") {
+                val limit = if (DictionaryKind.entries.any { it.storageKey == key })
+                    MAX_DICTIONARY_CHARACTERS else MAX_PHRASE_CHARACTERS
+                require(contentCharacters(list) <= maxOf(limit.toLong(), oldCharacters)) {
+                    "本类内容已达到字符容量上限，请缩短内容或删除部分条目后重试。此次操作未保存。"
+                }
+            }
             root.put(key, JSONArray(list))
             write(root)
         }
 
+    private fun contentCharacters(rows: List<JSONObject>): Long = rows.sumOf { row ->
+        if (row.has("text")) row.getString("text").length.toLong()
+        else row.getString("word").length.toLong() + row.getString("reading").length
+    }
+
     fun clipboard(): List<ClipboardItem> =
-        objects("clipboard").map {
+        objects("clipboard").toMutableList().apply { deduplicateClipboard(this) }.map {
             ClipboardItem(it.getString("id"), it.getString("text"), it.optBoolean("pinned"))
         }
+
+    /** Exact text only: whitespace and line breaks are meaningful clipboard content. */
+    private fun deduplicateClipboard(list: MutableList<JSONObject>) {
+        val unique = linkedMapOf<String, JSONObject>()
+        for (row in list) {
+            val text = row.getString("text")
+            val previous = unique.remove(text)
+            if (previous?.optBoolean("pinned") == true) row.put("pinned", true)
+            unique[text] = row
+        }
+        list.clear()
+        list.addAll(unique.values)
+    }
 
     /** Display grouping never changes the stored copy order used for bounded eviction. */
     fun clipboardForDisplay(): List<ClipboardItem> =
@@ -210,11 +271,8 @@ class ContentStore(context: Context) {
             list.find { it.optString("id") == id }?.put("pinned", pinned)
         }
 
-    /**
-     * copyToken is ClipDescription.timestamp, NOT a hash of text: repeated copies stay distinct.
-     */
     /** Snapshot when an OS copy event is received, before queueing its storage work. */
-    fun clipboardGeneration(): Long = synchronized(lock) { clipboardEpoch }
+    fun clipboardGeneration(): Long = clipboardEpoch.get()
 
     fun captureClipboard(
         text: String,
@@ -223,13 +281,13 @@ class ContentStore(context: Context) {
         expectedGeneration: Long? = null,
     ): Boolean =
         synchronized(lock) {
-            if (expectedGeneration != null && expectedGeneration != clipboardEpoch)
+            if (expectedGeneration != null && expectedGeneration != clipboardEpoch.get())
                 return@synchronized false
             // A listener callback and an input-view reopen can observe the same OS copy.
-            // Timestamp identity, not text or a time-window debounce, decides duplication.
+            // Timestamp identity suppresses reprocessing; storage separately merges equal text.
             // Some devices expose no timestamp; only actual callbacks are usable there.
             if (
-                text.isEmpty() ||
+                text.isEmpty() || text.length > MAX_CLIPBOARD_ITEM_CHARACTERS ||
                     (copyToken <= 0L && !newCopyEvent) ||
                     (copyToken > 0L && copyToken == settings.lastClipboardToken)
             )
@@ -240,12 +298,19 @@ class ContentStore(context: Context) {
         }
 
     fun addClipboard(text: String) {
+        require(text.length <= MAX_CLIPBOARD_ITEM_CHARACTERS) { "剪贴板单条最多保存 65536 个字符，原文仍可从系统剪贴板粘贴。" }
         if (text.isNotEmpty())
             mutate("clipboard") { list ->
+                val existing = list.find { it.getString("text") == text }
+                if (existing != null) list.remove(existing)
                 // Select a victim from existing history, so a full all-pinned history still
                 // accepts the newest copy. Pins cannot bypass the configured storage bound.
-                while (list.size >= settings.clipboardLimit) evictOldestClipboard(list)
-                list.add(item(text))
+                var characters = list.sumOf { it.getString("text").length.toLong() }
+                while (list.isNotEmpty() && (list.size >= settings.clipboardLimit ||
+                        characters + text.length > MAX_CLIPBOARD_CHARACTERS)) {
+                    characters -= evictOldestClipboard(list).getString("text").length
+                }
+                list.add(existing ?: item(text))
             }
     }
 
@@ -254,20 +319,20 @@ class ContentStore(context: Context) {
             while (list.size > settings.clipboardLimit) evictOldestClipboard(list)
         }
 
-    private fun evictOldestClipboard(list: MutableList<JSONObject>) {
+    private fun evictOldestClipboard(list: MutableList<JSONObject>): JSONObject {
         val oldestUnpinned = list.indexOfFirst { !it.optBoolean("pinned") }
-        list.removeAt(if (oldestUnpinned >= 0) oldestUnpinned else 0)
+        return list.removeAt(if (oldestUnpinned >= 0) oldestUnpinned else 0)
     }
 
     fun deleteClipboard(id: String) =
         synchronized(lock) {
-            clipboardEpoch++
+            clipboardEpoch.incrementAndGet()
             mutate("clipboard") { it.removeAll { row -> row.optString("id") == id } }
         }
 
     fun clearClipboard() =
         synchronized(lock) {
-            clipboardEpoch++
+            clipboardEpoch.incrementAndGet()
             suppressCurrentClipboard()
             removeCategory("clipboard")
         }
@@ -463,7 +528,7 @@ class ContentStore(context: Context) {
 
     fun clearAll() =
         synchronized(lock) {
-            clipboardEpoch++
+            clipboardEpoch.incrementAndGet()
             DictionaryKind.entries.forEach { advanceDictionaryEpoch(it) }
             invalidateDictionarySnapshots()
             suppressCurrentClipboard()
@@ -488,10 +553,15 @@ class ContentStore(context: Context) {
             .put("reading", reading)
 
     companion object {
+        const val MAX_CLIPBOARD_ITEM_CHARACTERS = 65_536
+        const val MAX_CLIPBOARD_CHARACTERS = 1_000_000
+        const val MAX_PHRASE_ENTRIES = 10_000
+        const val MAX_PHRASE_CHARACTERS = 1_000_000
+        const val MAX_DICTIONARY_CHARACTERS = 4_000_000
         const val MAX_DICTIONARY_ENTRIES = 10_000
         private const val DICTIONARY_LIMIT_MESSAGE = "用户词库最多保存 10000 条。此次操作未写入任何词条，请减少导入数量或先删除部分词条。"
         private val lock = Any()
-        private var clipboardEpoch = 0L
+        private val clipboardEpoch = AtomicLong(0L)
         private val dictionaryEpochs = mutableMapOf<DictionaryCacheKey, Long>()
         private val dictionarySnapshots = mutableMapOf<DictionaryCacheKey, DictionarySnapshot>()
         private val dictionaryRevisions = ConcurrentHashMap<DictionaryCacheKey, AtomicLong>()

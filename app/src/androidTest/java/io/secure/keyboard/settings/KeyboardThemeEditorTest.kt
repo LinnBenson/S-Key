@@ -66,6 +66,29 @@ class KeyboardThemeEditorTest : InstrumentationTestCase() {
         } finally { super.tearDown() }
     }
 
+    fun testPreviewTapSelectsRoleButCancelledScrollDoesNotOpenEditor() {
+        open(false)
+        instrumentation.runOnMainSync {
+            val preview = find<io.secure.keyboard.ui.PalettePreview>(activity!!.window.decorView, "theme_interactive_preview")
+            fun touch(action: Int, x: Float, y: Float) {
+                val event = MotionEvent.obtain(0, 1, action, x, y, 0)
+                try { preview.onTouchEvent(event) } finally { event.recycle() }
+            }
+            touch(MotionEvent.ACTION_DOWN, 10f, 10f)
+            touch(MotionEvent.ACTION_CANCEL, 10f, 10f)
+            touch(MotionEvent.ACTION_UP, 10f, 10f)
+            assertNull(currentDialog())
+            touch(MotionEvent.ACTION_DOWN, 10f, 10f)
+            touch(MotionEvent.ACTION_MOVE, 100f, 100f)
+            touch(MotionEvent.ACTION_UP, 10f, 10f)
+            assertNull(currentDialog())
+            touch(MotionEvent.ACTION_DOWN, 10f, 10f)
+            touch(MotionEvent.ACTION_UP, 10f, 10f)
+            assertNotNull(currentDialog())
+            assertEquals("toolbarIcon", preview.roleAt(10f, 10f))
+        }
+    }
+
     fun testDragAndTypedPreviewCancelWithoutAnyPreferenceWrite() {
         open(false)
         val before = prefs.all.toMap()

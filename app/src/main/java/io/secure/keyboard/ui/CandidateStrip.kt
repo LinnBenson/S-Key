@@ -17,10 +17,13 @@ class CandidateStrip(
     private val candidateColor: Int,
     private val selectedColor: Int,
     private val selectionVersion: () -> Int? = { 0 },
+    private val feedback: () -> KeyboardPressFeedback = { KeyboardPressFeedback() },
+    private val textSizeSp: Float = 20f,
+    private val chooseWithFeedback: ((String, () -> Unit) -> Unit)? = null,
     private val choose: (String) -> Unit,
 ) : HorizontalScrollView(context) {
     private val row = LinearLayout(context)
-    private val normalPaint = TextPaint(TextView(context).apply { textSize = 20f }.paint)
+    private val normalPaint = TextPaint(TextView(context).apply { textSize = textSizeSp.coerceIn(12f, 32f) }.paint)
     private var displayed = emptyList<String>()
     private var appendScheduled = false
     private val appendNearEnd = Runnable {
@@ -118,13 +121,14 @@ class CandidateStrip(
                 else
                     TextView(context).apply {
                         KeyboardFeedback.disableAutomatic(this)
-                        textSize = 20f
+                        textSize = textSizeSp.coerceIn(12f, 32f)
                         setTextColor(if (index == 0) selectedColor else candidateColor)
                         gravity = Gravity.CENTER
                         includeFontPadding = false
                         val density = resources.displayMetrics.density
                         val horizontal = (16 * density).roundToInt()
                         setPadding(horizontal, 0, horizontal, (4 * density).roundToInt())
+                        val pressFeedback = feedback()
                         var touched = false
                         var pressedVersion: Int? = null
                         var pressedValue = ""
@@ -137,17 +141,22 @@ class CandidateStrip(
                                     // Loading rows retain their appearance, but cannot begin a tap
                                     // that would become valid only when a new result arrives.
                                     if (pressedVersion == null) return@setOnTouchListener true
+                                    pressFeedback.onTouch(event)
                                 }
                                 MotionEvent.ACTION_UP -> {
                                     if (pressedVersion == null || pressedVersion != selectionVersion() ||
                                         pressedValue != text.toString()) {
+                                        pressFeedback.cancel()
                                         touched = false
                                         view.cancelPendingInputEvents()
                                         view.isPressed = false
                                         return@setOnTouchListener true
                                     }
                                 }
-                                MotionEvent.ACTION_CANCEL -> touched = false
+                                MotionEvent.ACTION_CANCEL -> {
+                                    pressFeedback.onTouch(event)
+                                    touched = false
+                                }
                             }
                             false
                         }
@@ -157,7 +166,11 @@ class CandidateStrip(
                             val valid = !touched || (pressedVersion != null &&
                                 pressedVersion == selectionVersion() && pressedValue == text.toString())
                             touched = false
-                            if (valid) choose(text.toString())
+                            if (valid) {
+                                val value = text.toString()
+                                if (chooseWithFeedback != null) chooseWithFeedback.invoke(value, pressFeedback.takeClick())
+                                else { pressFeedback.click(); choose(value) }
+                            } else pressFeedback.cancel()
                         }
                         row.addView(this, LinearLayout.LayoutParams(-2, -1))
                     }

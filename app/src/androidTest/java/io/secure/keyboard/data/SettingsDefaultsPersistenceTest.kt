@@ -34,6 +34,10 @@ class SettingsDefaultsPersistenceTest : AndroidTestCase() {
         val settings = SettingsStore(sandbox)
         assertTrue(settings.lastChineseLanguage)
         assertFalse(settings.keySound)
+        assertTrue(settings.fuzzyPinyin)
+        assertEquals(setOf("r_l", "en_eng", "in_ing"), settings.fuzzyPairs)
+        assertEquals(20, settings.candidateTextSize)
+        assertEquals(18, settings.expandedCandidateTextSize)
         assertEquals(SettingsStore.LayoutProfile(heightDp = 285), settings.profile(true, false))
         assertEquals(SettingsStore.LayoutProfile(heightDp = 210), settings.profile(true, true))
         assertEquals(
@@ -52,6 +56,18 @@ class SettingsDefaultsPersistenceTest : AndroidTestCase() {
             settings.toolbarPins,
         )
         assertTrue(prefs.all.isEmpty())
+    }
+
+    fun testCandidateSizesPersistIndependentlyAndClampInvalidValues() {
+        val settings = SettingsStore(sandbox)
+        settings.candidateTextSize = 28
+        settings.expandedCandidateTextSize = 24
+        assertEquals(28, SettingsStore(sandbox).candidateTextSize)
+        assertEquals(24, SettingsStore(sandbox).expandedCandidateTextSize)
+        settings.candidateTextSize = 99
+        settings.expandedCandidateTextSize = -1
+        assertEquals(32, SettingsStore(sandbox).candidateTextSize)
+        assertEquals(12, SettingsStore(sandbox).expandedCandidateTextSize)
     }
 
     fun testOnlyExplicitLanguageChoiceIsSavedAndReopened() {

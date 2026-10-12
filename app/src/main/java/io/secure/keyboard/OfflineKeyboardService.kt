@@ -16,6 +16,8 @@ import android.widget.*
 import java.util.concurrent.Executors
 import kotlin.math.*
 import org.json.JSONObject
+import io.secure.keyboard.concurrent.BoundedTaskQueue
+import io.secure.keyboard.data.ClipboardCapturePolicy
 import io.secure.keyboard.concurrent.LatestTaskMailbox
 import io.secure.keyboard.data.ContentStore
 import io.secure.keyboard.data.DictionaryKind
@@ -24,6 +26,9 @@ import io.secure.keyboard.engine.OfflineEngine
 import io.secure.keyboard.engine.CustomCandidateRanking
 import io.secure.keyboard.engine.EnglishCustomCandidateRanking
 import io.secure.keyboard.engine.Source
+import io.secure.keyboard.ui.KeyboardPressFeedback
+import io.secure.keyboard.ui.FloatingResize
+import io.secure.keyboard.ui.KeyboardHaptics
 import io.secure.keyboard.ui.KeyboardFeedback
 import io.secure.keyboard.ui.CandidateStrip
 import io.secure.keyboard.ui.CandidateGrid
@@ -52,6 +57,8 @@ class OfflineKeyboardService : InputMethodService() {
     private lateinit var engine: OfflineEngine
     private val worker = Executors.newSingleThreadExecutor()
     private val candidateQueries = LatestTaskMailbox(worker)
+    private val clipboardWrites = BoundedTaskQueue(worker, 32, 262_144)
+    private val contentQueries = LatestTaskMailbox(worker)
     @Volatile private var destroyed = false
     private val main = Handler(Looper.getMainLooper())
     private var loaded = false
@@ -315,6 +322,8 @@ class OfflineKeyboardService : InputMethodService() {
     override fun onDestroy() {
         destroyed = true
         active = false
+        clipboardWrites.close()
+        contentQueries.close()
         candidateQueries.close()
         voiceSelectionChecks.close()
         releaseFinishedInputPresentation()
@@ -423,8 +432,9 @@ class OfflineKeyboardService : InputMethodService() {
             background = shape(keyBg)
             setPadding(dp(8), dp(8), dp(8), dp(8))
             isClickable = true
+            val feedback = installPressFeedback()
             setOnClickListener {
-                keyFeedback()
+                feedback.click()
                 action()
             }
         }
@@ -441,8 +451,9 @@ class OfflineKeyboardService : InputMethodService() {
             contentDescription = description
             isClickable = true
             isFocusable = true
+            val feedback = installPressFeedback()
             setOnClickListener {
-                keyFeedback()
+                feedback.click()
                 action()
             }
         }
@@ -561,7 +572,10 @@ class OfflineKeyboardService : InputMethodService() {
         candidateStrip =
             CandidateStrip(this, candidateColor, selectedCandidateColor,
                 selectionVersion = { generation.takeIf { candidateGeneration == it } },
-            ) { choose(it, fromCandidateTap = true) }
+                feedback = { pressFeedback() },
+                textSizeSp = settings.candidateTextSize.toFloat(),
+                chooseWithFeedback = { value, feedback -> choose(value, feedback) },
+            ) { choose(it) }
         candidateGroup.addView(candidateStrip, LinearLayout.LayoutParams(0, -1, 1f))
         candidateGroup.addView(
             icon("clear", "取消待输入内容") {
@@ -605,7 +619,8 @@ class OfflineKeyboardService : InputMethodService() {
         }
         // Keep the complete top region fixed, so starting/canceling composition never moves keys.
         // Sum the separately rounded dimensions to preserve exact pixel equality at every density.
-        val headerHeight = dp(40) + if (showCode) 0 else dp(18)
+        val candidateHeight = (settings.candidateTextSize * resources.displayMetrics.scaledDensity * 1.4f).roundToInt() + dp(4)
+        val headerHeight = maxOf(dp(40), candidateHeight) + if (showCode) 0 else dp(18)
         if (header.layoutParams.height != headerHeight)
             header.layoutParams = header.layoutParams.apply { height = headerHeight }
         val visibleCandidates = if (secret) emptyList() else candidateTexts
@@ -671,10 +686,13 @@ class OfflineKeyboardService : InputMethodService() {
 
     private fun renderCandidateGrid() {
         val grid = candidateGrid ?: CandidateGrid(this, candidateColor, selectedCandidateColor, keyBg,
+            feedback = { pressFeedback() },
+            textSizeSp = settings.expandedCandidateTextSize.toFloat(),
+            chooseWithFeedback = { value, feedback -> choose(value, feedback) },
             selectionVersion = {
                 generation.takeIf { candidatesExpanded && showsCandidateMode() && candidateGeneration == it }
             },
-        ) { choose(it, fromCandidateTap = true) }.also { candidateGrid = it }
+        ) { choose(it) }.also { candidateGrid = it }
         grid.updateCandidates(candidateTexts)
         body.addView(grid, FrameLayout.LayoutParams(-1, -1))
     }
@@ -703,6 +721,7 @@ class OfflineKeyboardService : InputMethodService() {
         // Native posted clicks/long presses must be revoked while their views are still in
         // the root. cancelTransient separately revokes our key timers and voice session.
         if (::root.isInitialized) root.cancelPendingInputEvents()
+        contentQueries.clear()
         val releasePanel = panel != "keys"
         // Reset before cancelTransient: held-voice cancellation must not rebuild an obsolete
         // body before a new editor's language/privacy policy has been resolved.
@@ -862,9 +881,9 @@ class OfflineKeyboardService : InputMethodService() {
         }
     }
 
-    private fun choose(value: String): Boolean = choose(value, fromCandidateTap = false)
+    private fun choose(value: String): Boolean = choose(value) {}
 
-    private fun choose(value: String, fromCandidateTap: Boolean): Boolean {
+    private fun choose(value: String, feedback: () -> Unit): Boolean {
         val ic = currentInputConnection ?: return false
         val kind = if (chinese) DictionaryKind.CHINESE else DictionaryKind.ENGLISH
         val dictionaryRevision = candidateDictionaryRevision
@@ -879,9 +898,7 @@ class OfflineKeyboardService : InputMethodService() {
         ) return false
         if (chinese) {
             if (candidateQuery != code || code.isEmpty()) return false
-            // The tap is valid now. Submit feedback before the host attempt, even if the
-            // host subsequently rejects it; stale taps returned above without any effect.
-            if (fromCandidateTap) keyFeedback()
+            feedback()
             if (!ic.commitText(value, 1)) return false
             clearComposition()
         } else {
@@ -910,13 +927,13 @@ class OfflineKeyboardService : InputMethodService() {
                     )
                         return@post
                     // A deletion/edit can occur after the tap and during either host-prefix read.
-                    // Validate the same language's revision again before feedback or host mutation.
+                    // Validate the same language's revision again before host mutation.
                     if (dictionaryRevision != content.dictionaryRevision(kind)) {
                         clearCandidates()
                         renderHeader()
                         return@post
                     }
-                    if (fromCandidateTap) keyFeedback()
+                    feedback()
                     ic.beginBatchEdit()
                     try {
                         if (dictionaryRevision != content.dictionaryRevision(kind)) {
@@ -1140,12 +1157,25 @@ class OfflineKeyboardService : InputMethodService() {
         if (!sendDefaultEditorAction(true)) commit("\n")
     }
 
-    private fun keyFeedback() {
+    private fun pressFeedback() = KeyboardPressFeedback(
+        onPress = {
+            if (::root.isInitialized)
+                KeyboardHaptics.perform(root, settings.vibration, settings.vibrationStrength)
+        },
+        onClick = { vibrate -> keyFeedback(vibrate) },
+    )
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility") // Return false: View owns click and accessibility dispatch.
+    private fun View.installPressFeedback(): KeyboardPressFeedback = pressFeedback().also { feedback ->
+        setOnTouchListener { _, event -> feedback.onTouch(event); false }
+    }
+
+    private fun keyFeedback(vibrate: Boolean = true) {
         if (::root.isInitialized)
             KeyboardFeedback.perform(
                 root,
                 settings.keySound,
-                settings.vibration,
+                settings.vibration && vibrate,
                 settings.vibrationStrength,
             )
     }
@@ -1281,6 +1311,7 @@ class OfflineKeyboardService : InputMethodService() {
             var sx = 0f
             var sy = 0f
             var original = profile
+            var resizeStart = FloatingResize.Bounds(0, 0, 0, 0)
             var validGesture = false
             view.setOnTouchListener { _, e ->
                 when (e.actionMasked) {
@@ -1290,6 +1321,11 @@ class OfflineKeyboardService : InputMethodService() {
                         sx = e.rawX
                         sy = e.rawY
                         original = profile
+                        val bounds = box.layoutParams as FrameLayout.LayoutParams
+                        resizeStart = FloatingResize.Bounds(
+                            pxToDp(bounds.width.toFloat()), pxToDp(bounds.height.toFloat()),
+                            pxToDp(bounds.leftMargin.toFloat()), pxToDp(bounds.bottomMargin.toFloat()),
+                        )
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
@@ -1299,16 +1335,20 @@ class OfflineKeyboardService : InputMethodService() {
                         val dy = pxToDp(e.rawY - sy)
                         val maxWidth = resources.configuration.screenWidthDp
                         profile =
-                            if (resizing)
-                                original.copy(
-                                    floatingWidthDp =
-                                        (original.floatingWidthDp + dx).coerceIn(
-                                            220.coerceAtMost(maxWidth),
-                                            maxWidth,
-                                        ),
-                                    floatingHeightDp =
-                                        (original.floatingHeightDp - dy).coerceIn(200, 700),
+                            if (resizing) {
+                                val bounds = FloatingResize.resize(
+                                    resizeStart, dx, dy,
+                                    pxToDp(resources.displayMetrics.widthPixels.toFloat()),
+                                    minOf(700, pxToDp((resources.displayMetrics.heightPixels * 3 / 4).toFloat())),
+                                    pxToDp((resources.displayMetrics.heightPixels / 3).toFloat()),
                                 )
+                                original.copy(
+                                    floatingWidthDp = bounds.width,
+                                    floatingHeightDp = bounds.height,
+                                    floatingXDp = bounds.left,
+                                    floatingYDp = bounds.bottom,
+                                )
+                            }
                             else
                                 original.copy(
                                     floatingXDp =
@@ -1480,11 +1520,13 @@ class OfflineKeyboardService : InputMethodService() {
             }
         container.isFocusable = true
         KeyboardFeedback.disableAutomatic(container)
+        val feedback = pressFeedback()
         var touchClickTime = 0L
         container.setOnClickListener {
+            val fromTouch = touchClickTime != 0L
             keyClickTime = if (touchClickTime != 0L) touchClickTime else SystemClock.uptimeMillis()
             touchClickTime = 0L
-            keyFeedback()
+            keyFeedback(vibrate = !fromTouch)
             action()
         }
         val combinedPunctuation = text in listOf("，。", ". ,")
@@ -1582,6 +1624,7 @@ class OfflineKeyboardService : InputMethodService() {
             }
         }
         val singleTouch = View.OnTouchListener { _, e ->
+            feedback.onTouch(e)
             if (!e.x.isFinite() || !e.y.isFinite() || !e.rawX.isFinite() || !e.rawY.isFinite()) {
                 if (e.actionMasked == MotionEvent.ACTION_MOVE) {
                     if (isSpace) {
@@ -1719,6 +1762,7 @@ class OfflineKeyboardService : InputMethodService() {
             },
             horizontalCancelDistance = dp(70).toFloat(),
             verticalCancelSlop = dp(60).toFloat(),
+            onAdditionalPress = { feedback.press() },
         ))
         return container
     }
@@ -1798,8 +1842,9 @@ class OfflineKeyboardService : InputMethodService() {
                     background = shape(keyBg)
                     setPadding(dp(4), dp(8), dp(4), dp(8))
                     KeyboardFeedback.disableAutomatic(this)
+                    val feedback = installPressFeedback()
                     setOnClickListener {
-                        keyFeedback()
+                        feedback.click()
                         openTool(id)
                     }
                 }
@@ -1811,7 +1856,7 @@ class OfflineKeyboardService : InputMethodService() {
                     width = 0
                     height = dp(84)
                     columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                    setMargins(dp(3), dp(3), dp(3), dp(3))
+                    setMargins(dp(5), dp(5), dp(5), dp(5))
                 },
             )
         }
@@ -1873,7 +1918,7 @@ class OfflineKeyboardService : InputMethodService() {
                 row.addView(
                     v,
                     LinearLayout.LayoutParams(0, -1, 1f).apply {
-                        setMargins(dp(3), dp(3), dp(3), dp(3))
+                        setMargins(dp(5), dp(5), dp(5), dp(5))
                     },
                 )
             }
@@ -1896,12 +1941,11 @@ class OfflineKeyboardService : InputMethodService() {
         if (!::clips.isInitialized || (!active && !newCopyEvent) || secret) return
         try {
             val clip = clips.primaryClip ?: return
-            if (clip.itemCount == 0) return
-            val text = clip.getItemAt(0).text?.toString() ?: return
+            val text = ClipboardCapturePolicy.textForHistory(clip) ?: return
             val timestamp = clip.description.timestamp
             val epoch = content.clipboardGeneration()
             if (worker.isShutdown) return
-            worker.execute {
+            clipboardWrites.submit(text.length) {
                 try {
                     val saved = content.captureClipboard(text, timestamp, newCopyEvent, epoch)
                     if (saved) main.post { if (active && panel == "clipboard") renderBody() }
@@ -1952,64 +1996,73 @@ class OfflineKeyboardService : InputMethodService() {
             })
             return
         }
-        val scroll = ScrollView(this)
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scroll.addView(list)
-        column.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        fun addEntry(id: String, text: String, pinned: Boolean) {
-            fun changeContent(action: () -> Unit) {
-                keyFeedback()
-                val changed = readContent(false) {
-                    action()
-                    true
-                }
-                if (changed) renderBody()
+        val loading = label("正在读取…", 14f, muted)
+        column.addView(loading)
+        val expectedPanel = panel
+        fun current() = !destroyed && active && panel == expectedPanel &&
+            body.indexOfChild(column) >= 0 && !(isClipboard && secret)
+        // Parsing and the shared storage lock never block the input/main thread.
+        contentQueries.submit {
+            val entries = readContent(emptyList<ContentStore.ClipboardItem>()) {
+                if (isClipboard) content.clipboardForDisplay()
+                else content.phrasesForDisplay().map { ContentStore.ClipboardItem(it.id, it.text, it.pinned) }
             }
-            list.addView(
-                ContentEntryRow(
-                    this,
-                    text,
-                    pinned,
-                    textColor = fg,
-                    surfaceColor = keyBg,
-                    actionColor = toolbarColor,
-                    pinnedColor = accent,
-                    deleteColor = if (dark) 0xFFFF7B83.toInt() else 0xFFC94A54.toInt(),
-                    categoryLabel = if (isClipboard) "剪贴板记录" else "常用语",
-                    onInsert = {
-                        keyFeedback()
-                        commit(it)
-                    },
-                    onPin = { newPinned ->
-                        changeContent {
-                            if (isClipboard) content.setClipboardPinned(id, newPinned)
-                            else content.setPhrasePinned(id, newPinned)
-                        }
-                    },
-                    onDelete = {
-                        changeContent {
-                            if (isClipboard) content.deleteClipboard(id)
-                            else content.deletePhrase(id)
-                        }
-                    },
-                ),
-                LinearLayout.LayoutParams(-1, dp(52)).apply {
-                    setMargins(dp(4), dp(3), dp(4), dp(3))
-                },
-            )
-        }
-        if (isClipboard)
-            readContent(emptyList<ContentStore.ClipboardItem>()) { content.clipboardForDisplay() }
-                .forEach { addEntry(it.id, it.text, it.pinned) }
-        else
-            readContent(emptyList<ContentStore.Phrase>()) { content.phrasesForDisplay() }
-                .forEach { addEntry(it.id, it.text, it.pinned) }
-        if (list.childCount == 0)
-            list.addView(
-                label(if (isClipboard) "复制的文字会保存在这里" else "在设置中添加常用语", 14f, muted).apply {
-                    setPadding(dp(16), dp(24), dp(16), dp(24))
+            main.post {
+                if (!current()) return@post
+                column.removeAllViews()
+                if (entries.isEmpty()) {
+                    column.addView(label(if (isClipboard) "复制的文字会保存在这里" else "在设置中添加常用语", 14f, muted))
+                    return@post
                 }
-            )
+                var changing = false
+                fun changeContent(action: () -> Unit) {
+                    if (!current() || changing) return
+                    changing = true
+                    column.cancelPendingInputEvents()
+                    column.removeAllViews()
+                    column.addView(label("正在保存…", 14f, muted))
+                    worker.execute {
+                        readContent(Unit) { action() }
+                        main.post { if (current()) renderBody() }
+                    }
+                }
+                val list = ListView(this).apply {
+                    divider = null
+                    dividerHeight = dp(6)
+                    setPadding(dp(10), 0, dp(10), 0)
+                    clipToPadding = true
+                }
+                list.adapter = object : BaseAdapter() {
+                    override fun getCount() = entries.size
+                    override fun getItem(position: Int) = entries[position]
+                    override fun getItemId(position: Int) = position.toLong()
+                    override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                        val entry = entries[position]
+                        val insert: (String) -> Unit = { if (current() && !changing) { commit(it) } }
+                        val pin: (Boolean) -> Unit = { pinned -> changeContent {
+                            if (isClipboard) content.setClipboardPinned(entry.id, pinned)
+                            else content.setPhrasePinned(entry.id, pinned)
+                        } }
+                        val delete: () -> Unit = { changeContent {
+                            if (isClipboard) content.deleteClipboard(entry.id)
+                            else content.deletePhrase(entry.id)
+                        } }
+                        return (convertView as? ContentEntryRow)?.apply {
+                            bind(entry.text, entry.pinned, insert, pin, delete)
+                        } ?: ContentEntryRow(
+                            this@OfflineKeyboardService, entry.text, entry.pinned,
+                            textColor = fg, surfaceColor = keyBg, actionColor = toolbarColor,
+                            pinnedColor = accent,
+                            deleteColor = if (dark) 0xFFFF7B83.toInt() else 0xFFC94A54.toInt(),
+                            categoryLabel = if (isClipboard) "剪贴板记录" else "常用语",
+                            onInsert = insert, onPin = pin, onDelete = delete,
+                            feedback = { pressFeedback() },
+                        ).apply { layoutParams = AbsListView.LayoutParams(-1, dp(52)) }
+                    }
+                }
+                column.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
+            }
+        }
     }
 
     private fun renderEmoji() {
@@ -2087,8 +2140,9 @@ class OfflineKeyboardService : InputMethodService() {
                                 "旗帜",
                             )
                             .getOrElse(i) { g.first }
+                    val feedback = installPressFeedback()
                     setOnClickListener {
-                        keyFeedback()
+                        feedback.click()
                         emojiCategory = i
                         renderBody()
                     }
@@ -2121,9 +2175,10 @@ class OfflineKeyboardService : InputMethodService() {
                             })
                         .apply { text = items[position] }
             }
+        val emojiFeedback = pressFeedback()
         grid.setOnItemClickListener { _, _, position, _ ->
             val emoji = items.getOrNull(position) ?: return@setOnItemClickListener
-            keyFeedback()
+            emojiFeedback.click()
             commit(emoji)
             readContent(Unit) { content.useEmoji(emoji) }
         }
@@ -2131,8 +2186,11 @@ class OfflineKeyboardService : InputMethodService() {
         var startY = 0f
         var swiping = false
         grid.setOnTouchListener { _, e ->
+            if (e.actionMasked == MotionEvent.ACTION_CANCEL) emojiFeedback.onTouch(e)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    if (grid.pointToPosition(e.x.toInt(), e.y.toInt()) != AdapterView.INVALID_POSITION)
+                        emojiFeedback.onTouch(e)
                     down = e.x
                     startY = e.y
                     swiping = false
@@ -2144,6 +2202,7 @@ class OfflineKeyboardService : InputMethodService() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (swiping) {
+                        emojiFeedback.cancel()
                         emojiCategory =
                             (emojiCategory + if (e.x < down) 1 else -1).coerceIn(
                                 0,

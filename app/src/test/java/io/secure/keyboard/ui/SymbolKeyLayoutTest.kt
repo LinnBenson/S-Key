@@ -44,10 +44,10 @@ class SymbolKeyLayoutTest {
     }
 
     @Test
-    fun shortRowsKeepEqualSideGapsAndTenKeyWidths() {
+    fun thirdRowsUseLetterRowWeightsWithoutExtraGaps() {
         assertEquals(0f, SymbolKeyLayout.sideSpacerWeight(10, false), 0.0001f)
         val gap = SymbolKeyLayout.sideSpacerWeight(7, true)
-        assertEquals(0.2f, gap, 0.0001f)
-        assertEquals(10f, 1.3f + gap + 7f + gap + 1.3f, 0.0001f)
+        assertEquals(0f, gap, 0.0001f)
+        assertEquals(9.6f, 1.3f + gap + 7f + gap + 1.3f, 0.0001f)
     }
 }

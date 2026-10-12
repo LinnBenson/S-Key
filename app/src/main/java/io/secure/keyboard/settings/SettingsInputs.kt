@@ -28,9 +28,9 @@ internal object SettingsInputs {
         setPadding(SettingsPalette.dp(context, 12), SettingsPalette.dp(context, 12), SettingsPalette.dp(context, 12), SettingsPalette.dp(context, 12))
         backgroundTintList = null
         background = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_activated), SettingsPalette.shape(context, SettingsPalette.surface, 12, SettingsPalette.error))
-            addState(intArrayOf(android.R.attr.state_focused), SettingsPalette.shape(context, SettingsPalette.surface, 12, SettingsPalette.accent))
-            addState(intArrayOf(), SettingsPalette.shape(context, SettingsPalette.surface, 12, SettingsPalette.outline))
+            addState(intArrayOf(android.R.attr.state_activated), SettingsPalette.shape(context, SettingsPalette.functional, 16, SettingsPalette.error))
+            addState(intArrayOf(android.R.attr.state_focused), SettingsPalette.shape(context, SettingsPalette.functional, 16, SettingsPalette.accent))
+            addState(intArrayOf(), SettingsPalette.shape(context, SettingsPalette.functional, 16))
         }
         if (Build.VERSION.SDK_INT >= 29) {
             textCursorDrawable?.mutate()?.setTint(SettingsPalette.accent)

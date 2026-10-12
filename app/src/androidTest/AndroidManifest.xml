@@ -1,1 +1,8 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application><uses-library android:name="android.test.runner" android:required="false"/></application></manifest>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:versionCode="1"
+    android:versionName="0.1.8-regression">
+    <!-- BlueStacks Air's installation callback crashes when versionName is absent. -->
+    <application android:label="S Key regression tests" android:icon="@android:drawable/ic_menu_info_details">
+        <uses-library android:name="android.test.runner" android:required="false"/>
+    </application>
+</manifest>

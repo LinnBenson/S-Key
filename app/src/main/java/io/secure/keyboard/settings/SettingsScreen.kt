@@ -35,7 +35,7 @@ internal open class SettingsScreen(private val activity: Activity) {
     private var restoreListener: ViewTreeObserver.OnPreDrawListener? = null
 
     fun dp(value: Int) = SettingsPalette.dp(activity, value)
-    fun shape(color: Int, radius: Int = 16) = SettingsPalette.shape(activity, color, radius)
+    fun shape(color: Int, radius: Int = 24) = SettingsPalette.shape(activity, color, radius)
     fun column() = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
 
     @Suppress("DEPRECATION")
@@ -52,24 +52,28 @@ internal open class SettingsScreen(private val activity: Activity) {
         else activity.window.decorView.systemUiVisibility = activity.window.decorView.systemUiVisibility or
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-        val inset = if (activity.resources.configuration.screenWidthDp >= 600) 24 else 16
+        val inset = if (activity.resources.configuration.screenWidthDp >= 600) 24 else 22
         val root = column().apply {
             tag = "settings_shell"
             setBackgroundColor(this@SettingsScreen.background)
             if (Build.VERSION.SDK_INT >= 29) isForceDarkAllowed = false
         }
         if (title != null || backLabel != null) {
-            val header = column().apply { setPadding(dp(inset), dp(8), dp(inset), dp(8)) }
+            val header = column().apply { setPadding(dp(inset), dp(10), dp(inset), dp(12)) }
             backLabel?.let { label ->
-                button(header, label) { onBack?.invoke() }.apply {
+                button(header, "‹  返回") { onBack?.invoke() }.apply {
                     tag = "settings_back"
                     gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                    background = SettingsPalette.buttonBackground(activity)
+                    setPadding(dp(14), 0, dp(14), 0)
+                    minHeight = dp(44); minimumHeight = dp(44)
+                    textSize = 13f
                     layoutParams = LinearLayout.LayoutParams(-2, -2)
                     contentDescription = label
                 }
             }
             title?.let { value ->
-                text(header, value, 26f, true).apply {
+                text(header, value, 24f, true).apply {
                     tag = "settings_title"
                     if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
                 }
@@ -139,6 +143,7 @@ internal open class SettingsScreen(private val activity: Activity) {
         TextView(activity).apply {
             text = value
             textSize = size
+            includeFontPadding = false
             setTextColor(if (strong) ink else muted)
             if (strong) setTypeface(typeface, Typeface.BOLD)
             setLineSpacing(dp(3).toFloat(), 1f)
@@ -148,7 +153,7 @@ internal open class SettingsScreen(private val activity: Activity) {
 
     fun card(parent: LinearLayout, color: Int = surface): LinearLayout = column().apply {
         background = shape(color)
-        setPadding(dp(16), dp(12), dp(16), dp(12))
+        setPadding(dp(18), dp(16), dp(18), dp(16))
         parent.addView(this, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(8), 0, dp(8)) })
     }
 

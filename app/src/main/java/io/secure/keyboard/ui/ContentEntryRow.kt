@@ -19,15 +19,20 @@ class ContentEntryRow(
     pinned: Boolean,
     textColor: Int,
     surfaceColor: Int,
-    actionColor: Int,
-    pinnedColor: Int,
+    private val actionColor: Int,
+    private val pinnedColor: Int,
     deleteColor: Int,
-    categoryLabel: String,
+    private val categoryLabel: String,
     onInsert: (String) -> Unit,
     onPin: (Boolean) -> Unit,
     onDelete: () -> Unit,
+    private val feedback: () -> KeyboardPressFeedback = { KeyboardPressFeedback() },
 ) : LinearLayout(context) {
-    private val fullText = text
+    private var fullText = text
+    private var insertAction = onInsert
+    private var pinCallback = onPin
+    private var deleteCallback = onDelete
+    private var isPinned = pinned
     val textView: TextView
     val pinAction: View
     val deleteAction: View
@@ -61,7 +66,8 @@ class ContentEntryRow(
             isFocusable = true
             defaultFocusHighlightEnabled = false
             background = ripple(actionColor)
-            setOnClickListener { onInsert(fullText) }
+            val press = installFeedback(this)
+            setOnClickListener { press.click(); insertAction(fullText) }
         }
         addView(textView, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
         pinAction = ActionTarget(
@@ -71,13 +77,40 @@ class ContentEntryRow(
             if (pinned) pinnedColor else actionColor,
         ).apply {
             isSelected = pinned
-            setOnClickListener { onPin(!pinned) }
+            val press = installFeedback(this)
+            setOnClickListener { press.click(); pinCallback(!isPinned) }
         }
         deleteAction = ActionTarget(context, "delete", "删除$categoryLabel", deleteColor).apply {
-            setOnClickListener { onDelete() }
+            val press = installFeedback(this)
+            setOnClickListener { press.click(); deleteCallback() }
         }
         addView(pinAction, LayoutParams(dp(48), dp(48)))
         addView(deleteAction, LayoutParams(dp(48), dp(48)))
+    }
+
+    /** List recycling replaces callbacks as well as labels; no former entry stays captured. */
+    fun bind(text: String, pinned: Boolean, onInsert: (String) -> Unit,
+             onPin: (Boolean) -> Unit, onDelete: () -> Unit) {
+        fullText = text
+        textView.text = text
+        insertAction = onInsert
+        pinCallback = onPin
+        deleteCallback = onDelete
+        isPinned = pinned
+        pinAction.isSelected = pinned
+        pinAction.contentDescription = if (pinned) "取消置顶$categoryLabel" else "置顶$categoryLabel"
+        val target = pinAction as FrameLayout
+        val color = if (pinned) pinnedColor else actionColor
+        target.background = ripple(color)
+        target.removeAllViews()
+        target.addView(ToolIcon(context, if (pinned) "unpin" else "pin", color).apply {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, FrameLayout.LayoutParams(-1, -1))
+    }
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility") // View still dispatches normal and accessibility clicks.
+    private fun installFeedback(view: View) = feedback().also { press ->
+        view.setOnTouchListener { _, event -> press.onTouch(event); false }
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
