@@ -409,7 +409,6 @@ class SettingsActivity : Activity() {
     private fun home() {
         intent.removeExtra("page")
         page("home", "偏好设置")
-        label("把常用的设置，放在容易找到的地方。", 12f)
         ui.card(body).also {
             ui.text(it, "安心输入，只在本机", 17f, true)
             ui.text(it, "不学习输入内容，不保存输入历史。", 12f)
@@ -460,7 +459,6 @@ class SettingsActivity : Activity() {
 
     private fun behavior() {
         page("behavior", "外观与按键")
-        label("开关与滑块即时保存，配色单独确认。", 12f)
         section("键盘主题")
         val modes = listOf("system", "light", "dark")
         ui.segmented(target(), listOf("跟随系统", "浅色", "深色"), modes.indexOf(config.theme).coerceAtLeast(0)) {
@@ -484,7 +482,6 @@ class SettingsActivity : Activity() {
 
     private fun feedback() {
         page("feedback", "按键反馈与手势")
-        label("熟悉的触感，按你的习惯调整。", 12f)
         section("按键与手势")
         toggle("按键声音", config.keySound) { config.keySound = it }
         label("默认关闭。开启后使用系统键盘音效，遵循系统触摸音效、静音与系统音量设置。")
@@ -498,7 +495,6 @@ class SettingsActivity : Activity() {
 
     private fun inputPreferences() {
         page("input", "输入与补全")
-        label("文字候选优先，表情始终手动选择。", 12f)
         section("输入规则")
         toggle("四码自动上屏", config.fourCodeAutoCommit) { config.fourCodeAutoCommit = it }
         toggle("英文补全", config.englishCompletion) { config.englishCompletion = it }
@@ -700,7 +696,6 @@ class SettingsActivity : Activity() {
         page(route, name)
         currentDictionaryKind = kind
         intent.putExtra("page", route)
-        label("你的表达，按原样保存。", 12f)
         section("管理词条")
         button("添加词条", true) { editDictionary(null, kind) }
         val transferActions = compactActions(target())

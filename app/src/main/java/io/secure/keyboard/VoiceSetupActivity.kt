@@ -39,7 +39,6 @@ class VoiceSetupActivity : Activity() {
         title = "离线普通话语音"
         ui = SettingsScreen(this)
         val layout = ui.root("离线普通话语音", "‹ 返回") { finish() }
-        ui.text(layout, "一次安装，随时离线使用", 15f)
         ui.card(layout, ui.tint).also {
             ui.text(it, "你的声音，留在设备内", 17f, true)
             ui.text(it, "不保存录音、不联网、不记录转写内容。麦克风数据仅在内存中短暂处理。")
