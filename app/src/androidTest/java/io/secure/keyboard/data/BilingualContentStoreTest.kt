@@ -48,7 +48,7 @@ class BilingualContentStoreTest : AndroidTestCase() {
         store.addPhrase("保留常用语")
         store.saveAiPreset(null, "邮件", "润色邮件")
         val preset = store.aiPresets().single()
-        for ((name, prompt) in listOf("邮件" to "重复", "" to "提示词", "长".repeat(41) to "提示词", "名称" to "", "名称" to "长".repeat(1001))) {
+        for ((name, prompt) in listOf("邮件" to "重复", "" to "提示词", "长".repeat(41) to "提示词", "名称" to "", "名称" to "长".repeat(2001))) {
             try { store.saveAiPreset(null, name, prompt); fail("Invalid preset accepted") } catch (_: IllegalArgumentException) {}
         }
         assertEquals(listOf(preset), store.aiPresets())

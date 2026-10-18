@@ -1061,7 +1061,7 @@ class OfflineKeyboardService : InputMethodService() {
                 aiFollowup += value; updateAiPreview(); return true
             }
             if (aiMode && aiEditingInstruction) {
-                if (aiCustom.length + value.length > 1000) { toast("指令最多1000字符"); return false }
+                if (aiCustom.length + value.length > 2000) { toast("指令最多2000字符"); return false }
                 aiCustom += value; translation.invalidate(); updateTranslationPreview(); return true
             }
             val accepted = translation.edit(translation.text + value)
@@ -1548,7 +1548,7 @@ class OfflineKeyboardService : InputMethodService() {
         area.addView(footer,LinearLayout.LayoutParams(-1,unit))
         val left=FrameLayout(this); footer.addView(left,LinearLayout.LayoutParams(0,-1,1f))
         left.addView(compact("清空") {
-            stopAiRequest(); clearAiConversation(); clearComposition(); translation.edit(""); aiCustom=""; aiSelectionTarget.revoke(); renderBody()
+            stopAiRequest(); clearAiConversation(); clearComposition(); translation.edit(""); aiEditingInstruction=false; aiSelectionTarget.revoke(); renderBody()
         },FrameLayout.LayoutParams(dp(46),-1))
         footer.addView(label("Grok · AI 助手",10f,muted),LinearLayout.LayoutParams(0,-1,1f))
         val right=LinearLayout(this); footer.addView(right,LinearLayout.LayoutParams(0,-1,1f))

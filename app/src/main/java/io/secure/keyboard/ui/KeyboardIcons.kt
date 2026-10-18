@@ -26,16 +26,16 @@ object KeyboardIcons {
         "recent" -> R.drawable.ic_miuix_recent
         "drag_handle" -> R.drawable.ic_keyboard_drag_handle
         "resize" -> R.drawable.ic_keyboard_resize_diagonal
-        "quickedit" -> R.drawable.ic_keyboard_edit_note
+        "quickedit" -> R.drawable.ic_miuix_edit
         "arrow_up" -> R.drawable.ic_keyboard_arrow_upward
         "arrow_down" -> R.drawable.ic_keyboard_arrow_downward
         "arrow_left" -> R.drawable.ic_keyboard_arrow_back
         "arrow_right" -> R.drawable.ic_keyboard_arrow_forward
         "undo" -> R.drawable.ic_miuix_undo
         "layout" -> R.drawable.ic_keyboard_open_in_full
-        "floating" -> R.drawable.ic_keyboard_floating_enter
-        "floating_enter" -> R.drawable.ic_keyboard_floating_enter
-        "floating_exit" -> R.drawable.ic_keyboard_floating_exit
+        "floating" -> R.drawable.ic_miuix_sidebar
+        "floating_enter" -> R.drawable.ic_miuix_sidebar
+        "floating_exit" -> R.drawable.ic_miuix_horizontalsplit
         "split" -> R.drawable.ic_keyboard_split_keyboard
         "dictionary" -> R.drawable.ic_keyboard_menu_book
         "english_dictionary" -> R.drawable.ic_keyboard_dictionary

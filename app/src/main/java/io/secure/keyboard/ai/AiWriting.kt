@@ -8,11 +8,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.HttpsURLConnection
 
 internal object AiWriting {
-    val tasks = linkedMapOf("polish" to "润色", "correct" to "纠错", "tone" to "语气", "translate" to "翻译", "custom" to "自定义")
+    // Keep the persisted task ID so existing selections move to expansion.
+    val tasks = linkedMapOf("polish" to "润色", "correct" to "扩写", "tone" to "语气", "translate" to "翻译", "custom" to "自定义")
     val tones = listOf("自然", "正式", "日常", "礼貌", "简洁", "生气", "粗鲁")
     fun instruction(task: String, tone: String, target: String, custom: String): String = when(task) {
         "polish" -> "在保留原意和事实的前提下润色文字，使其自然流畅。保留原文语言。"
-        "correct" -> "只修正错别字、语法和标点，尽量少改动，保留原文语言和原意。"
+        "correct" -> "在保留原文语言、原意、事实和语气的前提下扩写文字，围绕已有信息补充解释、衔接和细节，使表达更完整、更具体。不要只是纠错或润色，不要机械重复，不要编造原文未提供的人物、数据、经历、承诺或其他事实。只输出扩写后的正文。"
         "tone" -> "将文字调整为${tone}的语气，保留原意和事实，不编造信息。保留原文语言。"
         "translate" -> "将文字翻译成${target}，语气${tone}，保留原意、人名和格式。"
         "custom" -> custom.trim().also { require(it.isNotBlank()) { "请先输入自定义指令" } }

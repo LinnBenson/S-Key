@@ -589,7 +589,7 @@ open class SettingsActivity : ComponentActivity() {
                     model.edit = edit.copy(first = it)
                 }
                 Spacer(Modifier.height(4.dp))
-                AiEditorField("提示词", "描述你希望 AI 如何处理原文…", edit.second, 1000, true) {
+                AiEditorField("提示词", "描述你希望 AI 如何处理原文…", edit.second, 2000, true) {
                     model.edit = edit.copy(second = it)
                 }
                 Spacer(Modifier.height(8.dp))
@@ -615,10 +615,10 @@ open class SettingsActivity : ComponentActivity() {
             TextField(value = edit.first, onValueChange = { if (!customAi || it.text.length <= 40) model.edit = edit.copy(first = it) },
                 label = if (customAi) "名称，例如：邮件润色" else if (edit.category == "phrases") "常用语" else "词语",
                 singleLine = customAi, modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp))
-            if (edit.category != "phrases") TextField(value = edit.second, onValueChange = { if (!customAi || it.text.length <= 1000) model.edit = edit.copy(second = it) },
+            if (edit.category != "phrases") TextField(value = edit.second, onValueChange = { if (!customAi || it.text.length <= 2000) model.edit = edit.copy(second = it) },
                 label = if (customAi) "自定义提示词" else "拼音 / 编码",
                 modifier = if (customAi) Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 260.dp) else Modifier.fillMaxWidth(), singleLine = !customAi)
-            if (customAi) Info("${edit.first.text.length}/40 名称 · ${edit.second.text.length}/1000 提示词")
+            if (customAi) Info("${edit.first.text.length}/40 名称 · ${edit.second.text.length}/2000 提示词")
             Action("保存", !model.busy && (!customAi || (edit.first.text.isNotBlank() && edit.second.text.isNotBlank()))) { model.saveEdit() }
             Action("取消", !model.busy) { model.edit = null }
         }

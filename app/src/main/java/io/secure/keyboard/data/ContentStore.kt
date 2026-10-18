@@ -504,7 +504,7 @@ class ContentStore(context: Context) {
     fun saveAiPreset(id: String?, name: String, prompt: String) = mutate("aiPresets") { rows ->
         val title = name.trim(); val instruction = prompt.trim()
         require(title.isNotBlank() && title.length <= 40) { "名称需为 1–40 个字符" }
-        require(instruction.isNotBlank() && instruction.length <= 1000) { "提示词需为 1–1000 个字符" }
+        require(instruction.isNotBlank() && instruction.length <= 2000) { "提示词需为 1–2000 个字符" }
         require(rows.none { it.getString("id") != id && it.getString("name").equals(title, ignoreCase = true) }) { "已有同名自定义 AI，请换个名称" }
         if (id == null) {
             require(rows.size < 100) { "最多保存 100 个自定义 AI" }
