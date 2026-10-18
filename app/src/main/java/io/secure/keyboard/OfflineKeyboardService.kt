@@ -2172,7 +2172,7 @@ class OfflineKeyboardService : InputMethodService() {
         }
         if(usingAi) {
             val config=try { io.secure.keyboard.data.ApiConfigurationStore(this).load() } catch(_:Exception) { cancelAiCommandVoice(); toast("请检查 AI 语音配置"); return }
-            aiCommandVoice=io.secure.keyboard.voice.AiVoiceSession(this,config,listener,translateToEnglish=false)
+            aiCommandVoice=io.secure.keyboard.voice.AiVoiceSession(this,config,listener,translateToEnglish = !chinese && settings.voiceAutoTranslate)
             aiCommandVoice?.begin()
         } else {
             inlineOfflineVoice=OfflineVoiceSession(this,listener)

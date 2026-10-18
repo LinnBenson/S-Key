@@ -652,6 +652,42 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         } finally { onMainChecked { invoke("cancelAiCommandVoice"); settings.voiceMode = previousMode } }
     }
 
+    fun testAssistantVoiceTranslationFollowsKeyboardAndSwitch() {
+        val settings = SettingsStore(context)
+        val oldMode = settings.voiceMode
+        val oldTranslate = settings.voiceAutoTranslate
+        val oldChinese = field<Boolean>("chinese")
+        try {
+            onMainChecked {
+                settings.voiceMode = "ai"
+                for (mode in listOf("translate", "ai")) {
+                    invoke("openTool", mode)
+                    for (chinese in listOf(true, false)) for (enabled in listOf(true, false)) {
+                        setField("chinese", chinese)
+                        settings.voiceAutoTranslate = enabled
+                        for (held in listOf(true, false)) {
+                            OfflineKeyboardService::class.java.getDeclaredMethod("startAssistantVoice", Boolean::class.javaPrimitiveType)
+                                .apply { isAccessible = true }.invoke(service, held)
+                            val session = field<Any>("aiCommandVoice")
+                            val translates = session.javaClass.getDeclaredField("translateToEnglish")
+                                .apply { isAccessible = true }.getBoolean(session)
+                            assertEquals("mode=$mode chinese=$chinese enabled=$enabled held=$held", !chinese && enabled, translates)
+                            invoke("cancelAiCommandVoice")
+                        }
+                    }
+                    invoke("openTool", mode)
+                }
+            }
+        } finally {
+            onMainChecked {
+                invoke("cancelAiCommandVoice")
+                setField("chinese", oldChinese)
+                settings.voiceMode = oldMode
+                settings.voiceAutoTranslate = oldTranslate
+            }
+        }
+    }
+
     fun testCancelAiRequestAlsoReleasesCommandVoice() {
         onMainChecked {
             invoke("openTool", "ai")

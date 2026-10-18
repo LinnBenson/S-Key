@@ -42,6 +42,26 @@ class AiSettingsThemeTest : InstrumentationTestCase() {
         instrumentation.runOnMainSync { activity?.finish() }
         super.tearDown()
     }
+    fun testApiVoiceTranslationToggleCanSwitchRepeatedlyAndPersist() {
+        val settings = SettingsStore(instrumentation.targetContext)
+        val previous = settings.voiceAutoTranslate
+        try {
+            instrumentation.runOnMainSync { settings.voiceAutoTranslate = true }
+            open("api")
+            for (expected in listOf(false, true, false, true)) {
+                tap("语音自动翻译")
+                assertEquals("Each tap must use refreshed checked state", expected, settings.voiceAutoTranslate)
+            }
+            tap("语音自动翻译")
+            open("api")
+            assertFalse(settings.voiceAutoTranslate)
+            tap("语音自动翻译")
+            assertTrue(settings.voiceAutoTranslate)
+        } finally {
+            instrumentation.runOnMainSync { settings.voiceAutoTranslate = previous }
+        }
+    }
+
     fun testManualAndSystemThemeAndOriginalInputUi() {
         val settings = SettingsStore(instrumentation.targetContext)
         val theme = settings.theme

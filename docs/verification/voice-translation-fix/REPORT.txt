@@ -1,0 +1,11 @@
+2026-10-19 — unpublished fix after 1.0.72
+
+Settings ApiSettings now observes model.revision like the other preference pages, so persisted toggle changes recompose and successive taps use fresh state. This also covers AI auto-apply on the same page.
+Assistant AI voice no longer hardcodes translateToEnglish=false: both translation and AI local source inputs follow !chinese && settings.voiceAutoTranslate, matching ordinary keyboard voice. Chinese mode and disabled switch preserve transcript.
+
+Validation:
+Debug + device test build succeeded. 207 JVM tests passed.
+22 device tests passed: real settings repeated toggle and reopen, local-source language/switch/held matrix, previous lost-result/hold regression, all 10 AI voice transport tests and 9 hold gesture tests.
+The matrix checks 16 combinations across translation/AI, Chinese/English, switch on/off, held/click. Mock HTTP verifies Chinese transcript becomes English output; cancellation and translation failure do not insert original transcript.
+Privacy static audit passed. Debug installed preserving data. Tests restore modified preferences.
+Real microphone-to-provider end-to-end transcription not exercised; cloud HTTP tests use synthetic inputs and mocked transport.

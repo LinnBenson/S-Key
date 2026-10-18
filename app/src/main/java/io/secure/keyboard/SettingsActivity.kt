@@ -301,6 +301,7 @@ open class SettingsActivity : ComponentActivity() {
         }
     }
     @Composable private fun ApiSettings() {
+        model.revision
         val draft = model.apiDraft
         var showKeys by remember { mutableStateOf(false) }
         @Composable fun field(label: String, value: String, secret: Boolean = false, change: (String) -> Unit) {
