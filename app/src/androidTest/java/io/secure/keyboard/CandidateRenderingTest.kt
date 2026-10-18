@@ -163,11 +163,8 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 setField("aiMode",cycle%3==0)
                 setField("aiTask","custom")
                 setField("aiCustom",marker)
-                setField("aiFollowup",marker)
-                val constructor=Class.forName("io.secure.keyboard.OfflineKeyboardService\$AiVersion")
-                    .getDeclaredConstructor(String::class.java,String::class.java,String::class.java,String::class.java,Boolean::class.javaPrimitiveType).apply { isAccessible=true }
-                val history=field<MutableList<Any>>("aiResults")
-                repeat(8) { history.add(constructor.newInstance(marker.repeat(100),marker.repeat(100),marker,marker,true)) }
+                val history=field<MutableList<String>>("aiResults")
+                repeat(8) { history.add(marker.repeat(100)) }
                 val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
                 session.enabled=cycle%3!=2
                 session.edit(marker)
@@ -176,11 +173,10 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 if(session.enabled) retired.add(java.lang.ref.WeakReference(field<View>("translationResultView")))
                 service.onFinishInputView(false)
                 session.close()
-                for(name in listOf("translationTextView","translationResultView","translationAction","translationInsert","aiInstructionView","aiFollowupView","aiResultNavigation","aiCommandButton","aiCommandVoice"))
+                for(name in listOf("translationTextView","translationResultView","translationAction","translationInsert","aiInstructionView","aiResultNavigation","aiCommandVoice"))
                     assertNull("Closed panel retains $name",field<Any?>(name))
                 assertEquals("",session.text); assertEquals("",session.result)
                 assertEquals("",field<String>("aiCustom"))
-                assertEquals("",field<String>("aiFollowup"))
                 assertTrue(field<List<*>>("aiResults").isEmpty())
                 setField("active",true)
             }
@@ -319,15 +315,22 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     fun testAssistantBackExitsBothModesAndDropsLateResult() {
-        onMainChecked {
+        val store=io.secure.keyboard.data.AiConversationStore(context)
+        val prior=store.load()
+        try { onMainChecked {
             for(tool in listOf("ai","translate")) {
                 invoke("openTool",tool)
                 val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
+                val saved=io.secure.keyboard.ai.AiConversation("8e6c_back","test",System.currentTimeMillis(),"polish")
+                store.save(saved)
+                if(tool=="ai") setField("aiConversation",saved)
                 session.edit("synthetic draft")
                 val token=session.begin()
                 val back=field<ViewGroup>("toolbarGroup").getChildAt(0)
                 assertEquals("退出模式",back.contentDescription.toString())
                 back.performClick()
+                if(tool=="ai") { assertNull(store.load());assertNull(field<Any?>("aiConversation")) }
+                else assertEquals(saved,store.load())
                 assertFalse(session.enabled)
                 assertFalse(field<Boolean>("aiMode"))
                 assertEquals("",session.text)
@@ -337,7 +340,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 assertEquals("更多工具",field<ViewGroup>("toolbarGroup").getChildAt(0).contentDescription.toString())
             }
             assertTrue(connection.committed.isEmpty())
-        }
+        } } finally { store.clear();if(prior!=null)store.save(prior) }
     }
 
     fun testAssistantEnglishCompletionStaysInLocalEditor() {
@@ -365,14 +368,14 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testExpandedCandidatesKeepAssistantEditorAndCursor() {
         for (tool in listOf("translate", "ai")) {
-            for (followup in if (tool == "ai") listOf(false, true) else listOf(false)) {
+            repeat(1) {
                 for (zh in listOf(true, false)) {
                     lateinit var editor: EditText
                     var panelHeight = 0
                     onMainChecked {
                         invoke("openTool", tool)
                         setField("chinese", zh)
-                        editor = field<TextView>(if (followup) "aiFollowupView" else "translationTextView") as EditText
+                        editor = field<TextView>("translationTextView") as EditText
                         editor.requestFocus()
                         editor.setText(if (zh) "甲乙丙丁" else "hel tail")
                         editor.setSelection(if (zh) 1 else 3, if (zh) 3 else 3)
@@ -388,14 +391,14 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                     }
                     instrumentation.waitForIdleSync()
                     onMainChecked {
-                        assertSame(editor, field<TextView>(if (followup) "aiFollowupView" else "translationTextView"))
+                        assertSame(editor, field<TextView>("translationTextView"))
                         assertTrue(editor.isAttachedToWindow)
                         assertTrue(editor.hasFocus())
                         assertEquals(panelHeight, field<View>("box").height)
                         assertEquals(if (zh) 1 else 3, editor.selectionStart)
                         assertEquals(3, editor.selectionEnd)
                         field<View>("hideIcon").performClick()
-                        assertSame(editor, field<TextView>(if (followup) "aiFollowupView" else "translationTextView"))
+                        assertSame(editor, field<TextView>("translationTextView"))
                         field<View>("hideIcon").performClick()
                     }
                     instrumentation.waitForIdleSync()
@@ -407,7 +410,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                         assertTrue(grid.getChildAt(0).isShown)
                         assertEquals(field<Int>("generation"), field<Int>("candidateGeneration"))
                         grid.getChildAt(0).performClick()
-                        assertSame(editor, field<TextView>(if (followup) "aiFollowupView" else "translationTextView"))
+                        assertSame(editor, field<TextView>("translationTextView"))
                         assertEquals(if (zh) "甲" + value + "丁" else value + " tail", editor.text.toString())
                         val cursor = value.length + 1
                         assertEquals(cursor, editor.selectionStart)
@@ -436,14 +439,6 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             invoke("applyBackspace")
             assertEquals("ad",source.text.toString())
             assertEquals("ad",field<io.secure.keyboard.translation.TranslationSession>("translation").text)
-            if(tool=="ai") {
-                val followup=field<TextView>("aiFollowupView") as android.widget.EditText
-                followup.requestFocus(); followup.setText("short")
-                followup.setSelection(0,5)
-                OfflineKeyboardService::class.java.getDeclaredMethod("commitInputText",String::class.java).apply { isAccessible=true }.invoke(service,"natural")
-                assertEquals("natural",field<String>("aiFollowup"))
-                assertEquals("ad",source.text.toString())
-            }
             assertTrue(connection.committed.isEmpty())
             invoke("openTool",tool)
         }
@@ -533,15 +528,6 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             invoke("applyBackspace")
             assertEquals("",field<String>("code"))
             assertEquals("原文",editor.text.toString())
-            if(tool=="ai") {
-                val followup=field<EditText>("aiFollowupView")
-                followup.requestFocus();setField("aiEditingFollowup",true)
-                followup.setText("更自然");followup.setSelection(followup.length())
-                setField("code","hao")
-                invoke("applyBackspace")
-                assertEquals("ha",field<String>("code"))
-                assertEquals("更自然",followup.text.toString())
-            }
             assertTrue(connection.committed.isEmpty())
             invoke("openTool",tool)
         }
@@ -647,173 +633,132 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
-    fun testResponseConversationBoundToSourceAndOnlyFollowupsReuseId() {
+    fun testPersistentSingleInputConversation() {
+        val store=io.secure.keyboard.data.AiConversationStore(context)
+        val prior=store.load()
         val requests=java.util.Collections.synchronizedList(mutableListOf<org.json.JSONObject>())
-        val responseRelease=CountDownLatch(1)
-        val failResponse=java.util.concurrent.atomic.AtomicBoolean(false)
-        var config=io.secure.keyboard.data.ApiConfiguration(grokUrl="https://example.invalid/v1",grokKey="synthetic-key",grokModel="test-model")
+        val gate=CountDownLatch(1)
+        val status=java.util.concurrent.atomic.AtomicInteger(200)
+        var config=io.secure.keyboard.data.ApiConfiguration(grokUrl="https://example.invalid/v1",grokKey="synthetic",grokModel="test-model")
         val provider: () -> io.secure.keyboard.data.ApiConfiguration = { config }
         val factory: () -> io.secure.keyboard.ai.AiWriting.Call = {
-            io.secure.keyboard.ai.AiWriting.Call { url ->
-                object: javax.net.ssl.HttpsURLConnection(url) {
-                    val sent=java.io.ByteArrayOutputStream()
-                    override fun connect() {}
-                    override fun disconnect() {}
-                    override fun usingProxy()=false
-                    override fun getCipherSuite()="test"
-                    override fun getLocalCertificates(): Array<java.security.cert.Certificate>?=null
-                    override fun getServerCertificates(): Array<java.security.cert.Certificate> = emptyArray()
-                    override fun getOutputStream()=sent
-                    override fun getResponseCode()=if(failResponse.get()) 503 else 200
-                    override fun getInputStream(): java.io.InputStream {
-                        requests.add(org.json.JSONObject(sent.toString("UTF-8")))
-                        val n=requests.size
-                        if(n==2) responseRelease.await(5,TimeUnit.SECONDS)
-                        return ("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"id\":\"resp_$n\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"result $n\"}]}]}}\n\n").byteInputStream()
-                    }
+            io.secure.keyboard.ai.AiWriting.Call { url -> object: javax.net.ssl.HttpsURLConnection(url) {
+                val sent=java.io.ByteArrayOutputStream()
+                override fun connect() {}
+                override fun disconnect() {}
+                override fun usingProxy()=false
+                override fun getCipherSuite()="test"
+                override fun getLocalCertificates(): Array<java.security.cert.Certificate>?=null
+                override fun getServerCertificates(): Array<java.security.cert.Certificate> = emptyArray()
+                override fun getOutputStream()=sent
+                override fun getResponseCode(): Int { requests.add(org.json.JSONObject(sent.toString("UTF-8"))); return status.get() }
+                override fun getErrorStream()=(if(status.get()==400) "{\"error\":{\"code\":\"previous_response_not_found\"}}" else "{\"error\":{\"code\":\"server_error\"}}").byteInputStream()
+                override fun getInputStream(): java.io.InputStream {
+                    val n=requests.size
+                    if(n==2) gate.await(10,TimeUnit.SECONDS)
+                    return ("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"id\":\"id${n}x_response\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"result $n\"}]}]}}\n\n").byteInputStream()
                 }
-            }
+            } }
         }
-        val settings=field<SettingsStore>("settings")
-        val auto=settings.aiAutoApply
-        fun finish(n: Int) = waitFor("response $n complete") {
-            requests.size==n && !field<io.secure.keyboard.translation.TranslationSession>("translation").busy && field<Any?>("aiResponseLink")!=null
-        }
-        fun select(offset:Int) = OfflineKeyboardService::class.java.getDeclaredMethod("selectAiResult",Int::class.javaPrimitiveType)
-            .apply { isAccessible=true }.invoke(service,offset)
+        val settings=field<SettingsStore>("settings");val auto=settings.aiAutoApply
+        val prefs=context.getSharedPreferences("settings",Context.MODE_PRIVATE);val oldTask=prefs.getString("aiTask","polish")
+        prefs.edit().putString("aiTask","polish").commit()
+        fun source()=field<EditText>("translationTextView")
+        fun session()=field<io.secure.keyboard.translation.TranslationSession>("translation")
+        fun finish(n:Int) = waitFor("request $n finished") { requests.size==n && !session().busy && field<Any?>("aiCall")==null }
+        fun send(value:String) = onMainChecked { source().setText(value);invoke("applyEnter") }
+        fun select(offset:Int) = OfflineKeyboardService::class.java.getDeclaredMethod("selectAiResult",Int::class.javaPrimitiveType).apply { isAccessible=true }.invoke(service,offset)
         try {
+            store.clear()
             onMainChecked {
                 settings.aiAutoApply=false
-                setField("aiConfiguration",provider); setField("aiCallFactory",factory)
-                invoke("openTool","ai"); setField("aiModel","test-model"); setField("aiTask","polish")
-                (field<TextView>("translationTextView") as EditText).setText("source A")
-                invoke("applyEnter")
+                setField("aiConfiguration",provider);setField("aiCallFactory",factory)
+                invoke("openTool","ai");setField("aiTask","polish");setField("aiModel","test-model")
             }
-            finish(1)
+            send("original");finish(1)
             assertFalse(requests[0].has("previous_response_id"))
             onMainChecked {
-                val followup=field<TextView>("aiFollowupView") as EditText
-                followup.requestFocus()
-                followup.setText("")
-                invoke("applyEnter")
-                assertFalse(field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
-                assertEquals(1,requests.size)
-                followup.setText("first requirement")
-                invoke("applyEnter")
-                assertEquals("", followup.text.toString())
-                assertEquals("", field<String>("aiFollowup"))
-                assertTrue(field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
-                followup.setText("next draft")
-                assertTrue("Typing the next draft must not cancel generation",field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
+                assertEquals("",source().text.toString())
+                assertEquals("续聊 id1x",field<TextView>("assistantSourceTitle").text.toString())
             }
-            responseRelease.countDown()
-            finish(2)
-            onMainChecked {
-                assertEquals("next draft",field<String>("aiFollowup"))
-                assertTrue(field<TextView>("aiFollowupView").hasFocus())
-            }
-            assertEquals("resp_1",requests[1].getString("previous_response_id"))
+            val first=store.load()!!
+            send("make it natural")
+            waitFor("second request held") { requests.size==2 }
+            onMainChecked { source().setText("new draft");assertTrue(session().busy) }
+            gate.countDown();finish(2)
+            assertEquals("id1x_response",requests[1].getString("previous_response_id"))
             assertEquals(1,requests[1].getJSONArray("input").length())
-            assertFalse(requests[1].has("instructions"))
-            assertEquals("first requirement",requests[1].getJSONArray("input").getJSONObject(0).getString("content"))
-            onMainChecked { invoke("refineAi","second requirement") }
+            assertTrue(store.load()!!.updatedAt>=first.updatedAt)
+            onMainChecked {
+                assertEquals("new draft",source().text.toString())
+                select(-1)
+                assertEquals("result 1",session().result)
+                assertEquals("续聊 id2x",field<TextView>("assistantSourceTitle").text.toString())
+                invoke("applyEnter")
+            }
             finish(3)
-            assertEquals("resp_2",requests[2].getString("previous_response_id"))
+            assertEquals("id2x_response",requests[2].getString("previous_response_id"))
             onMainChecked {
-                (field<TextView>("aiFollowupView") as EditText).requestFocus()
-                (field<TextView>("translationTextView") as EditText).requestFocus()
-                invoke("applyEnter")
-            }
-            finish(4)
-            assertFalse("Original generation must always start a new conversation",requests[3].has("previous_response_id"))
-            assertEquals("source A",requests[3].getJSONArray("input").getJSONObject(1).getString("content"))
-            onMainChecked { select(-2); invoke("refineAi","branch requirement") }
-            finish(5)
-            assertEquals("resp_2",requests[4].getString("previous_response_id"))
-            onMainChecked {
-                val source=field<TextView>("translationTextView") as EditText
-                source.setText("source B"); invoke("refineAi","must not send")
-                assertNull(field<Any?>("aiResponseLink"))
-                source.setText("source A")
-                select(-1); invoke("refineAi","still must not send")
-                assertEquals(5,requests.size)
-                assertFalse(field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
-                invoke("applyEnter")
-            }
-            finish(6)
-            assertFalse(requests[5].has("previous_response_id"))
-            onMainChecked {
-                failResponse.set(true)
-                val draft=field<TextView>("aiFollowupView") as EditText
-                draft.requestFocus(); draft.setText("retry requirement")
-                invoke("applyEnter")
-                assertEquals("",draft.text.toString())
-            }
-            waitFor("failed supplement restores completed parent") {
-                !field<io.secure.keyboard.translation.TranslationSession>("translation").busy && field<Any?>("aiCall")==null
-            }
-            onMainChecked {
-                assertEquals("retry requirement",field<TextView>("aiFollowupView").text.toString())
-                assertEquals("result 6",field<io.secure.keyboard.translation.TranslationSession>("translation").result)
-                assertEquals(6,requests.size)
-                failResponse.set(false)
-                config=config.copy(grokKey="changed-synthetic-key")
-                val draft=field<TextView>("aiFollowupView") as EditText
-                draft.requestFocus(); draft.setText("wrong account must not send")
-                invoke("applyEnter")
-                assertEquals("wrong account must not send",draft.text.toString())
-                assertFalse(field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
-                assertEquals(6,requests.size)
                 invoke("openTool","ai")
-                assertNull(field<Any?>("aiResponseLink"))
-                assertTrue(field<List<Any>>("aiResults").isEmpty())
+                assertTrue(field<List<*>>("aiResults").isEmpty())
+                assertNotNull(store.load())
+                invoke("openTool","ai");setField("aiTask","polish");setField("aiModel","test-model")
+                invoke("restoreAiConversation");invoke("updateAiPreview")
+                assertEquals("续聊 id3x",field<TextView>("assistantSourceTitle").text.toString())
             }
-        } finally { responseRelease.countDown(); onMainChecked { settings.aiAutoApply=auto } }
+            send("after reopening");finish(4)
+            assertEquals("id3x_response",requests[3].getString("previous_response_id"))
+            status.set(503);send("retry this");finish(5)
+            assertEquals("id4x_response",store.load()!!.id)
+            onMainChecked { assertEquals("retry this",source().text.toString()) }
+            status.set(400);onMainChecked { invoke("applyEnter") };finish(6)
+            assertNull(store.load())
+            onMainChecked {
+                assertEquals("原文",field<TextView>("assistantSourceTitle").text.toString())
+                assertEquals("retry this",source().text.toString())
+            }
+            status.set(200);onMainChecked { invoke("applyEnter") };finish(7)
+            assertFalse(requests[6].has("previous_response_id"))
+            store.save(store.load()!!.copy(updatedAt=System.currentTimeMillis()-io.secure.keyboard.ai.AiConversation.TTL))
+            send("expired");finish(8)
+            assertFalse(requests[7].has("previous_response_id"))
+            onMainChecked { invoke("clearAssistantSource");assertNull(store.load());assertEquals("原文",field<TextView>("assistantSourceTitle").text.toString()) }
+            send("fresh");finish(9)
+            config=config.copy(grokKey="changed")
+            send("new account");finish(10)
+            assertFalse(requests[9].has("previous_response_id"))
+            onMainChecked {
+                invoke("applyBackspace");invoke("applyBackspace")
+                assertFalse(field<Boolean>("aiMode"));assertNull(store.load())
+            }
+        } finally {
+            gate.countDown()
+            onMainChecked { invoke("stopAiRequest");settings.aiAutoApply=auto }
+            store.clear();if(prior!=null) store.save(prior)
+            prefs.edit().putString("aiTask",oldTask).commit()
+        }
     }
 
-    fun testAiHistorySwitchRestoresRegenerationContext() {
-        onMainChecked {
-            invoke("openTool", "ai")
-            val versions=field<MutableList<Any>>("aiResults")
-            val type=Class.forName("io.secure.keyboard.OfflineKeyboardService\$AiVersion")
-            val ctor=type.getDeclaredConstructor(String::class.java,String::class.java,String::class.java,String::class.java,Boolean::class.javaPrimitiveType).apply { isAccessible=true }
-            versions.add(ctor.newInstance("one", "source one", "polish", "polish",false))
-            versions.add(ctor.newInstance("two", "source two", "shorten", "polish",true))
-            setField("aiResultIndex",1)
-            val select=OfflineKeyboardService::class.java.getDeclaredMethod("selectAiResult",Int::class.javaPrimitiveType).apply { isAccessible=true }
-            select.invoke(service,-1)
-            val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
-            assertEquals("one",session.result)
-            assertFalse(field<Boolean>("aiLastCustomRequest"))
-            assertEquals("source one",field<String>("aiLastInput"))
-            assertEquals("polish",field<String>("aiLastInstruction"))
-            select.invoke(service,1)
-            assertEquals("two",session.result)
-            assertTrue(field<Boolean>("aiLastCustomRequest"))
-            assertTrue(connection.committed.isEmpty())
+    fun testConversationTypeAndPromptResetTitleImmediately() {
+        val store=io.secure.keyboard.data.AiConversationStore(context);val prior=store.load()
+        try { onMainChecked {
+            invoke("openTool","ai");setField("aiTask","polish");invoke("renderBody")
+            val saved=io.secure.keyboard.ai.AiConversation("8e6c_test","test",System.currentTimeMillis(),"polish")
+            store.save(saved);setField("aiConversation",saved);invoke("updateAiPreview")
+            assertEquals("续聊 8e6c",field<TextView>("assistantSourceTitle").text.toString())
+            fun find(view:View, text:String): TextView? {
+                if(view is TextView && view.text.toString()==text) return view
+                if(view is ViewGroup) for(i in 0 until view.childCount) find(view.getChildAt(i),text)?.let { return it }
+                return null
+            }
+            find(field<View>("root"),"扩写")!!.performClick()
+            assertNull(store.load());assertEquals("原文",field<TextView>("assistantSourceTitle").text.toString())
+            assertNull(find(field<View>("root"),"快捷提示"))
+            assertNull(find(field<View>("root"),"提交"))
             invoke("openTool","ai")
-            assertTrue(versions.isEmpty())
-        }
+        } } finally { store.clear();if(prior!=null)store.save(prior) }
     }
 
-    fun testAiFollowupDraftPreservesResultAndClearsOnExit() {
-        onMainChecked {
-            invoke("openTool", "ai"); setField("chinese", false)
-            val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
-            session.edit("original")
-            session.complete(session.begin(), "existing result")
-            setField("aiEditingFollowup", true)
-            invoke("type", "short😀"); invoke("backspace")
-            assertEquals("short", field<String>("aiFollowup"))
-            assertEquals("existing result", session.result)
-            assertEquals("original", session.text)
-            assertTrue(connection.committed.isEmpty())
-            invoke("openTool", "ai")
-            assertEquals("", field<String>("aiFollowup"))
-            assertTrue(field<List<*>>("aiResults").isEmpty())
-            assertFalse(field<Boolean>("aiEditingFollowup"))
-        }
-    }
 
     fun testAiSelectedTextCanBeExplicitlyReplaced() {
         onMainChecked { connection.selectedText="original"; invoke("openTool","ai") }
@@ -863,18 +808,21 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     fun testTranslationSelectionCannotOverwriteNewTyping() {
-        val release = gateWorker()
-        try {
+        for(tool in listOf("translate","ai")) {
+            val release = gateWorker()
+            try {
+                onMainChecked {
+                    connection.selectedText = "old selection"
+                    invoke("openTool",tool)
+                    setField("chinese",false); invoke("type","new draft")
+                }
+            } finally { release.countDown() }
+            drainWorker(); instrumentation.waitForIdleSync()
             onMainChecked {
-                connection.selectedText = "old selection"
-                invoke("openTool","translate")
-                setField("chinese",false); invoke("type","new draft")
+                assertEquals("new draft",field<io.secure.keyboard.translation.TranslationSession>("translation").text)
+                assertTrue(connection.committed.isEmpty())
+                invoke("openTool",tool)
             }
-        } finally { release.countDown() }
-        drainWorker(); instrumentation.waitForIdleSync()
-        onMainChecked {
-            assertEquals("new draft",field<io.secure.keyboard.translation.TranslationSession>("translation").text)
-            assertTrue(connection.committed.isEmpty())
         }
     }
 

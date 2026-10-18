@@ -2,6 +2,15 @@ package io.secure.keyboard.translation
 import org.junit.Assert.*
 import org.junit.Test
 class TranslationSessionTest {
+    @Test fun draftEditingAndClearingDoesNotInvalidateStreamingResult() {
+        val s=TranslationSession();s.enabled=true;s.edit("sent")
+        val token=s.begin();s.partial(token,"partial")
+        assertTrue(s.editDraft("next draft"));assertTrue(s.busy);assertEquals("partial",s.result)
+        s.complete(token,"finished");assertEquals("next draft",s.text);assertEquals("finished",s.result)
+        s.editDraft("");assertEquals("finished",s.result)
+        assertFalse(s.editDraft("x".repeat(5001)));assertEquals("",s.text)
+    }
+
     @Test fun streamingStaysBusyUntilCompleteAndRejectsLateChunks() {
         val s = TranslationSession(); s.enabled = true; s.edit("original")
         val token = s.begin(); s.partial(token, "你"); assertTrue(s.busy)

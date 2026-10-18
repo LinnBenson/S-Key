@@ -41,6 +41,7 @@ internal data class ApiConfiguration(
 
 /** Entire configuration encrypted with a non-exportable Android Keystore key; backup is disabled. */
 internal class ApiConfigurationStore(context: Context) {
+    private val app = context.applicationContext
     private val prefs = context.getSharedPreferences("api_configuration", Context.MODE_PRIVATE)
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -63,6 +64,8 @@ internal class ApiConfigurationStore(context: Context) {
     }
     fun save(config: ApiConfiguration) {
         val c = config.validated()
+        val old = runCatching { load().validated() }.getOrNull()
+        if(old==null || old.grokUrl!=c.grokUrl || old.grokKey!=c.grokKey || old.grokModel!=c.grokModel) AiConversationStore(app).clear()
         val json = JSONObject().put("googleUrl", c.googleUrl).put("googleKey", c.googleKey).put("googleModel", c.googleModel)
             .put("grokUrl", c.grokUrl).put("grokKey", c.grokKey).put("grokModel", c.grokModel)
             .put("voiceUrl", c.voiceUrl).put("voiceKey", c.voiceKey).put("voiceModel", c.voiceModel)
@@ -72,7 +75,7 @@ internal class ApiConfigurationStore(context: Context) {
             Base64.encodeToString(cipher.doFinal(json.toString().toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
         check(prefs.edit().putString("encrypted", encoded).commit()) { "配置保存失败" }
     }
-    fun clear() { check(prefs.edit().clear().commit()) { "清除失败" } }
+    fun clear() { AiConversationStore(app).clear(); check(prefs.edit().clear().commit()) { "清除失败" } }
 }
 
 internal object GrokModelCatalog {

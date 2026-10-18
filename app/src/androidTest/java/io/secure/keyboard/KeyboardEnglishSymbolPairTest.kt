@@ -145,6 +145,40 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
         }
     }
 
+    fun testAssistantPairsPlaceCaretInsideAndKeepHostUntouched() {
+        instrumentation.runOnMainSync {
+            selectLanguage(chinese = false)
+            val open = OfflineKeyboardService::class.java.getDeclaredMethod("openTool", String::class.java).apply { isAccessible = true }
+            for (mode in listOf("translate", "ai")) {
+                open.invoke(service, mode)
+                for (opener in listOf("\"", "'", "[", "{")) {
+                    val closer = when (opener) { "[" -> "]"; "{" -> "}"; else -> opener }
+                    enterSymbols(secondary = true)
+                    val source = field<EditText>("translationTextView")
+                    source.setText("前🙂remove后")
+                    source.setSelection(3, 9)
+                    val hostBefore = editor.text.toString()
+                    key(opener).performClick()
+                    val updated = field<EditText>("translationTextView")
+                    assertEquals("前🙂$opener${closer}后", updated.text.toString())
+                    assertEquals(4, updated.selectionStart)
+                    assertEnglishLetters()
+                    key("a").performClick()
+                    assertEquals("前🙂${opener}a${closer}后", field<EditText>("translationTextView").text.toString())
+                    assertEquals(hostBefore, editor.text.toString())
+                }
+                enterSymbols(secondary = true)
+                val source = field<EditText>("translationTextView")
+                source.setText("x".repeat(4999)); source.setSelection(4999)
+                key("'").performClick()
+                assertEquals(4999, field<EditText>("translationTextView").length())
+                assertTrue(field<Boolean>("symbols"))
+                key("ABC").performClick()
+                open.invoke(service, mode)
+            }
+        }
+    }
+
     fun testChineseSymbolsEnglishParenthesesAndRightClosersStayLiteralOnSymbolPages() {
         instrumentation.runOnMainSync {
             val cases = listOf(

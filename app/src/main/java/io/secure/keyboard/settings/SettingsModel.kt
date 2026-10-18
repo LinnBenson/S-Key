@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.secure.keyboard.data.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 
 /** Current edit survives rotation in memory; private text never enters saved-state bundles. */
 internal data class ContentEdit(val category: String, val id: String? = null,
@@ -49,9 +50,6 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
     var english by mutableStateOf<List<ContentStore.DictionaryEntry>>(emptyList())
     var aiPresets by mutableStateOf<List<ContentStore.AiPreset>>(emptyList())
     var emoji by mutableStateOf<List<String>>(emptyList())
-    var pendingKind = DictionaryKind.CHINESE
-    var importEpoch: Long? = null
-    var exportText: String? = null
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> revision++ }
     init { prefs.registerOnSharedPreferenceChangeListener(listener); loadApi(); refresh() }
     override fun onCleared() { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
@@ -67,6 +65,13 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
     private data class Snapshot(val clips: List<ContentStore.ClipboardItem>, val phrases: List<ContentStore.Phrase>,
         val chinese: List<ContentStore.DictionaryEntry>, val english: List<ContentStore.DictionaryEntry>, val emoji: List<String>, val aiPresets: List<ContentStore.AiPreset>)
 
+    /** Picker results must not disappear when onResume is refreshing the content lists. */
+    fun fileTask(success: (() -> Unit)? = null, work: () -> Unit) {
+        viewModelScope.launch {
+            snapshotFlow { busy }.first { !it }
+            task(success, work)
+        }
+    }
     fun refresh() = task { }
     fun task(success: (() -> Unit)? = null, work: () -> Unit) {
         if (busy) return

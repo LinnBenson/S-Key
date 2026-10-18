@@ -28,14 +28,6 @@ internal object AiWriting {
         "custom" -> custom.trim().also { require(it.isNotBlank()) { "请先输入自定义指令" } }
         else -> error("请选择 AI 功能")
     }
-    val refinements = linkedMapOf(
-        "再长一些" to "在已有信息范围内把当前文字写得更充分，展开简略表述、改善衔接，使篇幅适度增加。不要重复凑字，不增加新事实、例子、理由或结论。",
-        "再短一点" to "压缩当前文字，优先删除重复、赘词和非必要铺垫，合并同义表达。保留核心信息、关键细节、条件、立场和语气，不把完整内容缩成含糊的概括。",
-        "更自然" to "把生硬、模板化或翻译腔的表达改得自然流畅，调整词序和句式，像熟练使用原文语言的人正常表达。保持原有信息、情绪和大致篇幅。",
-        "更直接" to "把核心意思或诉求放在前面，减少绕弯、铺垫和含混表达，使重点一读就明白。保留必要限定和原有礼貌程度，不把委婉请求变成命令。",
-        "更正式" to "将当前文字改成规范、严谨、得体的书面表达，替换随意口语和网络用语，明确句间关系；不增加套话、身份、承诺或未经证实的结论。",
-        "更文艺" to "在不改变原意和事实的前提下增强语言的节奏、韵律和表现力，可使用不新增事实的修辞。避免堆砌辞藻、夸大情绪或虚构场景，保持可读性。",
-    )
     fun contextKey(config: ApiConfiguration): String {
         val c = config.validated()
         val bytes = "${c.grokUrl}\u0000${c.grokModel}\u0000${c.grokKey}".toByteArray(Charsets.UTF_8)
@@ -48,7 +40,7 @@ internal object AiWriting {
     fun payload(model: String, text: String, instruction: String, custom: Boolean = false,
                 previousResponseId: String? = null): JSONObject {
         require(model.isNotBlank()) { "请先选择 Grok 模型" }
-        require(text.isNotBlank() && text.length <= 20000) { "请输入 1–20000 字符的原文或补充要求" }
+        require(text.isNotBlank() && text.length <= 20000) { "请输入 1–20000 字符的输入内容" }
         require(previousResponseId == null || validResponseId(previousResponseId)) { "会话标识无效，请重新生成" }
         // Initial system messages belong to the stored conversation. Continuations send
         // only the new user requirement: no duplicated source, result or task prompt.
@@ -62,6 +54,11 @@ internal object AiWriting {
             .put("input",input)
             .apply { if (previousResponseId != null) put("previous_response_id",previousResponseId) }
     }
+    private fun expiredCode(error: JSONObject?): Boolean = error?.optString("code") in setOf(
+        "previous_response_not_found", "response_not_found", "conversation_not_found", "conversation_expired", "response_expired")
+
+    class ConversationExpired : IllegalStateException("会话已失效，请再次发送以开始新对话")
+
     class Call(private val connect: (URL) -> HttpsURLConnection = { it.openConnection() as HttpsURLConnection }) {
         var responseId: String? = null
             private set
@@ -88,6 +85,21 @@ internal object AiWriting {
                 conn.setFixedLengthStreamingMode(bytes.size)
                 conn.outputStream.use { it.write(bytes) }
                 val status=conn.responseCode
+                if (previousResponseId != null && status != 200) {
+                    // Only explicit machine-readable expiry codes revoke a conversation.
+                    conn.readTimeout=5000
+                    val deadline=System.nanoTime()+5_000_000_000L
+                    val body = runCatching { conn.errorStream?.use { input ->
+                        val bytes = ByteArray(8193); var total = 0
+                        while (total < bytes.size) {
+                            check(!canceled.get() && System.nanoTime()<deadline)
+                            val n=input.read(bytes,total,bytes.size-total); if(n<0) break; total+=n
+                        }
+                        if(total>8192) "" else String(bytes,0,total,Charsets.UTF_8)
+                    } }.getOrNull()
+                    val error = runCatching { JSONObject(body ?: "").optJSONObject("error") }.getOrNull()
+                    if (expiredCode(error)) throw ConversationExpired()
+                }
                 check(status==200) { when(status) {
                     401,403 -> "Grok 鉴权失败，请检查密钥和模型权限"
                     400,404,410 -> if (previousResponseId != null) "会话已失效或接口不支持续聊，请清空原文后重新生成" else "模型或接口不支持 Responses API，请检查 API 配置"
@@ -119,6 +131,7 @@ internal object AiWriting {
                 if (data == "[DONE]") return
                 val json = try { JSONObject(data) } catch (_: Exception) { error("流式响应格式错误，请检查接口") }
                 val type = json.optString("type")
+                if(expiredCode(json.optJSONObject("error")) || expiredCode(json.optJSONObject("response")?.optJSONObject("error"))) throw ConversationExpired()
                 check(type !in listOf("error", "response.failed", "response.incomplete", "response.refusal.delta") &&
                     (!json.has("error") || json.isNull("error"))) { "服务未返回完整文字结果，请重试" }
                 when (type) {

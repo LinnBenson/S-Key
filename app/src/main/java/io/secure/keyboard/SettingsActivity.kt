@@ -57,34 +57,34 @@ open class SettingsActivity : ComponentActivity() {
     private val modelPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let { ModelImportTransfer.start(applicationContext, it) }
     }
-    private val importPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    private val restorePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val kind = model.pendingKind
-            val epoch = model.importEpoch
             val resolver = applicationContext.contentResolver
-            model.task(success = { model.message = "词库导入完成" }) {
-                val input = resolver.openInputStream(uri) ?: error("无法读取文件")
-                model.content.importDictionary(DictionaryTextReader.read(input), epoch, kind)
+            val target = model
+            target.fileTask(success = { target.message = "数据还原完成" }) {
+                try {
+                    target.content.restoreBackup(resolver.openInputStream(uri) ?: error("无法读取备份"))
+                } catch (_: Exception) { error("还原失败，请检查备份文件格式和容量；未完成还原。") }
             }
         }
     }
-    private val exportPicker = registerForActivityResult(ActivityResultContracts.CreateDocument("text/tab-separated-values")) { uri ->
-        val snapshot = model.exportText
-        model.exportText = null
-        if (uri != null && snapshot != null) {
+    private val backupPicker = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
             val resolver = applicationContext.contentResolver
-            model.task(success = { model.message = "词库导出完成" }) {
-                (resolver.openOutputStream(uri, "wt") ?: error("无法写入文件")).bufferedWriter(Charsets.UTF_8).use { it.write(snapshot) }
+            val target = model
+            target.fileTask(success = { target.message = "数据备份完成" }) {
+                try {
+                    (resolver.openOutputStream(uri, "wt") ?: error("无法写入备份")).use {
+                        target.content.writeBackup(it)
+                    }
+                } catch (_: Exception) { error("备份失败，请重新选择保存位置；请勿使用未完成的文件。") }
             }
-        } else if (uri != null) model.message = "导出已中断，请重新选择导出。"
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         incomingPage = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: initialPage
-        model.pendingKind = savedInstanceState?.getString("pending_kind")?.let { runCatching { DictionaryKind.valueOf(it) }.getOrNull() }
-            ?: model.pendingKind
-        if (savedInstanceState?.containsKey("import_epoch") == true) model.importEpoch = savedInstanceState.getLong("import_epoch")
         setContent { ApplicationUi() }
     }
     override fun onNewIntent(intent: Intent) {
@@ -104,8 +104,6 @@ open class SettingsActivity : ComponentActivity() {
     }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("page", incomingPage)
-        outState.putString("pending_kind", model.pendingKind.name)
-        model.importEpoch?.let { outState.putLong("import_epoch", it) }
         super.onSaveInstanceState(outState)
     }
     private fun launch(action: () -> Unit) {
@@ -168,6 +166,15 @@ open class SettingsActivity : ComponentActivity() {
                                     if (model.aiPresets.isEmpty()) Info("还没有自定义 AI，例如：邮件润色、简短回复。")
                                 }
                                 "cleanup", "recovery" -> Group("本机内容") {
+                                    Info("备份中文词库、英文词库、常用语和自定义 AI 到一个文件。文件包含这些内容的明文，请自行妥善保存；不包含剪贴板、密钥或会话 ID。")
+                                    Action("备份数据", !model.busy) {
+                                        launch { backupPicker.launch("S-Key-backup-${java.time.LocalDate.now()}.json") }
+                                    }
+                                    Action("还原数据", !model.busy) {
+                                        ask("还原会替换中文词库、英文词库、常用语和自定义 AI，保留其他数据与设置。请选择 S Key 备份文件。") {
+                                            launch { restorePicker.launch(arrayOf("application/json", "application/octet-stream", "text/*")) }
+                                        }
+                                    }
                                     Info("清理不会删除主题、布局或输入偏好，也不会修改 Android 系统剪贴板。")
                                     Nav("清空全部用户内容", "剪贴板、常用语、词库、最近表情和 自定义 AI", "delete") {
                                         ask("确定清空全部用户内容？此操作无法撤销。") { model.task { model.content.clearAll() } }
@@ -326,7 +333,7 @@ open class SettingsActivity : ComponentActivity() {
             Action("获取可用模型", !model.busy) { model.fetchApiModels() }
             model.apiModels.forEach { id -> Choice(id, draft.grokModel == id) { model.apiDraft = draft.copy(grokModel = id) } }
             Info("使用当前填写的地址和密钥获取模型。也可手动输入模型 ID，修改后点击保存。文字生成需要支持 Responses API。")
-            Info("多轮补充通过响应 ID 续聊，服务端会保存输入与回答。xAI 保存 30 天；退出助手只清除本机会话，不会删除云端记录。自定义服务的留存规则以服务商为准。")
+            Info("原文框通过响应 ID 续聊，本机会话加密保存，最近一次成功后 12 小时内有效。普通退出清空结果历史但保留会话；清空原文或切换类型会重置会话。xAI 保存输入与回答 30 天，本机重置不会删除云端记录。自定义服务的留存规则以服务商为准。")
         }
         Group("AI 语音 API") {
             field("语音识别端点（完整 HTTPS 地址）", draft.voiceUrl) { model.apiDraft = draft.copy(voiceUrl = it) }
@@ -564,19 +571,6 @@ open class SettingsActivity : ComponentActivity() {
                 Action(if (route == "phrases") "添加常用语" else "添加词条", !model.busy) { model.edit = ContentEdit(route) }
                 if (route != "phrases") {
                     val kind = if (route == "dictionary") DictionaryKind.CHINESE else DictionaryKind.ENGLISH
-                    Info("UTF-8 文本，每行：词语 + 制表符 + 编码。可选表头 word + 制表符 + reading。中文手动短语支持拼音或五笔编码。")
-                    Action("导入词库", !model.busy) {
-                        model.pendingKind = kind
-                        model.task(success = { launch { importPicker.launch(arrayOf("text/*", "application/octet-stream")) } }) {
-                            model.importEpoch = model.content.captureDictionaryEpoch(kind)
-                        }
-                    }
-                    Action("导出词库", !model.busy) {
-                        model.pendingKind = kind
-                        model.task(success = { launch { exportPicker.launch("S-Key-2-${kind.name.lowercase()}.tsv") } }) {
-                            model.exportText = model.content.exportDictionary(kind)
-                        }
-                    }
                     Action("清空本词库") { ask("清空${pageTitle(route)}？") { model.task { model.content.clearDictionary(kind) } } }
                 } else Action("清空常用语") { ask("清空全部常用语？") { model.task { model.content.clearPhrases() } } }
             }

@@ -495,6 +495,74 @@ class ContentStore(context: Context) {
     fun exportDictionary(kind: DictionaryKind = DictionaryKind.CHINESE): String =
         "word\treading\n" + dictionary(kind).joinToString("\n") { "${it.word}\t${it.reading}" }
 
+    /** Only explicitly selected user content is exported, never credentials or conversations. */
+    fun writeBackup(output: java.io.OutputStream) = synchronized(lock) {
+        val root = read()
+        val data = JSONObject()
+        BACKUP_KEYS.forEach { data.put(it, array(root, it)) }
+        val envelope = JSONObject().put("format", "skey-content-backup").put("version", 1)
+            .put("data", data)
+        val writer = JsonWriter(output.bufferedWriter(Charsets.UTF_8))
+        writeJson(writer, envelope)
+        writer.flush()
+    }
+
+    fun restoreBackup(input: java.io.InputStream) {
+        val backup = ContentBackupReader.read(input)
+        require(backup.getString("format") == "skey-content-backup" && backup.getInt("version") == 1)
+        val data = backup.getJSONObject("data")
+        val clean = JSONObject()
+        for (key in BACKUP_KEYS) {
+            val rows = data.getJSONArray(key)
+            val kind = DictionaryKind.entries.find { it.storageKey == key }
+            require(rows.length() <= if (key == "aiPresets") 100 else 10_000)
+            val ids = HashSet<String>(); val names = HashSet<String>()
+            val checked = JSONArray(); var characters = 0L
+            for (index in 0 until rows.length()) {
+                val row = rows.getJSONObject(index)
+                fun string(name: String): String { require(row.get(name) is String); return row.getString(name) }
+                val id = string("id")
+                require(id.isNotBlank() && id.length <= 128 && ids.add(id))
+                val item = JSONObject().put("id", id)
+                when {
+                    kind != null -> {
+                        val word = string("word"); val reading = string("reading")
+                        kind.validateEntry(word, reading)
+                        item.put("word", word).put("reading", reading)
+                        characters += word.length.toLong() + reading.length
+                    }
+                    key == "aiPresets" -> {
+                        val name = string("name"); val prompt = string("prompt")
+                        require(name.isNotBlank() && name.length <= 40 && prompt.isNotBlank() && prompt.length <= 2000)
+                        require(names.add(name.lowercase(java.util.Locale.ROOT)))
+                        item.put("name", name).put("prompt", prompt)
+                        characters += name.length.toLong() + prompt.length
+                    }
+                    else -> {
+                        val value = string("text"); require(value.isNotBlank())
+                        require(!row.has("pinned") || row.get("pinned") is Boolean)
+                        item.put("text", value).put("pinned", row.optBoolean("pinned"))
+                        characters += value.length
+                    }
+                }
+                require(characters <= if (kind != null) MAX_DICTIONARY_CHARACTERS else MAX_PHRASE_CHARACTERS)
+                checked.put(item)
+            }
+            clean.put(key, checked)
+        }
+        synchronized(lock) {
+            val root = read()
+            BACKUP_KEYS.forEach { root.put(it, clean.getJSONArray(it)) }
+            // Invalidate in-flight consumers and continuation state before replacing presets.
+            AiConversationStore(app).clear()
+            DictionaryKind.entries.forEach { advanceDictionaryEpoch(it) }
+            invalidateDictionarySnapshots()
+            aiPresetEpoch.incrementAndGet()
+            write(root)
+            settings.lastCustomAiPresetId = null
+        }
+    }
+
     fun customAiEpoch(): Long = aiPresetEpoch.get()
 
     fun aiPresets(): List<AiPreset> = objects("aiPresets").map {
@@ -512,11 +580,19 @@ class ContentStore(context: Context) {
         } else {
             val row = rows.find { it.getString("id") == id }
             require(row != null) { "此自定义 AI 已删除，请重新添加" }
+            if(row.getString("prompt")!=instruction) {
+                val store=AiConversationStore(app)
+                if(store.load()?.type=="custom:$id") store.clear()
+            }
             row.put("name", title).put("prompt", instruction)
         }
     }
 
-    fun deleteAiPreset(id: String) = mutate("aiPresets") { rows -> rows.removeAll { it.getString("id") == id } }
+    fun deleteAiPreset(id: String) = mutate("aiPresets") { rows ->
+        val store=AiConversationStore(app)
+        if(store.load()?.type=="custom:$id") store.clear()
+        rows.removeAll { it.getString("id") == id }
+    }
 
     fun moveAiPreset(id: String, offset: Int) = mutate("aiPresets") { rows ->
         val index = rows.indexOfFirst { it.getString("id") == id }
@@ -566,6 +642,7 @@ class ContentStore(context: Context) {
         synchronized(lock) {
             clipboardEpoch.incrementAndGet()
             aiPresetEpoch.incrementAndGet()
+            AiConversationStore(app).clear()
             settings.lastCustomAiPresetId = null
             DictionaryKind.entries.forEach { advanceDictionaryEpoch(it) }
             invalidateDictionarySnapshots()
@@ -591,6 +668,7 @@ class ContentStore(context: Context) {
             .put("reading", reading)
 
     companion object {
+        private val BACKUP_KEYS = listOf("dictionary", "englishDictionary", "phrases", "aiPresets")
         const val MAX_CLIPBOARD_ITEM_CHARACTERS = 65_536
         const val MAX_CLIPBOARD_CHARACTERS = 1_000_000
         const val MAX_PHRASE_ENTRIES = 10_000
