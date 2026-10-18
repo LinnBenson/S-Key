@@ -1296,6 +1296,39 @@ class OfflineKeyboardService : InputMethodService() {
         aiTaskRunnable?.let { translationWorker.remove(it) }; aiTaskRunnable = null
     }
 
+    private fun bindSourcePaste(card: View, text: TextView) {
+        val listener = View.OnLongClickListener {
+            val editor = voiceEditorGeneration
+            PopupMenu(this, text).apply {
+                menu.add(0, android.R.id.paste, 0, android.R.string.paste).setOnMenuItemClickListener {
+                    if (active && !secret && translation.enabled && editor == voiceEditorGeneration &&
+                        translationTextView === text && text.isAttachedToWindow) {
+                        val value = runCatching { clips.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text }.getOrNull()
+                        if (value != null) pasteSourceText(value)
+                    }
+                    true
+                }
+                show()
+            }
+            true
+        }
+        text.setOnLongClickListener(listener)
+        card.setOnLongClickListener(listener)
+    }
+
+    private fun pasteSourceText(value: CharSequence) {
+        if (!active || secret || !translation.enabled) return
+        val remaining = 5000 - translation.text.length
+        var end = minOf(value.length, remaining)
+        if (end > 0 && end < value.length && Character.isHighSurrogate(value[end - 1]) && Character.isLowSurrogate(value[end])) end--
+        if (end <= 0) return
+        stopAiRequest(); clearComposition()
+        translation.edit(translation.text + value.subSequence(0, end))
+        aiEditingInstruction = false
+        if (aiMode) renderBody() else updateTranslationPreview()
+        refreshCandidates()
+    }
+
     private fun updateAiPreview() {
         translationTextView?.text=translation.text.ifEmpty { "输入文字，或先选中一段文字" }
         translationTextView?.setTextColor(if(translation.text.isEmpty()) muted else fg)
@@ -1388,6 +1421,7 @@ class OfflineKeyboardService : InputMethodService() {
             card.addView(ScrollView(this).apply { addView(text) },LinearLayout.LayoutParams(-1,0,1f))
             if(source) {
                 translationTextView=text
+                bindSourcePaste(card, text)
                 text.setOnClickListener { if(aiEditingInstruction) { clearComposition(); aiEditingInstruction=false; renderBody() } }
                 text.contentDescription="AI 原文，点击切换到原文输入"
             } else translationResultView=text
@@ -1681,8 +1715,8 @@ class OfflineKeyboardService : InputMethodService() {
             val text = label("",14f).apply { gravity=Gravity.START or Gravity.TOP; setPadding(0,dp(2),0,0) }
             card.addView(ScrollView(this).apply { addView(text) },LinearLayout.LayoutParams(-1,0,1f))
             if (source) {
-                translationTextView=text; text.contentDescription="翻译原文，长按清空"
-                text.setOnLongClickListener { translation.edit(""); clearComposition(); updateTranslationPreview(); refreshCandidates(); true }
+                translationTextView=text; text.contentDescription="翻译原文"
+                bindSourcePaste(card, text)
             } else translationResultView=text
             return card
         }
@@ -3186,8 +3220,9 @@ class OfflineKeyboardService : InputMethodService() {
                 if(usingAiVoice) {
                     val config=runCatching { io.secure.keyboard.data.ApiConfigurationStore(this).load() }.getOrNull()
                     if(config==null) { failVoice("无法读取语音 API 配置");return@post }
+                    if (!chinese && config.googleKey.isBlank()) { failVoice("英文语音需要先配置 Google 翻译密钥"); return@post }
                     aiVoice?.release()
-                    aiVoice=io.secure.keyboard.voice.AiVoiceSession(this,config,voiceListener())
+                    aiVoice=io.secure.keyboard.voice.AiVoiceSession(this,config,voiceListener(), translateToEnglish = !chinese)
                     aiVoice?.begin()
                 } else {
                     if (voice == null) voice = createVoiceSession()

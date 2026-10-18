@@ -329,6 +329,27 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testSourcePasteStaysInDraftAndInvalidatesResults() {
+        for (tool in listOf("translate", "ai")) onMainChecked {
+            invoke("openTool", tool)
+            val session = field<io.secure.keyboard.translation.TranslationSession>("translation")
+            session.edit("before ")
+            val old = session.begin()
+            OfflineKeyboardService::class.java.getDeclaredMethod("pasteSourceText", CharSequence::class.java).apply { isAccessible = true }.invoke(service, "pasted😀")
+            assertEquals("before pasted😀", session.text)
+            session.complete(old, "obsolete")
+            assertEquals("", session.result)
+            assertFalse(session.busy)
+            assertTrue(connection.committed.isEmpty())
+            session.edit("a".repeat(4999))
+            OfflineKeyboardService::class.java.getDeclaredMethod("pasteSourceText", CharSequence::class.java).apply { isAccessible = true }.invoke(service, "😀")
+            assertEquals(4999, session.text.length)
+            invoke("openTool", tool)
+            OfflineKeyboardService::class.java.getDeclaredMethod("pasteSourceText", CharSequence::class.java).apply { isAccessible = true }.invoke(service, "ignored")
+            assertEquals("", session.text)
+        }
+    }
+
     fun testAiDraftAndCustomInstructionStayOutOfHost() {
         onMainChecked {
             invoke("openTool", "ai"); setField("chinese", false)

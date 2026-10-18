@@ -21,6 +21,7 @@ import javax.net.ssl.HttpsURLConnection
 /** Bounded memory-only capture. Explicit stop uploads; cancel invalidates all callbacks. */
 internal class AiVoiceSession(context: Context, private val config: ApiConfiguration,
     private val listener: OfflineVoiceSession.Listener,
+    private val translateToEnglish: Boolean = false,
     private val connect: (URL) -> HttpsURLConnection = { it.openConnection() as HttpsURLConnection }) {
     private val context = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -31,6 +32,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
     @Volatile private var released = false
     @Volatile private var recorder: AudioRecord? = null
     @Volatile private var connection: HttpsURLConnection? = null
+    @Volatile private var translationCall: io.secure.keyboard.translation.GoogleTranslation.Call? = null
     private var busy = false
     private var timer: Runnable? = null
     fun begin() {
@@ -45,7 +47,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         timer?.let(main::removeCallbacks); timer=null
     }
     fun cancel() {
-        generation.incrementAndGet(); stop()
+        generation.incrementAndGet(); stop(); translationCall?.cancel()
         connection?.let { c -> Thread({ runCatching { c.disconnect() } }, "voice-disconnect").apply { isDaemon=true }.start() }
     }
     fun release() { if(released) return; cancel(); released=true; worker.shutdown() }
@@ -79,7 +81,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
             if(!current(id)) return
             check(count>=3200) { "录音太短，请重新说话" }
             emit(id) { listener.onState(OfflineVoiceSession.State.PROCESSING) }
-            val result=transcribe(id,pcm,count)
+            val result=prepareOutput(id,transcribe(id,pcm,count))
             emit(id) { listener.onPreview(result,true); listener.onSegment(1,result) }
         } catch(e:Exception) {
             val message=if(e is IllegalStateException || e is IllegalArgumentException) e.message ?: "识别失败" else "语音连接失败或超时，请重试"
@@ -90,6 +92,19 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
             main.post { busy=false; if(current(id)) { timer?.let(main::removeCallbacks);timer=null;listener.onState(OfflineVoiceSession.State.IDLE) } }
         }
     }
+    private fun prepareOutput(id: Long, transcript: String): String {
+        check(current(id)) { "已取消" }
+        if (!translateToEnglish) return transcript
+        val call = io.secure.keyboard.translation.GoogleTranslation.Call(connect)
+        translationCall = call
+        try {
+            check(current(id)) { "已取消" }
+            val result = call.execute(config, transcript, "auto", "en")
+            check(current(id)) { "已取消" }
+            return result
+        } finally { translationCall = null }
+    }
+
     private fun transcribe(id:Long, pcm:ByteArray, count:Int):String {
         val c=config.validated()
         require(c.voiceKey.isNotBlank()) { "请配置语音 API 密钥" }

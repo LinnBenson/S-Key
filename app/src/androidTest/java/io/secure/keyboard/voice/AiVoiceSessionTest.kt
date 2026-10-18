@@ -19,6 +19,7 @@ class AiVoiceSessionTest : AndroidTestCase() {
     private class Connection:HttpsURLConnection(URL("https://example.invalid/stt")) {
         val sent=ByteArrayOutputStream()
         var status=200
+        var response = """{"text":"synthetic transcript"}"""
         var disconnected=false
         override fun connect() {}
         override fun disconnect() { disconnected=true }
@@ -28,13 +29,52 @@ class AiVoiceSessionTest : AndroidTestCase() {
         override fun getServerCertificates():Array<Certificate> = emptyArray()
         override fun getOutputStream()=sent
         override fun getResponseCode()=status
-        override fun getInputStream()="""{"text":"synthetic transcript"}""".byteInputStream()
+        override fun getInputStream()=response.byteInputStream()
     }
     private fun transcribe(session:AiVoiceSession):String {
         val method=AiVoiceSession::class.java.getDeclaredMethod("transcribe",Long::class.javaPrimitiveType,ByteArray::class.java,Int::class.javaPrimitiveType)
         method.isAccessible=true
         return method.invoke(session,0L,ByteArray(3200),3200) as String
     }
+    private fun output(session: AiVoiceSession, text: String): String =
+        AiVoiceSession::class.java.getDeclaredMethod("prepareOutput", Long::class.javaPrimitiveType, String::class.java)
+            .apply { isAccessible = true }.invoke(session, 0L, text) as String
+
+    fun testEnglishOutputTranslatesBeforeCommit() {
+        val conn = Connection().apply { response = """{"data":{"translations":[{"translatedText":"Hello"}]}}""" }
+        val session = AiVoiceSession(context, ApiConfiguration(voiceKey="synthetic-key", googleKey="synthetic-google"), listener, true) { conn }
+        try {
+            assertEquals("Hello", output(session, "你好"))
+            val body = conn.sent.toString("UTF-8")
+            assertTrue(body.contains("\"target\":\"en\""))
+            assertFalse(body.contains("\"source\""))
+            assertTrue(conn.disconnected)
+        } finally { session.release() }
+    }
+
+    fun testChineseOutputDoesNotTranslate() {
+        val session = AiVoiceSession(context, ApiConfiguration(), listener) { error("Unexpected network") }
+        try { assertEquals("你好", output(session, "你好")) } finally { session.release() }
+    }
+
+    fun testCanceledEnglishOutputDoesNotStartTranslation() {
+        val session = AiVoiceSession(context, ApiConfiguration(googleKey="synthetic-google"), listener, true) { error("Unexpected network") }
+        try {
+            session.cancel()
+            try { output(session, "你好"); fail("Canceled output must not translate") }
+            catch (e: java.lang.reflect.InvocationTargetException) { assertTrue(e.cause is IllegalStateException) }
+        } finally { session.release() }
+    }
+
+    fun testEnglishTranslationFailureDoesNotReturnTranscript() {
+        val conn = Connection().apply { status=403 }
+        val session = AiVoiceSession(context, ApiConfiguration(googleKey="synthetic-google"), listener, true) { conn }
+        try {
+            try { output(session, "你好"); fail("Must not commit untranslated text") }
+            catch (e: java.lang.reflect.InvocationTargetException) { assertTrue(e.cause is IllegalStateException) }
+        } finally { session.release() }
+    }
+
     fun testWavUploadAndResponseWithoutRealNetwork() {
         val conn=Connection()
         val session=AiVoiceSession(context,ApiConfiguration(voiceKey="synthetic-key"),listener) { conn }
