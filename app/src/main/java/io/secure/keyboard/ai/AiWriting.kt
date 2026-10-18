@@ -36,23 +36,35 @@ internal object AiWriting {
         "更正式" to "将当前文字改成规范、严谨、得体的书面表达，替换随意口语和网络用语，明确句间关系；不增加套话、身份、承诺或未经证实的结论。",
         "更文艺" to "在不改变原意和事实的前提下增强语言的节奏、韵律和表现力，可使用不新增事实的修辞。避免堆砌辞藻、夸大情绪或虚构场景，保持可读性。",
     )
-    fun refinementInstruction(original: String, followup: String): String =
-        "原任务要求：\n$original\n\n本次补充要求：\n$followup\n\n请在当前正文基础上继续修改，保留原任务的用途、格式、语言和其他仍适用的要求。本次补充要求明确改变的部分以本次要求为准，其他要求继续有效。"
-
-    fun payload(model: String, text: String, instruction: String, custom: Boolean = false): JSONObject {
-        require(model.isNotBlank()) { "请先选择 Grok 模型" }
-        require(text.isNotBlank() && text.length <= 20000) { "请输入 1–20000 字符的原文" }
-        val messages=JSONArray()
-        if(custom) {
-            messages.put(JSONObject().put("role","system").put("content",instruction))
-            messages.put(JSONObject().put("role","user").put("content",text))
-        } else {
-            messages.put(JSONObject().put("role","system").put("content",common))
-            messages.put(JSONObject().put("role","user").put("content","处理要求：\n$instruction\n\n待处理原文：\n$text"))
-        }
-        return JSONObject().put("model",model).put("stream",true).put("messages",messages)
+    fun contextKey(config: ApiConfiguration): String {
+        val c = config.validated()
+        val bytes = "${c.grokUrl}\u0000${c.grokModel}\u0000${c.grokKey}".toByteArray(Charsets.UTF_8)
+        return try { java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it) } } finally { bytes.fill(0) }
     }
-    class Call {
+
+    private fun validResponseId(value: String) = value.matches(Regex("[A-Za-z0-9_-]{1,256}"))
+
+    fun payload(model: String, text: String, instruction: String, custom: Boolean = false,
+                previousResponseId: String? = null): JSONObject {
+        require(model.isNotBlank()) { "请先选择 Grok 模型" }
+        require(text.isNotBlank() && text.length <= 20000) { "请输入 1–20000 字符的原文或补充要求" }
+        require(previousResponseId == null || validResponseId(previousResponseId)) { "会话标识无效，请重新生成" }
+        // Initial system messages belong to the stored conversation. Continuations send
+        // only the new user requirement: no duplicated source, result or task prompt.
+        val input = JSONArray()
+        if (previousResponseId == null) {
+            input.put(JSONObject().put("role","system").put("content",
+                if (custom) instruction else "$common\n首条用户消息为待处理原文；后续用户消息为补充要求，请据此继续修改上一轮正文。\n\n处理要求：\n$instruction"))
+        }
+        input.put(JSONObject().put("role","user").put("content",text))
+        return JSONObject().put("model",model).put("stream",true).put("store",true)
+            .put("input",input)
+            .apply { if (previousResponseId != null) put("previous_response_id",previousResponseId) }
+    }
+    class Call(private val connect: (URL) -> HttpsURLConnection = { it.openConnection() as HttpsURLConnection }) {
+        var responseId: String? = null
+            private set
         private val canceled = AtomicBoolean(false)
         @Volatile private var connection: HttpsURLConnection? = null
         fun cancel() {
@@ -60,12 +72,12 @@ internal object AiWriting {
             val current = connection
             if (current != null) Thread({ runCatching { current.disconnect() } }, "ai-request-cancel").apply { isDaemon=true }.start()
         }
-        fun execute(config: ApiConfiguration, text: String, instruction: String, onPartial: (String) -> Unit = {}, custom: Boolean = false): String {
+        fun execute(config: ApiConfiguration, text: String, instruction: String, onPartial: (String) -> Unit = {}, custom: Boolean = false, previousResponseId: String? = null): String {
             val c = config.validated()
             require(c.grokKey.isNotBlank()) { "请先在接口 API 配置中保存 Grok 密钥" }
             check(!canceled.get()) { "已停止生成" }
-            val bytes = payload(c.grokModel, text, instruction, custom).toString().toByteArray(Charsets.UTF_8)
-            val conn = URL(c.grokUrl + "/chat/completions").openConnection() as HttpsURLConnection
+            val bytes = payload(c.grokModel, text, instruction, custom, previousResponseId).toString().toByteArray(Charsets.UTF_8)
+            val conn = connect(URL(c.grokUrl + "/responses"))
             connection = conn
             try {
                 check(!canceled.get()) { "已停止生成" }
@@ -78,7 +90,7 @@ internal object AiWriting {
                 val status=conn.responseCode
                 check(status==200) { when(status) {
                     401,403 -> "Grok 鉴权失败，请检查密钥和模型权限"
-                    400,404 -> "模型或接口地址不可用，请检查 API 配置"
+                    400,404,410 -> if (previousResponseId != null) "会话已失效或接口不支持续聊，请清空原文后重新生成" else "模型或接口不支持 Responses API，请检查 API 配置"
                     429 -> "请求过于频繁或额度不足，请稍后重试"
                     else -> "生成失败（HTTP $status），请稍后重试"
                 } }
@@ -90,6 +102,8 @@ internal object AiWriting {
             } finally { bytes.fill(0); connection=null; conn.disconnect() }
         }
         internal fun readStream(reader: java.io.Reader, onPartial: (String) -> Unit = {}): String {
+            responseId = null
+            var completedId: String? = null
             val output = StringBuilder()
             val line = StringBuilder()
             val event = StringBuilder()
@@ -101,24 +115,48 @@ internal object AiWriting {
             fun dispatch() {
                 if (event.isEmpty()) return
                 val data = event.toString().trim(); event.setLength(0)
-                if (data == "[DONE]") { finished = true; return }
+                // Only response.completed makes a result eligible for insertion or continuation.
+                if (data == "[DONE]") return
                 val json = try { JSONObject(data) } catch (_: Exception) { error("流式响应格式错误，请检查接口") }
-                check(!json.has("error")) { "生成失败，请重试" }
-                val choice = json.optJSONArray("choices")?.optJSONObject(0) ?: return
-                val reason = choice.optString("finish_reason")
-                check(reason != "length") { "结果超出长度限制，请缩短原文后重试" }
-                check(reason.isEmpty() || reason == "null" || reason == "stop") { "服务未返回完整文字结果" }
-                val delta = choice.optJSONObject("delta")?.opt("content") as? String
-                if (delta != null) {
-                    check(output.length + delta.length <= 20000) { "AI 响应过大，请缩短原文" }
-                    output.append(delta)
-                    val now = System.nanoTime()
-                    if (now - lastUpdate >= 40_000_000L) {
-                        check(!canceled.get()) { "已停止生成" }
-                        onPartial(output.toString()); lastUpdate = now
+                val type = json.optString("type")
+                check(type !in listOf("error", "response.failed", "response.incomplete", "response.refusal.delta") &&
+                    (!json.has("error") || json.isNull("error"))) { "服务未返回完整文字结果，请重试" }
+                when (type) {
+                    "response.output_text.delta" -> {
+                        val delta = json.opt("delta") as? String ?: error("流式响应格式错误，请检查接口")
+                        check(output.length + delta.length <= 20000) { "AI 响应过大，请缩短原文" }
+                        output.append(delta)
+                        val now = System.nanoTime()
+                        if (now - lastUpdate >= 40_000_000L) {
+                            check(!canceled.get()) { "已停止生成" }
+                            onPartial(output.toString()); lastUpdate = now
+                        }
+                    }
+                    "response.completed" -> {
+                        val response = json.optJSONObject("response") ?: error("响应缺少完成信息")
+                        check(response.optString("status") == "completed" &&
+                            (!response.has("error") || response.isNull("error"))) { "服务未返回完整文字结果" }
+                        val id = response.optString("id")
+                        check(validResponseId(id)) { "响应缺少有效会话标识，请检查接口" }
+                        val items = response.optJSONArray("output") ?: error("响应缺少正文")
+                        val text = StringBuilder()
+                        for (i in 0 until items.length()) {
+                            val item = items.getJSONObject(i)
+                            if (item.optString("type") != "message") continue
+                            check(item.optString("role") == "assistant") { "响应角色错误" }
+                            val parts = item.optJSONArray("content") ?: continue
+                            for (j in 0 until parts.length()) {
+                                val part = parts.getJSONObject(j)
+                                check(part.optString("type") != "refusal") { "服务未返回可用正文" }
+                                if (part.optString("type") == "output_text") text.append(part.getString("text"))
+                                check(text.length <= 20000) { "AI 响应过大，请缩短原文" }
+                            }
+                        }
+                        check(text.isNotBlank()) { "未收到可用的文字结果，请重试" }
+                        output.setLength(0); output.append(text)
+                        completedId = id; finished = true
                     }
                 }
-                if (reason == "stop") finished = true
             }
             fun finishLine() {
                 val value = line.toString(); line.setLength(0)
@@ -146,6 +184,7 @@ internal object AiWriting {
             }
             check(!canceled.get()) { "已停止生成" }
             check(finished) { "生成连接中断，请重新生成" }
+            responseId = completedId
             return output.toString().trim()
         }
     }

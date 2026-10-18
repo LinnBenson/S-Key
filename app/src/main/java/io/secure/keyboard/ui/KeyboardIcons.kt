@@ -3,6 +3,7 @@ import io.secure.keyboard.R
 /** Shared UI icon catalog: Miuix plus dedicated Material keyboard symbols. */
 object KeyboardIcons {
     fun resource(kind: String): Int = when(kind) {
+        "send" -> R.drawable.ic_miuix_send
         "ai" -> R.drawable.ic_keyboard_auto_awesome
         "translate" -> R.drawable.ic_miuix_translate
         "globe" -> R.drawable.ic_keyboard_language

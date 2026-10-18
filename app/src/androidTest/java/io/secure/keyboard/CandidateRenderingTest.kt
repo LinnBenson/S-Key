@@ -363,6 +363,66 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testExpandedCandidatesKeepAssistantEditorAndCursor() {
+        for (tool in listOf("translate", "ai")) {
+            for (followup in if (tool == "ai") listOf(false, true) else listOf(false)) {
+                for (zh in listOf(true, false)) {
+                    lateinit var editor: EditText
+                    var panelHeight = 0
+                    onMainChecked {
+                        invoke("openTool", tool)
+                        setField("chinese", zh)
+                        editor = field<TextView>(if (followup) "aiFollowupView" else "translationTextView") as EditText
+                        editor.requestFocus()
+                        editor.setText(if (zh) "甲乙丙丁" else "hel tail")
+                        editor.setSelection(if (zh) 1 else 3, if (zh) 3 else 3)
+                    }
+                    if (zh) typePending("nihao") else {
+                        onMainChecked { invoke("refreshCandidates") }
+                        awaitResults()
+                    }
+                    instrumentation.waitForIdleSync()
+                    onMainChecked {
+                        panelHeight = field<View>("box").height
+                        field<View>("hideIcon").performClick()
+                    }
+                    instrumentation.waitForIdleSync()
+                    onMainChecked {
+                        assertSame(editor, field<TextView>(if (followup) "aiFollowupView" else "translationTextView"))
+                        assertTrue(editor.isAttachedToWindow)
+                        assertTrue(editor.hasFocus())
+                        assertEquals(panelHeight, field<View>("box").height)
+                        assertEquals(if (zh) 1 else 3, editor.selectionStart)
+                        assertEquals(3, editor.selectionEnd)
+                        field<View>("hideIcon").performClick()
+                        assertSame(editor, field<TextView>(if (followup) "aiFollowupView" else "translationTextView"))
+                        field<View>("hideIcon").performClick()
+                    }
+                    instrumentation.waitForIdleSync()
+                    awaitResults()
+                    onMainChecked {
+                        val value = field<List<String>>("candidateTexts").first()
+                        val grid = field<CandidateGrid>("candidateGrid")
+                        assertEquals(value, (grid.getChildAt(0) as TextView).text.toString())
+                        assertTrue(grid.getChildAt(0).isShown)
+                        assertEquals(field<Int>("generation"), field<Int>("candidateGeneration"))
+                        grid.getChildAt(0).performClick()
+                        assertSame(editor, field<TextView>(if (followup) "aiFollowupView" else "translationTextView"))
+                        assertEquals(if (zh) "甲" + value + "丁" else value + " tail", editor.text.toString())
+                        val cursor = value.length + 1
+                        assertEquals(cursor, editor.selectionStart)
+                        assertEquals(cursor, editor.selectionEnd)
+                        assertFalse(field<Boolean>("candidatesExpanded"))
+                        invoke("type", "!")
+                        assertEquals(if (zh) "甲" + value + "!丁" else value + " !tail", editor.text.toString())
+                        assertTrue(connection.committed.isEmpty())
+                        invoke("openTool", tool)
+                    }
+                }
+            }
+        }
+    }
+
     fun testAssistantEditorsReplaceSelectionAndDeleteAtCursor() {
         for(tool in listOf("translate","ai")) onMainChecked {
             invoke("openTool",tool)
@@ -585,6 +645,100 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             assertNull(field<Any?>("inlineOfflineVoice"))
             assertTrue(voice.javaClass.getDeclaredField("released").apply { isAccessible=true }.getBoolean(voice))
         }
+    }
+
+    fun testResponseConversationBoundToSourceAndOnlyFollowupsReuseId() {
+        val requests=java.util.Collections.synchronizedList(mutableListOf<org.json.JSONObject>())
+        var config=io.secure.keyboard.data.ApiConfiguration(grokUrl="https://example.invalid/v1",grokKey="synthetic-key",grokModel="test-model")
+        val provider: () -> io.secure.keyboard.data.ApiConfiguration = { config }
+        val factory: () -> io.secure.keyboard.ai.AiWriting.Call = {
+            io.secure.keyboard.ai.AiWriting.Call { url ->
+                object: javax.net.ssl.HttpsURLConnection(url) {
+                    val sent=java.io.ByteArrayOutputStream()
+                    override fun connect() {}
+                    override fun disconnect() {}
+                    override fun usingProxy()=false
+                    override fun getCipherSuite()="test"
+                    override fun getLocalCertificates(): Array<java.security.cert.Certificate>?=null
+                    override fun getServerCertificates(): Array<java.security.cert.Certificate> = emptyArray()
+                    override fun getOutputStream()=sent
+                    override fun getResponseCode()=200
+                    override fun getInputStream(): java.io.InputStream {
+                        requests.add(org.json.JSONObject(sent.toString("UTF-8")))
+                        val n=requests.size
+                        return ("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"id\":\"resp_$n\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"result $n\"}]}]}}\n\n").byteInputStream()
+                    }
+                }
+            }
+        }
+        val settings=field<SettingsStore>("settings")
+        val auto=settings.aiAutoApply
+        fun finish(n: Int) = waitFor("response $n complete") {
+            requests.size==n && !field<io.secure.keyboard.translation.TranslationSession>("translation").busy && field<Any?>("aiResponseLink")!=null
+        }
+        fun select(offset:Int) = OfflineKeyboardService::class.java.getDeclaredMethod("selectAiResult",Int::class.javaPrimitiveType)
+            .apply { isAccessible=true }.invoke(service,offset)
+        try {
+            onMainChecked {
+                settings.aiAutoApply=false
+                setField("aiConfiguration",provider); setField("aiCallFactory",factory)
+                invoke("openTool","ai"); setField("aiModel","test-model"); setField("aiTask","polish")
+                (field<TextView>("translationTextView") as EditText).setText("source A")
+                invoke("applyEnter")
+            }
+            finish(1)
+            assertFalse(requests[0].has("previous_response_id"))
+            onMainChecked {
+                val followup=field<TextView>("aiFollowupView") as EditText
+                followup.requestFocus()
+                followup.setText("")
+                invoke("applyEnter")
+                assertFalse(field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
+                assertEquals(1,requests.size)
+                followup.setText("first requirement")
+                invoke("applyEnter")
+            }
+            finish(2)
+            assertEquals("resp_1",requests[1].getString("previous_response_id"))
+            assertEquals(1,requests[1].getJSONArray("input").length())
+            assertFalse(requests[1].has("instructions"))
+            assertEquals("first requirement",requests[1].getJSONArray("input").getJSONObject(0).getString("content"))
+            onMainChecked { invoke("refineAi","second requirement") }
+            finish(3)
+            assertEquals("resp_2",requests[2].getString("previous_response_id"))
+            onMainChecked {
+                (field<TextView>("aiFollowupView") as EditText).requestFocus()
+                (field<TextView>("translationTextView") as EditText).requestFocus()
+                invoke("applyEnter")
+            }
+            finish(4)
+            assertFalse("Original generation must always start a new conversation",requests[3].has("previous_response_id"))
+            assertEquals("source A",requests[3].getJSONArray("input").getJSONObject(1).getString("content"))
+            onMainChecked { select(-2); invoke("refineAi","branch requirement") }
+            finish(5)
+            assertEquals("resp_2",requests[4].getString("previous_response_id"))
+            onMainChecked {
+                val source=field<TextView>("translationTextView") as EditText
+                source.setText("source B"); invoke("refineAi","must not send")
+                assertNull(field<Any?>("aiResponseLink"))
+                source.setText("source A")
+                select(-1); invoke("refineAi","still must not send")
+                assertEquals(5,requests.size)
+                assertFalse(field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
+                invoke("applyEnter")
+            }
+            finish(6)
+            assertFalse(requests[5].has("previous_response_id"))
+            onMainChecked {
+                config=config.copy(grokKey="changed-synthetic-key")
+                invoke("refineAi","wrong account must not send")
+                assertFalse(field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
+                assertEquals(6,requests.size)
+                invoke("openTool","ai")
+                assertNull(field<Any?>("aiResponseLink"))
+                assertTrue(field<List<Any>>("aiResults").isEmpty())
+            }
+        } finally { onMainChecked { settings.aiAutoApply=auto } }
     }
 
     fun testAiHistorySwitchRestoresRegenerationContext() {

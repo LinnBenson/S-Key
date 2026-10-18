@@ -325,7 +325,8 @@ open class SettingsActivity : ComponentActivity() {
             field("模型 ID", draft.grokModel) { model.apiDraft = draft.copy(grokModel = it) }
             Action("获取可用模型", !model.busy) { model.fetchApiModels() }
             model.apiModels.forEach { id -> Choice(id, draft.grokModel == id) { model.apiDraft = draft.copy(grokModel = id) } }
-            Info("使用当前填写的地址和密钥获取模型。也可手动输入模型 ID，修改后点击保存。")
+            Info("使用当前填写的地址和密钥获取模型。也可手动输入模型 ID，修改后点击保存。文字生成需要支持 Responses API。")
+            Info("多轮补充通过响应 ID 续聊，服务端会保存输入与回答。xAI 保存 30 天；退出助手只清除本机会话，不会删除云端记录。自定义服务的留存规则以服务商为准。")
         }
         Group("AI 语音 API") {
             field("语音识别端点（完整 HTTPS 地址）", draft.voiceUrl) { model.apiDraft = draft.copy(voiceUrl = it) }
