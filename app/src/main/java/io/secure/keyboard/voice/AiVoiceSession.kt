@@ -64,7 +64,9 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
             mic=AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,maxOf(minimum*2,6400))
             val input=mic; recorder=input
             check(input.state==AudioRecord.STATE_INITIALIZED) { "麦克风初始化失败" }
-            if(!gate.startIfAllowed({current(id) && recording}) { input.startRecording() }) return
+            check(gate.startIfAllowed({current(id) && recording}) { input.startRecording() }) {
+                "录音尚未开始，请按住空格等待聆听提示后再说话"
+            }
             check(input.recordingState==AudioRecord.RECORDSTATE_RECORDING) { "无法启动麦克风" }
             emit(id) {
                 listener.onState(OfflineVoiceSession.State.LISTENING)

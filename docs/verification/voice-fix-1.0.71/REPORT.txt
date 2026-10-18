@@ -1,0 +1,16 @@
+Voice input fixes (unreleased), 2026-10-19
+
+Fixed: host onUpdateSelection notifications no longer cancel voice targeted at the separate AI/translation local input. Local editor identity, selection, text, session and lifecycle guards remain enforced.
+Fixed: held assistant voice uses release-to-recognize UI; tap AI voice retains the recognize button. Provider mode is captured per session.
+Fixed: held offline segments accumulate and deduplicate until finalization; click offline retains endpoint commit.
+Fixed: premature AI recording release reports readiness failure. Empty final results report retry; capacity overflow reports failure without partial insertion.
+
+Validation:
+assembleDebug, assembleDebugAndroidTest, testDebugUnitTest: BUILD SUCCESSFUL.
+207 JVM tests passed (0 failures/errors).
+49 emulator device tests: 48 passed, 1 failed.
+All 10 AiVoiceSessionTest, 9 SpaceHoldTouchTrackerTest and 3 targeted CandidateRenderingTest passed. New test covers AI/translation, held/click UI, delayed host cursor notification, final insertion, offline segment dedup and stale callbacks.
+Known unrelated failure: DirectVoiceInputTest.testVoicePreviewCentersPlaceholderAndMultilineTextWithoutHidingStatusOrErrors expects "..." but current preview is empty. No all-green device claim.
+Privacy static audit passed.
+Debug APK installed with -r, preserving application data.
+Cloud transcription uses mocked transport in tests. Real microphone speech/provider end-to-end accuracy and long-duration memory profiling were not verified in this run.

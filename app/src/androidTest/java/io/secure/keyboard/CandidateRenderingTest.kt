@@ -595,6 +595,63 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testAssistantVoiceHoldUiAndOfflineSegments() {
+        val settings = SettingsStore(context)
+        val previousMode = settings.voiceMode
+        try {
+            onMainChecked {
+                fun texts(view: View): List<String> = (if (view is TextView) listOf(view.text.toString()) else emptyList()) +
+                    if (view is ViewGroup) (0 until view.childCount).flatMap { texts(view.getChildAt(it)) } else emptyList()
+                fun begin(held: Boolean): io.secure.keyboard.voice.OfflineVoiceSession.Listener {
+                    setField("assistantHeldVoice", held)
+                    OfflineKeyboardService::class.java.getDeclaredMethod("startAssistantVoice", Boolean::class.javaPrimitiveType)
+                        .apply { isAccessible = true }.invoke(service, held)
+                    val session = if (settings.voiceMode == "ai") field<Any>("aiCommandVoice") else field<Any>("inlineOfflineVoice")
+                    return session.javaClass.getDeclaredField("listener").apply { isAccessible = true }.get(session)
+                        as io.secure.keyboard.voice.OfflineVoiceSession.Listener
+                }
+                for (mode in listOf("translate", "ai")) {
+                    invoke("openTool", mode)
+                    val source = field<EditText>("translationTextView")
+                    source.setText("前后"); source.setSelection(1)
+                    settings.voiceMode = "offline"
+                    val listener = begin(true)
+                    listener.onState(io.secure.keyboard.voice.OfflineVoiceSession.State.LISTENING)
+                    assertTrue(texts(field<View>("assistantVoicePanel")).contains("按住说话，松手识别"))
+                    assertFalse(texts(field<View>("assistantVoicePanel")).contains("识别语音"))
+                    listener.onSegment(1, "第一段")
+                    listener.onSegment(1, "重复段")
+                    assertEquals("前后", source.text.toString())
+                    assertNotNull(field<Any?>("inlineOfflineVoice"))
+                    listener.onSegment(2, "第二段")
+                    listener.onPreview("第二段", true)
+                    assertEquals("前第一段第二段后", source.text.toString())
+                    assertNull(field<Any?>("inlineOfflineVoice"))
+                    listener.onPreview("迟到", true)
+                    assertEquals("前第一段第二段后", source.text.toString())
+                    assertTrue(connection.committed.isEmpty())
+                    val empty = begin(true)
+                    empty.onState(io.secure.keyboard.voice.OfflineVoiceSession.State.IDLE)
+                    assertNull(field<View?>("assistantVoicePanel"))
+                    assertEquals("前第一段第二段后", source.text.toString())
+                    settings.voiceMode = "ai"
+                    for (held in listOf(true, false)) {
+                        val ai = begin(held)
+                        assertEquals(!held, texts(field<View>("assistantVoicePanel")).contains("识别语音"))
+                        // A delayed host cursor notification does not move the local source caret.
+                        service.onUpdateSelection(0, 0, 2, 2, -1, -1)
+                        assertNotNull("Host cursor callback must not cancel inline AI recognition", field<Any?>("aiCommandVoice"))
+                        val expected = source.text.toString().let { it.substring(0, source.selectionStart) + "AI文字" + it.substring(source.selectionEnd) }
+                        ai.onPreview("AI文字", true)
+                        assertEquals(expected, source.text.toString())
+                        assertNull(field<View?>("assistantVoicePanel"))
+                    }
+                    invoke("openTool", mode)
+                }
+            }
+        } finally { onMainChecked { invoke("cancelAiCommandVoice"); settings.voiceMode = previousMode } }
+    }
+
     fun testCancelAiRequestAlsoReleasesCommandVoice() {
         onMainChecked {
             invoke("openTool", "ai")

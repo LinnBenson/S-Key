@@ -423,7 +423,10 @@ class OfflineKeyboardService : InputMethodService() {
             val expected = if (newSelStart == newSelEnd) spacingExpectedCursors.indexOf(newSelStart) else -1
             if (expected >= 0) repeat(expected + 1) { spacingExpectedCursors.removeFirst() }
             else { spacingSelectionVersion++; spacingExpectedCursors.clear() }
-            cancelAiCommandVoice()
+            // This callback describes the HOST editor, not the assistant's local EditText.
+            // Delayed host cursor acknowledgements must not discard an inline voice result.
+            // Actual editor replacement is still revoked by voiceEditorGeneration/lifecycle;
+            // local draft and selection changes are guarded by the inline listener itself.
             aiSelectionEpoch++
             aiSelectionTarget.revoke()
             if (aiMode) updateTranslationPreview()
@@ -1105,7 +1108,7 @@ class OfflineKeyboardService : InputMethodService() {
     }
 
     private fun commitInputText(value: String): Boolean {
-        if (aiCommandVoice != null) cancelAiCommandVoice()
+        if (aiCommandVoice != null || inlineOfflineVoice != null) cancelAiCommandVoice()
         if (translation.enabled) {
             activeAssistantEditor()?.let { editor ->
                 val start=minOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(0)
@@ -2089,10 +2092,13 @@ class OfflineKeyboardService : InputMethodService() {
         oldAiVoice?.release(); oldOfflineVoice?.release()
     }
 
-    private fun toggleAiCommandVoice() {
+    private fun toggleAiCommandVoice() = startAssistantVoice(false)
+
+    private fun startAssistantVoice(held: Boolean) {
         if(aiCommandVoice!=null || inlineOfflineVoice!=null) { aiCommandVoice?.stop(); inlineOfflineVoice?.stop(); toast("识别中…"); return }
         val target=activeAssistantEditor() ?: return
         if(!active || secret || translation.busy) return
+        val usingAi = settings.voiceMode == "ai"
         if(checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED) {
             toast("请先在语音设置中允许麦克风权限"); return
         }
@@ -2108,7 +2114,7 @@ class OfflineKeyboardService : InputMethodService() {
         overlay.addView(preview,LinearLayout.LayoutParams(-1,dp(50)))
         val actions=LinearLayout(this)
         overlay.addView(actions,LinearLayout.LayoutParams(-1,dp(44)))
-        if(settings.voiceMode=="ai") actions.addView(button("识别语音") { aiCommandVoice?.stop() },LinearLayout.LayoutParams(0,-1,1f).apply { rightMargin=dp(10) })
+        if(usingAi && !held) actions.addView(button("识别语音") { aiCommandVoice?.stop() },LinearLayout.LayoutParams(0,-1,1f).apply { rightMargin=dp(10) })
         actions.addView(button("取消") { cancelAiCommandVoice() },LinearLayout.LayoutParams(0,-1,1f))
         assistantVoicePanel=overlay
         body.addView(overlay,FrameLayout.LayoutParams(-1,-1))
@@ -2118,18 +2124,39 @@ class OfflineKeyboardService : InputMethodService() {
             editor==voiceEditorGeneration && connection===currentInputConnection && target===activeAssistantEditor() &&
             target.isAttachedToWindow && target.selectionStart==start && target.selectionEnd==end && target.text.toString()==original
         val offlineSegments=StringBuilder()
+        var lastSegmentId = Long.MIN_VALUE
+        fun finish(text: String) {
+            if (!valid()) { cancelAiCommandVoice(); toast("输入位置已改变，语音已停止"); return }
+            val capacity = 5000 - (target.length() - kotlin.math.abs(end - start))
+            cancelAiCommandVoice()
+            when {
+                text.isBlank() -> toast("未识别到有效文字，请重试")
+                text.length > capacity -> toast("语音文字超出原文容量，请缩短录音后重试")
+                else -> commitInputText(text)
+            }
+        }
         val listener=object: OfflineVoiceSession.Listener {
             override fun onSegment(segmentId:Long,text:String) {
-                if(settings.voiceMode!="ai" && valid()) {
-                    cancelAiCommandVoice(); commitInputText(text)
+                if (!usingAi && valid() && segmentId > lastSegmentId) {
+                    lastSegmentId = segmentId
+                    if (offlineSegments.length + text.length > 5000) {
+                        cancelAiCommandVoice(); toast("语音文字超出原文容量，请缩短录音后重试"); return
+                    }
+                    offlineSegments.append(text)
+                    // Tap-mode offline input keeps its endpoint auto-commit behavior.
+                    // Held input must wait for release/finalization and retain every segment.
+                    if (!held) finish(offlineSegments.toString())
                 }
             }
             override fun onLevel(level:Float) { if(valid()) waveform.setLevel(level) }
             override fun onState(state:OfflineVoiceSession.State) {
                 if(epoch!=aiCommandEpoch) return
-                if(!valid()) { cancelAiCommandVoice(); return }
+                if(!valid()) { cancelAiCommandVoice(); toast("输入位置已改变，语音已停止"); return }
+                if (state == OfflineVoiceSession.State.IDLE) {
+                    finish(if (usingAi) "" else offlineSegments.toString()); return
+                }
                 status.text=when(state) {
-                    OfflineVoiceSession.State.LISTENING -> "聆听中"
+                    OfflineVoiceSession.State.LISTENING -> if (held) "按住说话，松手识别" else "聆听中"
                     OfflineVoiceSession.State.PROCESSING -> "识别中"
                     OfflineVoiceSession.State.LOADING -> "准备聆听"
                     else -> "识别完成"
@@ -2139,13 +2166,11 @@ class OfflineKeyboardService : InputMethodService() {
                 if(epoch!=aiCommandEpoch) return
                 if(valid()) preview.text=text
                 if(!isFinal) return
-                if(!valid()) { cancelAiCommandVoice(); return }
-                cancelAiCommandVoice()
-                commitInputText(if(settings.voiceMode=="ai") text else offlineSegments.toString())
+                finish(if (usingAi) text else offlineSegments.toString().ifEmpty { text })
             }
             override fun onError(message:String) { if(epoch==aiCommandEpoch) { cancelAiCommandVoice(); toast(message) } }
         }
-        if(settings.voiceMode=="ai") {
+        if(usingAi) {
             val config=try { io.secure.keyboard.data.ApiConfigurationStore(this).load() } catch(_:Exception) { cancelAiCommandVoice(); toast("请检查 AI 语音配置"); return }
             aiCommandVoice=io.secure.keyboard.voice.AiVoiceSession(this,config,listener,translateToEnglish=false)
             aiCommandVoice?.begin()
@@ -2759,7 +2784,7 @@ class OfflineKeyboardService : InputMethodService() {
                 if(translation.enabled) {
                     if(spaceHoldTouch.claim(spacePointerId,spaceDownVersion)) {
                         assistantHeldVoice=true
-                        toggleAiCommandVoice()
+                        startAssistantVoice(true)
                         if(assistantVoicePanel==null) cancelAiCommandVoice()
                     }
                 } else beginHeldVoice(spacePointerId, spaceDownVersion)
