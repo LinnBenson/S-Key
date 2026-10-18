@@ -336,6 +336,19 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testEmptySourceBackspaceClosesOnlyAfterLastCharacterDeleted() {
+        for (tool in listOf("translate", "ai")) onMainChecked {
+            invoke("openTool", tool)
+            val session = field<io.secure.keyboard.translation.TranslationSession>("translation")
+            session.edit("字")
+            invoke("applyBackspace")
+            assertEquals("", session.text); assertTrue(session.enabled)
+            invoke("applyBackspace")
+            assertFalse(session.enabled); assertFalse(field<Boolean>("aiMode"))
+            assertTrue(connection.committed.isEmpty())
+        }
+    }
+
     fun testSourcePasteStaysInDraftAndInvalidatesResults() {
         for (tool in listOf("translate", "ai")) onMainChecked {
             invoke("openTool", tool)

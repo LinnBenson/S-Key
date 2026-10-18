@@ -15,6 +15,9 @@ internal class TranslationSession(private val onInvalidate: () -> Unit = {}) {
     }
     fun invalidate() { onInvalidate(); revision++; result = ""; busy = false; status = "输入原文后点击翻译" }
     fun begin(): Int { invalidate(); busy = true; status = "正在翻译…"; return revision }
+    fun partial(token: Int, value: String) {
+        if (enabled && busy && token == revision) result = value
+    }
     fun complete(token: Int, value: String, error: Boolean = false) {
         if (!enabled || token != revision) return
         busy = false

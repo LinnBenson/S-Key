@@ -133,6 +133,7 @@ class OfflineKeyboardService : InputMethodService() {
     private var aiInstructionView: TextView? = null
     private var aiCall: io.secure.keyboard.ai.AiWriting.Call? = null
     private var aiTaskRunnable: Runnable? = null
+    private var aiPreviewDelivery: io.secure.keyboard.ai.LatestPreview? = null
     private var aiModels = emptyList<String>()
     private var aiModel = ""
     private var aiSelectionEpoch = 0
@@ -1288,6 +1289,11 @@ class OfflineKeyboardService : InputMethodService() {
     private fun backspace() = dispatchKey(QueuedKey.Backspace)
 
     private fun applyBackspace() {
+        if (translation.enabled && translation.text.isEmpty() && code.isEmpty() &&
+            !(aiMode && (aiEditingFollowup || aiEditingInstruction))) {
+            openTool(if (aiMode) "ai" else "translate")
+            return
+        }
         if (translation.enabled && !aiEditingFollowup) { if (aiMode) stopAiRequest(); translation.invalidate(); updateTranslationPreview() }
         if (chinese && code.isNotEmpty()) {
             code = code.dropLast(1)
@@ -1381,6 +1387,7 @@ class OfflineKeyboardService : InputMethodService() {
     }
 
     private fun stopAiRequest() {
+        aiPreviewDelivery?.close(); aiPreviewDelivery = null
         cancelAiCommandVoice()
         aiCall?.cancel(); aiCall = null
         aiTaskRunnable?.let { translationWorker.remove(it) }; aiTaskRunnable = null
@@ -1390,12 +1397,33 @@ class OfflineKeyboardService : InputMethodService() {
         val listener = View.OnLongClickListener {
             if (active && !secret && translation.enabled && translationTextView === text && text.isAttachedToWindow) {
                 val value = runCatching { clips.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text }.getOrNull()
-                if (value != null && pasteSourceText(value) && translation.text.isNotBlank()) requestTranslation()
+                if (value != null && pasteSourceText(value)) {
+                    toast("已粘贴")
+                    if (translation.text.isNotBlank()) requestTranslation()
+                }
             }
             true
         }
-        text.setOnLongClickListener(listener)
-        card.setOnLongClickListener(listener)
+        bindCardLongPress(card, listener)
+    }
+
+    private fun bindCardLongPress(view: View, listener: View.OnLongClickListener) {
+        view.setOnLongClickListener(listener)
+        if (view is android.view.ViewGroup) {
+            for (i in 0 until view.childCount) bindCardLongPress(view.getChildAt(i), listener)
+        }
+    }
+
+    private fun bindResultCopy(card: View, text: TextView) {
+        bindCardLongPress(card, View.OnLongClickListener {
+            if (active && !secret && translation.enabled && translationResultView === text &&
+                text.isAttachedToWindow && !translation.busy && translation.result.isNotEmpty()) {
+                runCatching { clips.setPrimaryClip(android.content.ClipData.newPlainText("", translation.result)) }
+                    .onSuccess { toast("已复制") }
+                    .onFailure { toast("复制失败") }
+            }
+            true
+        })
     }
 
     private fun pasteSourceText(value: CharSequence): Boolean {
@@ -1407,6 +1435,7 @@ class OfflineKeyboardService : InputMethodService() {
         stopAiRequest(); clearComposition()
         translation.edit(translation.text + value.subSequence(0, end))
         aiEditingInstruction = false
+        aiEditingFollowup = false
         if (aiMode) renderBody() else updateTranslationPreview()
         refreshCandidates()
         return true
@@ -1419,7 +1448,7 @@ class OfflineKeyboardService : InputMethodService() {
         translationTextView?.text=translation.text
         translationTextView?.setTextColor(if(translation.text.isEmpty()) muted else fg)
         translationResultView?.text=when {
-            translation.busy -> "正在生成，请稍候…"
+            translation.busy -> translation.result.ifEmpty { "正在生成，请稍候…" }
             translation.result.isNotEmpty() -> translation.result
             translation.status == "输入原文后点击翻译" -> ""
             else -> translation.status
@@ -1512,13 +1541,13 @@ class OfflineKeyboardService : InputMethodService() {
             }
             card.addView(heading,LinearLayout.LayoutParams(-1,dp(24)))
             val text=label("",14f).apply { gravity=Gravity.START or Gravity.TOP }
-            card.addView(ScrollView(this).apply { addView(text) },LinearLayout.LayoutParams(-1,0,1f))
+            card.addView(ScrollView(this).apply { isFillViewport=true; isVerticalScrollBarEnabled=false; isHorizontalScrollBarEnabled=false; addView(text) },LinearLayout.LayoutParams(-1,0,1f))
             if(source) {
                 translationTextView=text
                 bindSourcePaste(card, text)
                 text.setOnClickListener { aiEditingFollowup=false; if(aiEditingInstruction) { clearComposition(); aiEditingInstruction=false; renderBody() } }
                 text.contentDescription="AI 原文，点击切换到原文输入"
-            } else translationResultView=text
+            } else { translationResultView=text; bindResultCopy(card, text) }
             return card
         }
         cards.addView(card(if(aiEditingInstruction) "原文 · 点击继续输入" else "原文",true),LinearLayout.LayoutParams(0,-1,1f).apply { rightMargin=dp(3) })
@@ -1696,14 +1725,22 @@ class OfflineKeyboardService : InputMethodService() {
         val text=overrideInput ?: translation.text; aiLastInput=text; aiLastInstruction=instruction; val token=translation.begin(); val editor=voiceEditorGeneration
         val connection=currentInputConnection
         stopAiRequest(); val call=io.secure.keyboard.ai.AiWriting.Call(); aiCall=call; updateAiPreview()
+        val preview = io.secure.keyboard.ai.LatestPreview({ main.post(it) }, { main.removeCallbacks(it) }) { partial ->
+            if (!destroyed && active && aiMode && !secret && editor==voiceEditorGeneration &&
+                connection===currentInputConnection && aiCall===call) {
+                translation.partial(token, partial); updateAiPreview()
+            }
+        }
+        aiPreviewDelivery = preview
         val task = Runnable {
             var failed=false
-            val result=try { call.execute(config,text,instruction) }
+            val result=try { call.execute(config,text,instruction, preview::offer) }
                 catch(e:IllegalArgumentException) { failed=true; e.message ?: "配置错误" }
                 catch(e:IllegalStateException) { failed=true; e.message ?: "生成失败" }
                 catch(_:Exception) { failed=true; "连接失败或超时，请重试" }
             main.post {
                 if(destroyed || !active || !aiMode || secret || editor!=voiceEditorGeneration || connection!==currentInputConnection || aiCall!==call) return@post
+                preview.close(); aiPreviewDelivery=null
                 aiCall=null; aiTaskRunnable=null; translation.complete(token,result,failed)
                 if (!failed && translation.result == result) {
                     aiResults.add(AiVersion(result, text, instruction))
@@ -1917,11 +1954,11 @@ class OfflineKeyboardService : InputMethodService() {
             }
             card.addView(label(title,10f,muted).apply { gravity=Gravity.START; setSingleLine(true) },LinearLayout.LayoutParams(-1,dp(16)))
             val text = label("",14f).apply { gravity=Gravity.START or Gravity.TOP; setPadding(0,dp(2),0,0) }
-            card.addView(ScrollView(this).apply { addView(text) },LinearLayout.LayoutParams(-1,0,1f))
+            card.addView(ScrollView(this).apply { isFillViewport=true; isVerticalScrollBarEnabled=false; isHorizontalScrollBarEnabled=false; addView(text) },LinearLayout.LayoutParams(-1,0,1f))
             if (source) {
                 translationTextView=text; text.contentDescription="翻译原文"
                 bindSourcePaste(card, text)
-            } else translationResultView=text
+            } else { translationResultView=text; bindResultCopy(card, text) }
             return card
         }
         cards.addView(card("原文",true),LinearLayout.LayoutParams(0,-1,1f).apply { rightMargin=dp(3) })
@@ -2502,7 +2539,7 @@ class OfflineKeyboardService : InputMethodService() {
                             main.removeCallbacks(hold)
                             main.removeCallbacks(repeat)
                             long = true
-                            repeat(count - movedDelete) { backspace() }
+                            repeat(count - movedDelete) { if (container.isAttachedToWindow) backspace() }
                             movedDelete = count
                         }
                     } else if (long && choices.isNotEmpty()) {

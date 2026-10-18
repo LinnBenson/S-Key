@@ -8,7 +8,7 @@ class AiWritingTest : AndroidTestCase() {
     fun testPayloadAndInstructions() {
         val body=AiWriting.payload("chosen-model","original text",AiWriting.instruction("tone","礼貌","英语",""))
         assertEquals("chosen-model",body.getString("model"))
-        assertFalse(body.getBoolean("stream"))
+        assertTrue(body.getBoolean("stream"))
         val messages=body.getJSONArray("messages")
         assertEquals(2,messages.length())
         assertTrue(messages.getJSONObject(1).getString("content").contains("礼貌"))

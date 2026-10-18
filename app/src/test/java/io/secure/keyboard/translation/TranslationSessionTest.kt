@@ -2,6 +2,16 @@ package io.secure.keyboard.translation
 import org.junit.Assert.*
 import org.junit.Test
 class TranslationSessionTest {
+    @Test fun streamingStaysBusyUntilCompleteAndRejectsLateChunks() {
+        val s = TranslationSession(); s.enabled = true; s.edit("original")
+        val token = s.begin(); s.partial(token, "你"); assertTrue(s.busy)
+        s.partial(token, "你好"); assertEquals("你好", s.result); assertTrue(s.busy)
+        s.complete(token, "你好！"); assertFalse(s.busy)
+        s.partial(token, "late"); assertEquals("你好！", s.result)
+        val next = s.begin(); s.close(); s.partial(next, "stale")
+        assertEquals("", s.result)
+    }
+
     @Test fun editsRejectStaleResultsAndDoNotSplitEmoji() {
         val s = TranslationSession(); s.enabled = true; s.edit("a😀")
         val token = s.begin(); s.backspace(); s.complete(token, "stale")
