@@ -15,6 +15,7 @@ object KeyboardIcons {
         "back" -> R.drawable.ic_miuix_back
         "forward" -> R.drawable.ic_miuix_chevronforward
         "clear" -> R.drawable.ic_miuix_close
+        "show" -> R.drawable.ic_miuix_show
         "edit" -> R.drawable.ic_miuix_edit
         "pin" -> R.drawable.ic_miuix_pin
         "unpin" -> R.drawable.ic_miuix_unpin

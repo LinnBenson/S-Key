@@ -731,11 +731,45 @@ open class SettingsActivity : ComponentActivity() {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
     }
     @Composable private fun ContentCard(text: String, summary: String, actions: List<Pair<String, () -> Unit>>) {
+        var preview by remember(text) { mutableStateOf(false) }
         Card(Modifier.fillMaxWidth()) {
-            Text(text, maxLines = 5, modifier = Modifier.padding(20.dp), color = MiuixTheme.colorScheme.onSurface)
-            Info(summary)
-            // Vertical controls remain reachable at narrow widths and large system font scales.
-            actions.forEach { (label, action) -> Action(label, !model.busy, action) }
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).heightIn(min = 40.dp).clickable { preview = true },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(text.replace('\n', ' ').replace('\r', ' '), modifier = Modifier.weight(1f),
+                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        color = MiuixTheme.colorScheme.onSurface)
+                    if (summary.isNotBlank() && summary !in listOf("剪贴板", "常用语", "已置顶")) {
+                        Text(summary, modifier = Modifier.widthIn(max = 72.dp), fontSize = 13.sp,
+                            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            color = MiuixTheme.colorScheme.onSurfaceSecondary)
+                    }
+                }
+                actions.forEach { (label, action) ->
+                    val icon = when (label) {
+                        "编辑" -> "edit"
+                        "删除" -> "delete"
+                        "置顶" -> "pin"
+                        "取消置顶" -> "unpin"
+                        "上移" -> "arrow_up"
+                        "复制" -> "show"
+                        else -> "more"
+                    }
+                    IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy, onClick = { if (label == "复制") preview = true else action() }) {
+                        UiIcon(icon, if (label == "复制") "查看完整内容" else label)
+                    }
+                }
+            }
+        }
+        if (preview) Modal("内容", { preview = false }) {
+            Text(text, color = MiuixTheme.colorScheme.onSurface)
+            if (summary.isNotBlank()) Info(summary)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(text = "关闭", onClick = { preview = false }, modifier = Modifier.weight(1f))
+                TextButton(text = "复制", onClick = { copy(text); preview = false }, modifier = Modifier.weight(1f))
+            }
         }
     }
     @Composable private fun Modal(title: String, close: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
