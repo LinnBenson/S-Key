@@ -298,6 +298,11 @@ open class SettingsActivity : ComponentActivity() {
         var showKeys by remember { mutableStateOf(false) }
         @Composable fun field(label: String, value: String, secret: Boolean = false, change: (String) -> Unit) {
             TextField(value = value, onValueChange = change, label = label,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = if (secret) androidx.compose.ui.text.input.KeyboardType.Password
+                        else androidx.compose.ui.text.input.KeyboardType.Text,
+                    autoCorrectEnabled = false,
+                ),
                 visualTransformation = if (secret && !showKeys) androidx.compose.ui.text.input.PasswordVisualTransformation()
                     else androidx.compose.ui.text.input.VisualTransformation.None,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))

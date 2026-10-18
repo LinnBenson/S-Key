@@ -55,6 +55,22 @@ class AiWritingTest : AndroidTestCase() {
         assertTrue(messages.getJSONObject(1).getString("content").endsWith("original text"))
         assertEquals("summarize",AiWriting.instruction("custom","自然","英语"," summarize "))
     }
+    fun testCustomUsesOnlyUserPromptAndTranslationIgnoresTone() {
+        val messages=AiWriting.payload("model","source","my exact prompt",custom=true).getJSONArray("messages")
+        assertEquals(2,messages.length())
+        assertEquals("my exact prompt",messages.getJSONObject(0).getString("content"))
+        assertEquals("source",messages.getJSONObject(1).getString("content"))
+        assertEquals(AiWriting.instruction("translate","粗鲁","英语",""),AiWriting.instruction("translate","礼貌","英语",""))
+    }
+    fun testRefinementPreservesOriginalTaskWithoutSharedCustomPrompt() {
+        val instruction=AiWriting.refinementInstruction("写邮件，保留主题和称呼", "再短一点")
+        val messages=AiWriting.payload("model","当前邮件",instruction,custom=true).getJSONArray("messages")
+        assertEquals(instruction,messages.getJSONObject(0).getString("content"))
+        assertTrue(instruction.contains("写邮件，保留主题和称呼"))
+        assertTrue(instruction.contains("再短一点"))
+        assertEquals("当前邮件",messages.getJSONObject(1).getString("content"))
+        assertFalse(AiWriting.instruction("correct","自然","英语","").contains("1.5"))
+    }
     fun testSelectionEpochAndRevocation() {
         val target=AiSelectionTarget(); target.capture("same text",4)
         assertTrue(target.matches("same text",4))

@@ -159,7 +159,7 @@ class SettingsDefaultsPersistenceTest : AndroidTestCase() {
         assertEquals("#EFEFF1", settings.themeTokens(false).keyboardBackground)
         assertEquals("#D0D2D9", settings.themeTokens(false).specialKeyBackground)
         assertEquals("#CFD8DB", settings.themeTokens(false).divider)
-        assertEquals("#2B2B2B", settings.themeTokens(false).accent)
+        assertEquals("#007AFF", settings.themeTokens(false).accent)
         assertTrue("Reading new defaults must not write preferences", prefs.all.isEmpty())
 
         // Include the former light defaults as explicitly saved choices; never migrate them.

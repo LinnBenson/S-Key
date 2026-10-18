@@ -48,6 +48,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     private lateinit var service: OfflineKeyboardService
     private lateinit var harness: ServiceHarness
     private lateinit var connection: RecordingConnection
+    private var originalSpacing = false
     private var originalCompletion = true
     private var originalChinese = true
     private var originalFourCode = false
@@ -99,6 +100,8 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     override fun setUp() {
         super.setUp()
         val settings = SettingsStore(context)
+        originalSpacing = settings.autoChineseSpacing
+        settings.autoChineseSpacing = false
         originalChinese = settings.lastChineseLanguage
         settings.lastChineseLanguage = true
         originalCompletion = settings.englishCompletion
@@ -133,6 +136,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             if (::harness.isInitialized) harness.close()
             if (::activity.isInitialized) activity.finish()
         }
+        SettingsStore(context).autoChineseSpacing = originalSpacing
         SettingsStore(context).englishCompletion = originalCompletion
         SettingsStore(context).lastChineseLanguage = originalChinese
         SettingsStore(context).fourCodeAutoCommit = originalFourCode
@@ -161,9 +165,9 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 setField("aiCustom",marker)
                 setField("aiFollowup",marker)
                 val constructor=Class.forName("io.secure.keyboard.OfflineKeyboardService\$AiVersion")
-                    .getDeclaredConstructor(String::class.java,String::class.java,String::class.java).apply { isAccessible=true }
+                    .getDeclaredConstructor(String::class.java,String::class.java,String::class.java,String::class.java,Boolean::class.javaPrimitiveType).apply { isAccessible=true }
                 val history=field<MutableList<Any>>("aiResults")
-                repeat(8) { history.add(constructor.newInstance(marker.repeat(100),marker.repeat(100),marker)) }
+                repeat(8) { history.add(constructor.newInstance(marker.repeat(100),marker.repeat(100),marker,marker,true)) }
                 val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
                 session.enabled=cycle%3!=2
                 session.edit(marker)
@@ -280,7 +284,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             }
             waitFor("First custom preset auto-filled") { field<String>("aiCustom") == "缩短到两句话" }
             onMainChecked {
-                find(field<View>("body"), "选择自定义 AI")!!.performClick()
+                find(field<View>("assistantArea"), "选择自定义 AI")!!.performClick()
             }
             waitFor("Named presets loaded") { field<android.widget.PopupWindow?>("popup")?.contentView?.let { find(it,"已选择自定义 AI：简短回复") } != null }
             instrumentation.waitForIdleSync()
@@ -336,6 +340,153 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testAssistantEnglishCompletionStaysInLocalEditor() {
+        query(false,"he")
+        for(tool in listOf("translate","ai")) {
+            onMainChecked {
+                invoke("openTool",tool); setField("aiTask","polish")
+                val source=field<TextView>("translationTextView") as android.widget.EditText
+                source.setText("hel"); source.setSelection(3); invoke("refreshCandidates")
+            }
+            waitFor("Local English candidates") {
+                field<Int>("candidateGeneration")==field<Int>("generation") &&
+                    field<List<String>>("candidateTexts").contains("hello")
+            }
+            onMainChecked {
+                val index=field<List<String>>("candidateTexts").indexOf("hello")
+                row.getChildAt(index).performClick()
+                assertEquals("hello ",field<TextView>("translationTextView").text.toString())
+                assertTrue(connection.committed.isEmpty())
+                assertEquals(0,connection.deleted)
+                invoke("openTool",tool)
+            }
+        }
+    }
+
+    fun testAssistantEditorsReplaceSelectionAndDeleteAtCursor() {
+        for(tool in listOf("translate","ai")) onMainChecked {
+            invoke("openTool",tool)
+            setField("aiTask","polish")
+            val source=field<TextView>("translationTextView") as android.widget.EditText
+            source.setText("abcd")
+            source.setSelection(1,3)
+            OfflineKeyboardService::class.java.getDeclaredMethod("commitInputText",String::class.java).apply { isAccessible=true }.invoke(service,"X")
+            assertEquals("aXd",source.text.toString())
+            source.setSelection(2)
+            invoke("applyBackspace")
+            assertEquals("ad",source.text.toString())
+            assertEquals("ad",field<io.secure.keyboard.translation.TranslationSession>("translation").text)
+            if(tool=="ai") {
+                val followup=field<TextView>("aiFollowupView") as android.widget.EditText
+                followup.requestFocus(); followup.setText("short")
+                followup.setSelection(0,5)
+                OfflineKeyboardService::class.java.getDeclaredMethod("commitInputText",String::class.java).apply { isAccessible=true }.invoke(service,"natural")
+                assertEquals("natural",field<String>("aiFollowup"))
+                assertEquals("ad",source.text.toString())
+            }
+            assertTrue(connection.committed.isEmpty())
+            invoke("openTool",tool)
+        }
+    }
+
+    fun testAssistantDividerDragPersistsAndClampsBothPanels() {
+        val prefs=context.getSharedPreferences("settings",Context.MODE_PRIVATE)
+        val had=prefs.contains("assistantSourceWeight")
+        val previous=prefs.getFloat("assistantSourceWeight",0.35f)
+        fun descendants(view:View):List<View> = listOf(view) +
+            if(view is ViewGroup) (0 until view.childCount).flatMap { descendants(view.getChildAt(it)) } else emptyList()
+        try {
+            for(tool in listOf("translate","ai")) {
+                onMainChecked {
+                    prefs.edit().putFloat("assistantSourceWeight",0.35f).commit()
+                    invoke("loadAssistantWidth")
+                    invoke("openTool",tool)
+                }
+                instrumentation.waitForIdleSync()
+                onMainChecked {
+                    val handle=descendants(field("root")).first { it.contentDescription=="左右拖动调整原文和结果宽度" }
+                    val row=handle.parent as LinearLayout
+                    assertTrue(row.width>handle.width)
+                    val down=SystemClock.uptimeMillis()
+                    fun touch(action:Int,x:Float) {
+                        val e=MotionEvent.obtain(down,down+action,action,x,10f,0)
+                        try { handle.dispatchTouchEvent(e) } finally { e.recycle() }
+                    }
+                    touch(MotionEvent.ACTION_DOWN,0f)
+                    touch(MotionEvent.ACTION_MOVE,row.width.toFloat())
+                    assertEquals(0.8f,(row.getChildAt(0).layoutParams as LinearLayout.LayoutParams).weight)
+                    assertEquals(0.35f,prefs.getFloat("assistantSourceWeight",0f))
+                    touch(MotionEvent.ACTION_UP,row.width.toFloat())
+                    assertEquals(0.8f,prefs.getFloat("assistantSourceWeight",0f))
+                    setField("assistantSourceWeight",0.35f)
+                    invoke("loadAssistantWidth")
+                    assertEquals(0.8f,field<Float>("assistantSourceWeight"))
+                    invoke("renderBody")
+                    val restored=descendants(field("root")).first { it.contentDescription=="左右拖动调整原文和结果宽度" }.parent as LinearLayout
+                    assertEquals(0.8f,(restored.getChildAt(0).layoutParams as LinearLayout.LayoutParams).weight)
+                    invoke("openTool",tool)
+                }
+            }
+        } finally {
+            val edit=prefs.edit()
+            if(had) edit.putFloat("assistantSourceWeight",previous) else edit.remove("assistantSourceWeight")
+            edit.commit()
+        }
+    }
+
+    fun testCompactAssistantInsertionAndClear() {
+        for (tool in listOf("translate", "ai")) {
+            onMainChecked {
+                connection.committed.clear()
+                invoke("openTool",tool)
+                setField("aiTask", "polish")
+                val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
+                session.edit("source")
+                val token=session.begin()
+                session.partial(token,"partial")
+                field<TextView>("translationResultView").performClick()
+                assertTrue(connection.committed.isEmpty())
+                session.complete(token,"complete")
+                field<TextView>("translationResultView").performClick()
+            }
+            waitFor("Completed $tool result inserted") { connection.committed==listOf("complete") }
+            onMainChecked {
+                invoke("clearAssistantSource")
+                val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
+                assertEquals("",session.text)
+                assertEquals("",session.result)
+                invoke("openTool",tool)
+            }
+        }
+    }
+
+    fun testAssistantBackspaceDeletesCompositionBeforeCommittedDraft() {
+        for(tool in listOf("translate","ai")) onMainChecked {
+            invoke("openTool",tool)
+            setField("chinese",true)
+            val editor=field<EditText>("translationTextView")
+            editor.setText("原文"); editor.setSelection(editor.length())
+            setField("code","ni")
+            invoke("applyBackspace")
+            assertEquals("n",field<String>("code"))
+            assertEquals("原文",editor.text.toString())
+            invoke("applyBackspace")
+            assertEquals("",field<String>("code"))
+            assertEquals("原文",editor.text.toString())
+            if(tool=="ai") {
+                val followup=field<EditText>("aiFollowupView")
+                followup.requestFocus();setField("aiEditingFollowup",true)
+                followup.setText("更自然");followup.setSelection(followup.length())
+                setField("code","hao")
+                invoke("applyBackspace")
+                assertEquals("ha",field<String>("code"))
+                assertEquals("更自然",followup.text.toString())
+            }
+            assertTrue(connection.committed.isEmpty())
+            invoke("openTool",tool)
+        }
+    }
+
     fun testEmptySourceBackspaceClosesOnlyAfterLastCharacterDeleted() {
         for (tool in listOf("translate", "ai")) onMainChecked {
             invoke("openTool", tool)
@@ -343,6 +494,16 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             session.edit("字")
             invoke("applyBackspace")
             assertEquals("", session.text); assertTrue(session.enabled)
+            invoke("applyBackspace")
+            assertTrue("One empty backspace must not close",session.enabled)
+            setField("assistantBackspaceTapAt",SystemClock.uptimeMillis()-1000L)
+            invoke("applyBackspace")
+            assertTrue("Slow taps must not close",session.enabled)
+            val repeated=OfflineKeyboardService::class.java.getDeclaredMethod("performBackspace",Boolean::class.javaPrimitiveType).apply { isAccessible=true }
+            repeat(3) { repeated.invoke(service,false) }
+            assertTrue("Held/swiped deletion must not close",session.enabled)
+            invoke("applyBackspace")
+            assertTrue(session.enabled)
             invoke("applyBackspace")
             assertFalse(session.enabled); assertFalse(field<Boolean>("aiMode"))
             assertTrue(connection.committed.isEmpty())
@@ -404,23 +565,47 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testInlineOfflineVoiceCancellationIsReentrantSafe() {
+        onMainChecked {
+            invoke("openTool", "ai")
+            var callbacks=0
+            val voice=io.secure.keyboard.voice.OfflineVoiceSession(service,
+                object: io.secure.keyboard.voice.OfflineVoiceSession.Listener {
+                    override fun onState(state: io.secure.keyboard.voice.OfflineVoiceSession.State) {
+                        callbacks++
+                        assertNull("Release callbacks must not retain the session",field<Any?>("inlineOfflineVoice"))
+                        invoke("cancelAiCommandVoice")
+                    }
+                    override fun onPreview(text: String,isFinal: Boolean) {}
+                    override fun onError(message: String) {}
+                })
+            setField("inlineOfflineVoice",voice)
+            invoke("cancelAiCommandVoice")
+            assertEquals(1,callbacks)
+            assertNull(field<Any?>("inlineOfflineVoice"))
+            assertTrue(voice.javaClass.getDeclaredField("released").apply { isAccessible=true }.getBoolean(voice))
+        }
+    }
+
     fun testAiHistorySwitchRestoresRegenerationContext() {
         onMainChecked {
             invoke("openTool", "ai")
             val versions=field<MutableList<Any>>("aiResults")
             val type=Class.forName("io.secure.keyboard.OfflineKeyboardService\$AiVersion")
-            val ctor=type.getDeclaredConstructor(String::class.java,String::class.java,String::class.java).apply { isAccessible=true }
-            versions.add(ctor.newInstance("one", "source one", "polish"))
-            versions.add(ctor.newInstance("two", "source two", "shorten"))
+            val ctor=type.getDeclaredConstructor(String::class.java,String::class.java,String::class.java,String::class.java,Boolean::class.javaPrimitiveType).apply { isAccessible=true }
+            versions.add(ctor.newInstance("one", "source one", "polish", "polish",false))
+            versions.add(ctor.newInstance("two", "source two", "shorten", "polish",true))
             setField("aiResultIndex",1)
             val select=OfflineKeyboardService::class.java.getDeclaredMethod("selectAiResult",Int::class.javaPrimitiveType).apply { isAccessible=true }
             select.invoke(service,-1)
             val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
             assertEquals("one",session.result)
+            assertFalse(field<Boolean>("aiLastCustomRequest"))
             assertEquals("source one",field<String>("aiLastInput"))
             assertEquals("polish",field<String>("aiLastInstruction"))
             select.invoke(service,1)
             assertEquals("two",session.result)
+            assertTrue(field<Boolean>("aiLastCustomRequest"))
             assertTrue(connection.committed.isEmpty())
             invoke("openTool","ai")
             assertTrue(versions.isEmpty())
@@ -597,12 +782,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
             }
             bitmap.recycle()
-            fun findInsert(view: View): TextView? {
-                if (view is TextView && view.text.toString() == "插入") return view
-                if (view is ViewGroup) for (i in 0 until view.childCount) findInsert(view.getChildAt(i))?.let { return it }
-                return null
-            }
-            assertTrue(findInsert(root)!!.performClick())
+            assertTrue(field<TextView>("translationResultView").performClick())
             assertEquals(listOf("你好"), connection.committed)
             session.edit("another draft")
             service.onFinishInput()
@@ -865,7 +1045,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             var bodyHeight = 0
             var boxHeight = 0
             lateinit var originalStrip: CandidateStrip
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 bodyHeight = field<View>("body").height
                 boxHeight = field<View>("box").height
                 originalStrip = strip
@@ -873,7 +1053,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 field<View>("hideIcon").performClick()
             }
             instrumentation.waitForIdleSync()
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 val grid = field<CandidateGrid>("candidateGrid")
                 assertSame(grid, field<ViewGroup>("body").getChildAt(0))
                 assertSame(originalStrip, strip)
@@ -890,7 +1070,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 field<View>("hideIcon").performClick()
             }
             instrumentation.waitForIdleSync()
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 val grid = field<CandidateGrid>("candidateGrid")
                 val position = field<List<String>>("candidateTexts").indexOf(text)
                 assertEquals(1, position)
@@ -917,7 +1097,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     fun testAllMappedWubiCandidatesRemainReachableAtTheExpandedGridTail() {
         query(true, "khkh")
         lateinit var expectedTail: String
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val values = field<List<String>>("candidateTexts")
             assertEquals("The full packaged four-code bucket reaches the service", 472, values.size)
             assertEquals(values.size, values.distinct().size)
@@ -926,7 +1106,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             field<View>("hideIcon").performClick()
         }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val grid = field<CandidateGrid>("candidateGrid")
             assertEquals(472, grid.adapter.count)
             grid.setSelection(471)
@@ -935,7 +1115,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             val grid = field<CandidateGrid>("candidateGrid")
             grid.firstVisiblePosition <= 471 && grid.lastVisiblePosition >= 471
         }
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val grid = field<CandidateGrid>("candidateGrid")
             val cell = grid.getChildAt(471 - grid.firstVisiblePosition) as TextView
             assertEquals(expectedTail, cell.text.toString())
@@ -948,16 +1128,16 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testExpandedSameResultsRetainScrollViewsAndRejectLoadingTouch() {
         query(true, "q")
-        instrumentation.runOnMainSync { field<View>("hideIcon").performClick() }
+        onMainChecked { field<View>("hideIcon").performClick() }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync { field<CandidateGrid>("candidateGrid").setSelection(20) }
+        onMainChecked { field<CandidateGrid>("candidateGrid").setSelection(20) }
         instrumentation.waitForIdleSync()
         lateinit var originalGrid: CandidateGrid
         lateinit var cells: List<TextView>
         lateinit var texts: List<CharSequence>
         var first = 0
         var top = 0
-        instrumentation.runOnMainSync {
+        onMainChecked {
             originalGrid = field("candidateGrid")
             cells = (0 until originalGrid.childCount).map { originalGrid.getChildAt(it) as TextView }
             texts = cells.map { it.text }
@@ -965,7 +1145,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             top = cells.first().top
         }
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             invoke("refreshCandidates")
             cells.first().performClick()
             assertTrue("Retained grid labels must not select during loading", connection.committed.isEmpty())
@@ -974,7 +1154,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         release.countDown()
         awaitResults()
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertSame(originalGrid, field("candidateGrid"))
             assertSame(originalGrid, field<ViewGroup>("body").getChildAt(0))
             assertEquals(first, originalGrid.firstVisiblePosition)
@@ -989,23 +1169,23 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testExpandedEnglishSelectionAndCancelEditorResetSafelyRestoreKeys() {
         query(false, "he")
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("展开候选", field<View>("hideIcon").contentDescription)
             field<View>("hideIcon").performClick()
         }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync { field<CandidateGrid>("candidateGrid").getChildAt(0).performClick() }
+        onMainChecked { field<CandidateGrid>("candidateGrid").getChildAt(0).performClick() }
         drainWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals(1, connection.committed.size)
             assertFalse(field<Boolean>("candidatesExpanded"))
             assertFalse(field<ViewGroup>("body").getChildAt(0) is CandidateGrid)
         }
         query(true, "ni")
-        instrumentation.runOnMainSync { field<View>("hideIcon").performClick() }
+        onMainChecked { field<View>("hideIcon").performClick() }
         instrumentation.waitForIdleSync()
         lateinit var oldCell: View
-        instrumentation.runOnMainSync {
+        onMainChecked {
             oldCell = field<CandidateGrid>("candidateGrid").getChildAt(0)
             val count = connection.committed.size
             (field<LinearLayout>("candidateGroup").getChildAt(1)).performClick()
@@ -1016,9 +1196,9 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             assertEquals(count, connection.committed.size)
         }
         query(true, "ni")
-        instrumentation.runOnMainSync { field<View>("hideIcon").performClick() }
+        onMainChecked { field<View>("hideIcon").performClick() }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             oldCell = field<CandidateGrid>("candidateGrid").getChildAt(0)
             val replacement = RecordingConnection(View(activity))
             startEditor(replacement)
@@ -1048,7 +1228,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             override fun afterTextChanged(s: Editable?) {}
         }
         lateinit var draw: ViewTreeObserver.OnDrawListener
-        instrumentation.runOnMainSync {
+        onMainChecked {
             originalHeader = field("header")
             originalBody = field("body")
             originalKeys = originalBody.getChildAt(0)
@@ -1067,7 +1247,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             originalHeader.viewTreeObserver.addOnDrawListener(draw)
         }
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             repeat(3) { invoke("refreshCandidates") }
             originalHeader.postInvalidateOnAnimation()
             assertEquals("Pending query must retain all visible candidates", labels.size, row.childCount)
@@ -1078,7 +1258,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         release.countDown()
         awaitResults()
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             originalHeader.viewTreeObserver.removeOnDrawListener(draw)
             assertEquals("There must be no empty/toolbar intermediate candidate frame", 0, emptyFrames)
             assertSame(originalHeader, field("header"))
@@ -1099,13 +1279,13 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         val original = List(12) { "candidate$it" }
         val clicked = mutableListOf<String>()
         lateinit var testStrip: CandidateStrip
-        instrumentation.runOnMainSync {
+        onMainChecked {
             testStrip = CandidateStrip(activity, Color.DKGRAY, Color.BLUE) { clicked.add(it) }
             activity.setContentView(testStrip, ViewGroup.LayoutParams(-1, 120))
             testStrip.updateCandidates(original)
         }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertTrue(testStrip.isAttachedToWindow)
             val testRow = testStrip.getChildAt(0) as LinearLayout
             val labels = (0 until testRow.childCount).map { testRow.getChildAt(it) as TextView }
@@ -1133,7 +1313,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     fun testOldChineseVisualsCannotCommitThroughTapSpaceOrPunctuation() {
         query(true, "ni")
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val oldFirst = row.getChildAt(0)
             setField("code", "nihao")
             invoke("refreshCandidates")
@@ -1149,7 +1329,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         waitFor("current-query confirmation and following punctuation commit in order") {
             connection.committed.size == 2
         }
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("Only the fresh nihao result and one queued punctuation may commit",
                 listOf("你好", "."), connection.committed)
             assertEquals("", field<String>("code"))
@@ -1160,27 +1340,27 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     fun testEnglishStalePrefixAndNewEditorRejectDelayedSelection() {
         query(false, "he")
         var release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             row.getChildAt(0).performClick()
             connection.before = "different"
         }
         release.countDown()
         drainWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertTrue(connection.committed.isEmpty())
             assertEquals(0, connection.deleted)
         }
         query(false, "he")
         release = gateWorker()
         lateinit var replacement: RecordingConnection
-        instrumentation.runOnMainSync {
+        onMainChecked {
             row.getChildAt(0).performClick()
             replacement = RecordingConnection(View(activity)).apply { before = "he" }
             startEditor(replacement)
         }
         release.countDown()
         drainWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertTrue(connection.committed.isEmpty())
             assertTrue(replacement.committed.isEmpty())
             assertEquals(0, replacement.deleted)
@@ -1190,7 +1370,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     fun testPendingEnglishRefreshCannotSelectRetainedVisuals() {
         query(false, "he")
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             connection.before = "hello"
             invoke("refreshCandidates")
             assertTrue(row.childCount > 0)
@@ -1202,7 +1382,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             field<Int>("candidateGeneration") == field<Int>("generation") &&
                 field<String>("candidateQuery") == "hello"
         }
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertTrue(connection.committed.isEmpty())
             assertEquals(0, connection.deleted)
             assertEquals("hello", connection.before)
@@ -1216,7 +1396,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         val release = gateWorker()
         lateinit var label: View
         val down = SystemClock.uptimeMillis()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             invoke("refreshCandidates")
             label = row.getChildAt(0)
             val event = MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, 8f, 8f, 0)
@@ -1225,14 +1405,14 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
         release.countDown()
         awaitResults()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertSame(label, row.getChildAt(0))
             val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, 8f, 8f, 0)
             label.dispatchTouchEvent(event)
             event.recycle()
         }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertTrue("A tap begun on a stale result must not become valid later", connection.committed.isEmpty())
             label.performClick()
             assertEquals("A new accessibility/programmatic click must still work", 1, connection.committed.size)
@@ -1246,10 +1426,10 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         val id = store.dictionary().first { it.word == word }.id
         try {
             query(true, "ni")
-            instrumentation.runOnMainSync { assertTrue(field<List<String>>("candidateTexts").contains(word)) }
+            onMainChecked { assertTrue(field<List<String>>("candidateTexts").contains(word)) }
             val release = gateWorker()
             store.deleteDictionary(id)
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertFalse(invoke("choose", word) as Boolean)
                 assertEquals(0, row.childCount)
                 assertTrue(connection.committed.isEmpty())
@@ -1257,7 +1437,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             }
             release.countDown()
             awaitResults()
-            instrumentation.runOnMainSync { assertFalse(field<List<String>>("candidateTexts").contains(word)) }
+            onMainChecked { assertFalse(field<List<String>>("candidateTexts").contains(word)) }
         } finally {
             if (store.dictionary().any { it.id == id }) store.deleteDictionary(id)
         }
@@ -1266,7 +1446,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     fun testExactCustomMatchesFormSecondPlaceBlockAndPromoteDuplicateText() {
         query(true, "ni")
         lateinit var baseline: List<String>
-        instrumentation.runOnMainSync { baseline = field<List<String>>("candidateTexts").toList() }
+        onMainChecked { baseline = field<List<String>>("candidateTexts").toList() }
         assertTrue("Fixture needs several normal candidates", baseline.size > 3)
         val suffix = SystemClock.uptimeMillis()
         val first = "自定排序甲$suffix"
@@ -1282,7 +1462,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             store.addDictionary(duplicate, "ni")
             store.addDictionary(first, "n i")
             query(true, "ni")
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 val actual = field<List<String>>("candidateTexts")
                 assertEquals(listOf(baseline.first(), first, second, duplicate), actual.take(4))
                 assertEquals(1, actual.count { it == duplicate })
@@ -1300,7 +1480,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     fun testCustomPrefixTailBeyondFortyBuiltinsIsReachableByHorizontalScrolling() {
         query(true, "q")
         lateinit var baseline: List<String>
-        instrumentation.runOnMainSync {
+        onMainChecked {
             baseline = field<List<String>>("candidateTexts").toList()
             assertTrue("Fixture needs a nonempty actual built-in baseline", baseline.isNotEmpty())
         }
@@ -1318,7 +1498,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         try {
             store.importDictionary(words.joinToString("\n") { "$it\tqqqqqqqqqqqq" })
             query(true, "q")
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertEquals(baseline.size + words.size, field<List<String>>("candidateTexts").size)
                 assertEquals(expected, field<List<String>>("candidateTexts"))
                 assertEquals("Initial binding must stay bounded despite all retained matches", 40, row.childCount)
@@ -1327,7 +1507,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 if (row.childCount < expected.size) strip.scrollTo(row.width, 0)
                 row.childCount == expected.size
             }
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 val actual = field<List<String>>("candidateTexts")
                 words.forEach { word ->
                     val index = actual.indexOf(word)
@@ -1357,7 +1537,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             store.addDictionary(prefix, code + "a")
             store.addDictionary(exact, code)
             query(true, code)
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertEquals(listOf(exact, prefix), field<List<String>>("candidateTexts"))
                 assertTrue(invoke("choose", exact) as Boolean)
                 assertEquals(listOf(exact), connection.committed)
@@ -1365,7 +1545,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             val id = store.dictionary().single { it.word == exact }.id
             store.deleteDictionary(id)
             query(true, code)
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertEquals(listOf(prefix), field<List<String>>("candidateTexts"))
                 assertTrue(invoke("choose", prefix) as Boolean)
                 assertEquals(listOf(exact, prefix), connection.committed)
@@ -1382,21 +1562,21 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         val id = store.dictionary().single { it.word == word }.id
         try {
             query(true, "ni")
-            instrumentation.runOnMainSync { assertEquals(word, field<List<String>>("candidateTexts")[1]) }
+            onMainChecked { assertEquals(word, field<List<String>>("candidateTexts")[1]) }
             store.updateDictionary(id, word, "nihao")
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertFalse("Old exact snapshot cannot commit after code edit", invoke("choose", word) as Boolean)
                 assertTrue(connection.committed.isEmpty())
             }
             query(true, "ni")
-            instrumentation.runOnMainSync { assertEquals(word, field<List<String>>("candidateTexts").last()) }
+            onMainChecked { assertEquals(word, field<List<String>>("candidateTexts").last()) }
             store.deleteDictionary(id)
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertFalse("Old prefix snapshot cannot commit after deletion", invoke("choose", word) as Boolean)
                 assertTrue(connection.committed.isEmpty())
             }
             query(true, "ni")
-            instrumentation.runOnMainSync { assertFalse(word in field<List<String>>("candidateTexts")) }
+            onMainChecked { assertFalse(word in field<List<String>>("candidateTexts")) }
         } finally {
             if (store.dictionary().any { it.id == id }) store.deleteDictionary(id)
         }
@@ -1479,12 +1659,12 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         val settings = SettingsStore(context)
         try {
             query(true, "wgkq")
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertEquals(listOf("使", word), field<List<String>>("candidateTexts").take(2))
                 invoke("clearPending")
             }
             settings.fourCodeAutoCommit = true
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 repeat(3) {
                     "wgkq".forEach { invoke("type", it.toString()) }
                     assertEquals("", field<String>("code"))
@@ -1494,7 +1674,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             drainWorker()
             settings.fourCodeAutoCommit = false
             query(true, "wgkq")
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertEquals(listOf("使", word), field<List<String>>("candidateTexts").take(2))
             }
         } finally {
@@ -1505,7 +1685,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testCompletedOldQueryCannotReplaceNewCompositionOrResurrectCanceledCandidates() {
         query(true, "ni")
-        instrumentation.runOnMainSync {
+        onMainChecked {
             invoke("refreshCandidates")
             // Chinese lookup does not need the editor/main thread. Wait only in this fixture so
             // its result is already queued for main-thread delivery when generation changes.
@@ -1516,7 +1696,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             invoke("refreshCandidates")
         }
         awaitResults()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("nihao", field<String>("candidateQuery"))
             assertTrue(field<List<String>>("candidateTexts").contains("你好"))
             invoke("refreshCandidates")
@@ -1527,7 +1707,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             invoke("renderHeader")
         }
         drainWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals(0, row.childCount)
             assertEquals("", field<String>("code"))
             assertEquals("", field<String>("candidateQuery"))
@@ -1541,7 +1721,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         val id = store.dictionary().first { it.word == word }.id
         try {
             query(true, "ni")
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 invoke("refreshCandidates")
                 val deletedAfterComputation = CountDownLatch(1)
                 worker.execute {
@@ -1551,7 +1731,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 assertTrue(deletedAfterComputation.await(5, TimeUnit.SECONDS))
             }
             drainWorker()
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertEquals("A removed personal result must not return on delayed delivery", 0, row.childCount)
                 assertEquals("", field<String>("candidateQuery"))
             }
@@ -1565,17 +1745,17 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         val originalTheme = settings.theme
         try {
             for (theme in listOf("light", "dark")) {
-                instrumentation.runOnMainSync { settings.theme = theme }
+                onMainChecked { settings.theme = theme }
                 // Theme changes now rebuild the live IME asynchronously. Drain that callback
                 // before attaching this synthetic Activity host to the current keyboard view.
                 instrumentation.waitForIdleSync()
-                instrumentation.runOnMainSync {
+                onMainChecked {
                     activity.setContentView(service.onCreateInputView())
                 }
                 instrumentation.waitForIdleSync()
                 instrumentation.sendKeySync(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT))
                 instrumentation.sendKeySync(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_RIGHT))
-                instrumentation.runOnMainSync {
+                onMainChecked {
                     val toolbar = field<LinearLayout>("toolbarGroup")
                     val more = toolbar.getChildAt(0) as ToolIcon
                     assertTrue(more.isAttachedToWindow)
@@ -1590,7 +1770,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                     bitmap.recycle()
                 }
                 saveFocusScreenshot(theme)
-                instrumentation.runOnMainSync {
+                onMainChecked {
                     val more = field<LinearLayout>("toolbarGroup").getChildAt(0)
                     more.performClick()
                     assertEquals("more", field<String>("panel"))
@@ -1636,7 +1816,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         for ((raw, word) in listOf("nihao" to "你好", "wqiy" to "你")) {
             resetActualHost(host)
             typePending(raw)
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertEquals("Composition must remain keyboard-local", "", host.editor.text.toString())
                 host.haptics.reset()
                 tapKey("回车")
@@ -1649,7 +1829,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             }
             resetActualHost(host)
             typePending(raw)
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertEquals(word, (row.getChildAt(0) as TextView).text.toString())
                 host.haptics.reset()
                 tapKey("五笔")
@@ -1664,7 +1844,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testActualEditorIdleEnterPerformsItsNormalActionWithoutInsertingText() {
         val host = attachActualHost()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("", field<String>("code"))
             tapKey("回车")
             assertEquals(listOf(EditorInfo.IME_ACTION_SEARCH), host.connection.actions)
@@ -1686,7 +1866,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             host.haptics.onFeedback = null
             assertEquals("One accepted control press has exactly one feedback request", 1, host.haptics.effects.size)
         }
-        instrumentation.runOnMainSync {
+        onMainChecked {
             setField("chinese", false)
             invoke("renderBody")
             assertOneBefore({ assertEquals("", host.editor.text.toString()) }) { tapKey("a") }
@@ -1705,7 +1885,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         // host deletion path or assuming a fixed delay is sufficient.
         waitFor("real EditText handles queued Backspace down/up") { host.editor.text.isEmpty() }
         drainWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("", host.editor.text.toString())
             assertEquals("Asynchronous host delivery must not add another feedback", 1, host.haptics.effects.size)
             assertEquals(listOf("a"), host.haptics.hostTextAtFeedback)
@@ -1742,7 +1922,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     fun testActualCandidateTapUsesOneGlobalTenPercentHapticBeforeHostCommit() {
         val host = attachActualHost()
         typePending("nihao")
-        instrumentation.runOnMainSync {
+        onMainChecked {
             host.haptics.reset()
             row.getChildAt(0).performClick()
             assertEquals("你好", host.editor.text.toString())
@@ -1751,14 +1931,14 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             assertEquals("Haptic must precede the validated host commit attempt", listOf(""), host.haptics.hostTextAtFeedback)
         }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync { assertEquals(1, host.haptics.effects.size) }
+        onMainChecked { assertEquals(1, host.haptics.effects.size) }
     }
 
     fun testActualCandidateTapRespectsDisabledFeedbackAndRejectsStaleBeforeValidAttempts() {
         val host = attachActualHost()
         SettingsStore(context).vibration = false
         typePending("nihao")
-        instrumentation.runOnMainSync {
+        onMainChecked {
             row.getChildAt(0).performClick()
             assertEquals("你好", host.editor.text.toString())
             assertTrue("Global feedback switch must cover candidate taps", host.haptics.effects.isEmpty())
@@ -1767,7 +1947,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         resetActualHost(host)
         typePending("ni")
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             setField("code", "nihao")
             invoke("refreshCandidates")
             row.getChildAt(0).performClick()
@@ -1776,7 +1956,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
         release.countDown()
         awaitResults()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             host.connection.rejectCommits = true
             row.getChildAt(0).performClick()
             assertEquals("", host.editor.text.toString())
@@ -1791,7 +1971,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testActualEnglishCandidateHapticFollowsValidationAndPrecedesEditorChanges() {
         val host = attachActualHost()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             host.editor.setText("he")
             host.editor.setSelection(2)
             setField("chinese", false)
@@ -1799,14 +1979,14 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
         awaitResults()
         var expected = ""
-        instrumentation.runOnMainSync {
+        onMainChecked {
             expected = (row.getChildAt(0) as TextView).text.toString()
             host.haptics.reset()
             row.getChildAt(0).performClick()
             assertTrue("No candidate haptic before asynchronous prefix validation", host.haptics.effects.isEmpty())
         }
         drainWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("$expected ", host.editor.text.toString())
             assertEquals(listOf("$expected "), host.connection.commits)
             assertEquals(listOf(HapticFeedbackConstants.KEYBOARD_TAP), host.haptics.effects)
@@ -1823,20 +2003,20 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             Example("hel,world", "hello ,world", "hello ", 1),
         )) {
             resetActualHost(host)
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 host.editor.setText(example.before)
                 host.editor.setSelection(3)
                 setField("chinese", false)
                 invoke("refreshCandidates")
             }
             awaitResults()
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 val hello = (0 until row.childCount).map { row.getChildAt(it) as TextView }
                     .first { it.text.toString() == "hello" }
                 hello.performClick()
             }
             drainWorker()
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertEquals(example.expected, host.editor.text.toString())
                 assertEquals("Cursor must advance past exactly the completion's one trailing space", 6, host.editor.selectionStart)
                 assertEquals(6, host.editor.selectionEnd)
@@ -1849,7 +2029,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testActualEnglishDelayedSelectionCannotMutateNewHostTextOrProduceFeedback() {
         val host = attachActualHost()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             host.editor.setText("hel ")
             host.editor.setSelection(3)
             setField("chinese", false)
@@ -1857,14 +2037,14 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
         awaitResults()
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             row.getChildAt(0).performClick()
             host.editor.setText("different, text")
             host.editor.setSelection(9)
         }
         release.countDown()
         drainWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("different, text", host.editor.text.toString())
             assertEquals(9, host.editor.selectionStart)
             assertTrue(host.connection.commits.isEmpty())
@@ -1967,7 +2147,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     private fun resetActualHost(host: ActualHost) {
-        instrumentation.runOnMainSync {
+        onMainChecked {
             invoke("clearPending")
             invoke("renderHeader")
             host.editor.setText("")
@@ -1981,7 +2161,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     private fun typePending(raw: String) {
-        instrumentation.runOnMainSync { raw.forEach { invoke("type", it.toString()) } }
+        onMainChecked { raw.forEach { invoke("type", it.toString()) } }
         awaitResults()
         instrumentation.waitForIdleSync()
     }
