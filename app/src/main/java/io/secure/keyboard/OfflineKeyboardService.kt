@@ -1526,9 +1526,9 @@ class OfflineKeyboardService : InputMethodService() {
             override fun onTextChanged(t:CharSequence?, start:Int,before:Int,count:Int) {}
             override fun afterTextChanged(t:android.text.Editable?) {
                 if(syncingAssistantEditor || !active || !translation.enabled) return
-                stopAiRequest()
-                if(followup) { aiFollowup=t.toString(); if(translation.busy) translation.invalidate() }
+                if(followup) aiFollowup=t.toString()
                 else {
+                    stopAiRequest()
                     aiSourceEpoch++
                     aiResponseLink = null
                     translation.edit(t.toString())
@@ -2004,6 +2004,7 @@ class OfflineKeyboardService : InputMethodService() {
         if (previousResponseId != null && (aiResponseLink?.context != context || aiResponseLink?.source != translation.text || aiResponseLink?.sourceEpoch != aiSourceEpoch)) {
             toast("接口、模型或原文已变化，请清空后重新生成"); return
         }
+        val parentResponse = aiResponseLink.takeIf { previousResponseId != null && it?.id == previousResponseId }
         val source = translation.text
         val sourceEpoch = aiSourceEpoch
         if (previousResponseId == null) aiResponseLink = null
@@ -2031,13 +2032,24 @@ class OfflineKeyboardService : InputMethodService() {
             main.post {
                 if(destroyed || !active || !aiMode || secret || editor!=voiceEditorGeneration || connection!==currentInputConnection || aiCall!==call) return@post
                 preview.close(); aiPreviewDelivery=null
-                aiCall=null; aiTaskRunnable=null; translation.complete(token,result,failed)
+                aiCall=null; aiTaskRunnable=null
+                if (failed && parentResponse != null) {
+                    // Keep the completed parent available for retry. Never overwrite a newer draft.
+                    translation.complete(token,parentResponse.result)
+                    if (aiFollowup.isEmpty()) {
+                        aiFollowup=text
+                        syncAssistantText(aiFollowupView, aiFollowup)
+                        refreshCandidates()
+                    }
+                    updateAiPreview(); toast(result)
+                    return@post
+                }
+                translation.complete(token,result,failed)
                 if (!failed && translation.result == result) {
                     aiResponseLink = call.responseId?.let { AiResponseLink(it, previousResponseId, context, source, result, sourceEpoch) }
                     aiResults.add(AiVersion(result, text, instruction, original, customRequest).apply { responseLink = aiResponseLink })
                     if (aiResults.size > 8) aiResults.removeAt(0)
                     aiResultIndex=aiResults.lastIndex
-                    aiEditingFollowup=false
                     renderBody()
                     if (settings.aiAutoApply && autoApplySelectionEpoch == aiSelectionEpoch) applyAiResult()
                 } else updateAiPreview()
@@ -2045,6 +2057,13 @@ class OfflineKeyboardService : InputMethodService() {
         }
         aiTaskRunnable = task
         translationWorker.execute(task)
+        if (previousResponseId != null && overrideInput == aiFollowup) {
+            aiFollowup = ""
+            followupCursor = 0
+            // Programmatic clearing must not trigger the watcher and cancel this request.
+            syncAssistantText(aiFollowupView, "")
+            refreshCandidates()
+        }
     }
 
     private fun clearAiConversation() {

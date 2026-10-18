@@ -649,6 +649,8 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testResponseConversationBoundToSourceAndOnlyFollowupsReuseId() {
         val requests=java.util.Collections.synchronizedList(mutableListOf<org.json.JSONObject>())
+        val responseRelease=CountDownLatch(1)
+        val failResponse=java.util.concurrent.atomic.AtomicBoolean(false)
         var config=io.secure.keyboard.data.ApiConfiguration(grokUrl="https://example.invalid/v1",grokKey="synthetic-key",grokModel="test-model")
         val provider: () -> io.secure.keyboard.data.ApiConfiguration = { config }
         val factory: () -> io.secure.keyboard.ai.AiWriting.Call = {
@@ -662,10 +664,11 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                     override fun getLocalCertificates(): Array<java.security.cert.Certificate>?=null
                     override fun getServerCertificates(): Array<java.security.cert.Certificate> = emptyArray()
                     override fun getOutputStream()=sent
-                    override fun getResponseCode()=200
+                    override fun getResponseCode()=if(failResponse.get()) 503 else 200
                     override fun getInputStream(): java.io.InputStream {
                         requests.add(org.json.JSONObject(sent.toString("UTF-8")))
                         val n=requests.size
+                        if(n==2) responseRelease.await(5,TimeUnit.SECONDS)
                         return ("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"id\":\"resp_$n\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"result $n\"}]}]}}\n\n").byteInputStream()
                     }
                 }
@@ -697,8 +700,18 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 assertEquals(1,requests.size)
                 followup.setText("first requirement")
                 invoke("applyEnter")
+                assertEquals("", followup.text.toString())
+                assertEquals("", field<String>("aiFollowup"))
+                assertTrue(field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
+                followup.setText("next draft")
+                assertTrue("Typing the next draft must not cancel generation",field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
             }
+            responseRelease.countDown()
             finish(2)
+            onMainChecked {
+                assertEquals("next draft",field<String>("aiFollowup"))
+                assertTrue(field<TextView>("aiFollowupView").hasFocus())
+            }
             assertEquals("resp_1",requests[1].getString("previous_response_id"))
             assertEquals(1,requests[1].getJSONArray("input").length())
             assertFalse(requests[1].has("instructions"))
@@ -730,15 +743,32 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             finish(6)
             assertFalse(requests[5].has("previous_response_id"))
             onMainChecked {
+                failResponse.set(true)
+                val draft=field<TextView>("aiFollowupView") as EditText
+                draft.requestFocus(); draft.setText("retry requirement")
+                invoke("applyEnter")
+                assertEquals("",draft.text.toString())
+            }
+            waitFor("failed supplement restores completed parent") {
+                !field<io.secure.keyboard.translation.TranslationSession>("translation").busy && field<Any?>("aiCall")==null
+            }
+            onMainChecked {
+                assertEquals("retry requirement",field<TextView>("aiFollowupView").text.toString())
+                assertEquals("result 6",field<io.secure.keyboard.translation.TranslationSession>("translation").result)
+                assertEquals(6,requests.size)
+                failResponse.set(false)
                 config=config.copy(grokKey="changed-synthetic-key")
-                invoke("refineAi","wrong account must not send")
+                val draft=field<TextView>("aiFollowupView") as EditText
+                draft.requestFocus(); draft.setText("wrong account must not send")
+                invoke("applyEnter")
+                assertEquals("wrong account must not send",draft.text.toString())
                 assertFalse(field<io.secure.keyboard.translation.TranslationSession>("translation").busy)
                 assertEquals(6,requests.size)
                 invoke("openTool","ai")
                 assertNull(field<Any?>("aiResponseLink"))
                 assertTrue(field<List<Any>>("aiResults").isEmpty())
             }
-        } finally { onMainChecked { settings.aiAutoApply=auto } }
+        } finally { responseRelease.countDown(); onMainChecked { settings.aiAutoApply=auto } }
     }
 
     fun testAiHistorySwitchRestoresRegenerationContext() {
