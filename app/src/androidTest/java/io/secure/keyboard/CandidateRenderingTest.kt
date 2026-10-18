@@ -79,7 +79,8 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         var acceptCommits = true
         override fun getTextBeforeCursor(n: Int, flags: Int): CharSequence = before.takeLast(n)
         override fun getTextAfterCursor(n: Int, flags: Int): CharSequence = ""
-        override fun getSelectedText(flags: Int): CharSequence? = null
+        var selectedText: String? = null
+        override fun getSelectedText(flags: Int): CharSequence? = selectedText
         override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
             if (!acceptCommits) return false
             committed.add(text.toString())
@@ -139,6 +140,389 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         SettingsStore(context).vibration = originalVibration
         SettingsStore(context).vibrationStrength = originalVibrationStrength
         super.tearDown()
+    }
+
+    fun testAssistantPrivacyAndSixtyPanelMemoryCycles() {
+        val marker="SKEY_PRIVATE_AUDIT_20261018_TEXT"
+        val retired=mutableListOf<java.lang.ref.WeakReference<View>>()
+        fun sample(stage:String) {
+            Runtime.getRuntime().gc(); System.runFinalization(); SystemClock.sleep(150)
+            val info=android.os.Debug.MemoryInfo().also { android.os.Debug.getMemoryInfo(it) }
+            val runtime=Runtime.getRuntime()
+            instrumentation.sendStatus(0,android.os.Bundle().apply {
+                putString("audit", "$stage pssKiB=${info.totalPss} javaBytes=${runtime.totalMemory()-runtime.freeMemory()} nativeBytes=${android.os.Debug.getNativeHeapAllocatedSize()} retainedViews=${retired.count { it.get()!=null }}")
+            })
+        }
+        sample("baseline")
+        repeat(60) { cycle ->
+            onMainChecked {
+                setField("aiMode",cycle%3==0)
+                setField("aiTask","custom")
+                setField("aiCustom",marker)
+                val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
+                session.enabled=cycle%3!=2
+                session.edit(marker)
+                session.complete(session.begin(),marker+"_RESULT")
+                invoke("renderBody")
+                if(session.enabled) retired.add(java.lang.ref.WeakReference(field<View>("translationResultView")))
+                service.onFinishInputView(false)
+                session.close()
+                for(name in listOf("translationTextView","translationResultView","translationAction","translationInsert","aiInstructionView"))
+                    assertNull("Closed panel retains $name",field<Any?>(name))
+                assertEquals("",session.text); assertEquals("",session.result)
+                assertEquals("",field<String>("aiCustom"))
+                setField("active",true)
+            }
+            instrumentation.waitForIdleSync()
+            if(cycle in listOf(9,29,59)) sample("cycle_${cycle+1}")
+        }
+        // Android view traversal/editor callbacks can outlive detachment by several frames.
+        repeat(10) {
+            instrumentation.waitForIdleSync()
+            Runtime.getRuntime().gc(); System.runFinalization(); SystemClock.sleep(500)
+        }
+        sample("finished_after_settle")
+        assertEquals("Detached assistant views must be collectible",0,retired.count { it.get()!=null })
+        val prefs=File(context.applicationInfo.dataDir,"shared_prefs")
+        val config=io.secure.keyboard.data.ApiConfigurationStore(context).load()
+        for(file in prefs.walkTopDown().filter { it.isFile }) {
+            val body=file.readText()
+            assertFalse("Draft entered preferences",body.contains(marker))
+            for(key in listOf(config.googleKey,config.grokKey,config.voiceKey).filter { it.length>=8 })
+                assertFalse("Plaintext API key entered preferences",body.contains(key))
+        }
+        for(file in listOf(context.filesDir,context.noBackupFilesDir,context.cacheDir).asSequence()
+            .flatMap { it.walkTopDown() }.filter { it.isFile && (it.length()<5_000_000 || it.extension in listOf("json","xml","txt","log","jsonl")) })
+            assertFalse("Draft entered app files",file.readBytes().toString(Charsets.UTF_8).contains(marker))
+    }
+
+    fun testAssistantIconsFollowModeAcrossToolbarAndMore() {
+        val settings=SettingsStore(context);val pins=settings.toolbarPins
+        try {
+            settings.toolbarPins=listOf("ai","translate")
+            onMainChecked {
+                fun checkIcons(root:View, ai:Boolean, translate:Boolean) {
+                    fun visit(v:View) {
+                        if(v is ToolIcon && v.contentDescription?.toString() in listOf("AI 助手","翻译")) {
+                            val selected=if(v.contentDescription.toString()=="AI 助手") ai else translate
+                            assertEquals(selected,v.isSelected)
+                            assertEquals(field<Int>(if(selected) "accent" else "toolbarColor"),v.tint)
+                        }
+                        if(v is ViewGroup) for(j in 0 until v.childCount) visit(v.getChildAt(j))
+                    }
+                    visit(root)
+                }
+                invoke("renderHeader")
+                checkIcons(field("toolbarGroup"),false,false)
+                invoke("openTool","ai")
+                checkIcons(field("toolbarGroup"),true,false)
+                setField("panel","more");invoke("renderBody")
+                checkIcons(field("body"),true,false)
+                invoke("openTool","translate")
+                checkIcons(field("toolbarGroup"),false,true)
+                setField("panel","more");invoke("renderBody")
+                checkIcons(field("body"),false,true)
+                invoke("openTool","translate")
+                checkIcons(field("toolbarGroup"),false,false)
+            }
+        } finally { settings.toolbarPins=pins }
+    }
+
+    fun testClosingAssistantRemovesQueuedSensitiveRequests() {
+        val executor = field<java.util.concurrent.ThreadPoolExecutor>("translationWorker")
+        val started = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        executor.execute { started.countDown(); release.await(5, java.util.concurrent.TimeUnit.SECONDS) }
+        assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS))
+        try {
+            onMainChecked {
+                for (tool in listOf("ai", "translate")) {
+                    invoke("openTool", tool)
+                    val task = Runnable { throw AssertionError("Closed request must never run") }
+                    setField(if (tool == "ai") "aiTaskRunnable" else "translationTask", task)
+                    executor.execute(task)
+                    field<ViewGroup>("toolbarGroup").getChildAt(0).performClick()
+                    assertTrue("Closed draft retained in worker queue", executor.queue.isEmpty())
+                }
+            }
+        } finally { release.countDown() }
+    }
+
+    fun testNamedCustomAiSelectorOnlySelectsAndFillsPrompt() {
+        val folder = java.io.File(context.cacheDir, "instruction-ui-fixture").apply { deleteRecursively(); mkdirs() }
+        val isolated = object : android.content.ContextWrapper(context) {
+            override fun getApplicationContext(): android.content.Context = this
+            override fun getNoBackupFilesDir() = folder
+        }
+        val original = field<io.secure.keyboard.data.ContentStore>("content")
+        val store = io.secure.keyboard.data.ContentStore(isolated)
+        fun find(view: View, description: String): View? {
+            if (view.contentDescription?.toString() == description) return view
+            if (view is ViewGroup) for (i in 0 until view.childCount) find(view.getChildAt(i), description)?.let { return it }
+            return null
+        }
+        try {
+            store.saveAiPreset(null, "简短回复", "缩短到两句话")
+            store.saveAiPreset(null, "邮件润色", "保留原意并润色邮件")
+            onMainChecked {
+                setField("content", store)
+                invoke("openTool", "ai")
+                setField("aiTask", "custom")
+                invoke("renderBody")
+                invoke("fillDefaultCustomAiPreset")
+            }
+            waitFor("First custom preset auto-filled") { field<String>("aiCustom") == "缩短到两句话" }
+            onMainChecked {
+                find(field<View>("body"), "选择自定义 AI")!!.performClick()
+            }
+            waitFor("Named presets loaded") { field<android.widget.PopupWindow?>("popup")?.contentView?.let { find(it,"选择自定义 AI：简短回复") } != null }
+            instrumentation.waitForIdleSync()
+            waitFor("Preset popup laid out") { field<android.widget.PopupWindow>("popup").contentView.width > 0 }
+            onMainChecked {
+                val view = field<android.widget.PopupWindow>("popup").contentView
+                val bitmap = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
+                try {
+                    view.draw(android.graphics.Canvas(bitmap))
+                    java.io.File(context.getExternalFilesDir(null), "instruction-history-preview.png").outputStream().use {
+                        bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                } finally { bitmap.recycle() }
+            }
+            onMainChecked {
+                val view = field<android.widget.PopupWindow>("popup").contentView
+                fun noDelete(v: View) {
+                    assertFalse(v.contentDescription?.toString()?.contains("删除") == true)
+                    if (v is ViewGroup) for (i in 0 until v.childCount) noDelete(v.getChildAt(i))
+                }
+                noDelete(view)
+                find(view, "选择自定义 AI：简短回复")!!.performClick()
+                assertEquals("缩短到两句话", field<String>("aiCustom"))
+                assertFalse(field<Boolean>("aiEditingInstruction"))
+                assertNull(field<android.widget.PopupWindow?>("popup"))
+                assertTrue(connection.committed.isEmpty())
+            }
+        } finally {
+            onMainChecked { invoke("cancelTransient"); setField("content", original) }
+            folder.deleteRecursively()
+        }
+    }
+
+    fun testAssistantBackExitsBothModesAndDropsLateResult() {
+        onMainChecked {
+            for(tool in listOf("ai","translate")) {
+                invoke("openTool",tool)
+                val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
+                session.edit("synthetic draft")
+                val token=session.begin()
+                val back=field<ViewGroup>("toolbarGroup").getChildAt(0)
+                assertEquals("退出模式",back.contentDescription.toString())
+                back.performClick()
+                assertFalse(session.enabled)
+                assertFalse(field<Boolean>("aiMode"))
+                assertEquals("",session.text)
+                session.complete(token,"late result")
+                assertEquals("",session.result)
+                assertEquals("keys",field<String>("panel"))
+                assertEquals("更多工具",field<ViewGroup>("toolbarGroup").getChildAt(0).contentDescription.toString())
+            }
+            assertTrue(connection.committed.isEmpty())
+        }
+    }
+
+    fun testAiDraftAndCustomInstructionStayOutOfHost() {
+        onMainChecked {
+            invoke("openTool", "ai"); setField("chinese", false)
+            invoke("type", "hello")
+            val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
+            assertEquals("hello",session.text)
+            setField("aiTask","custom"); setField("aiEditingInstruction",true)
+            invoke("type","short😀"); invoke("backspace")
+            assertEquals("short",field<String>("aiCustom"))
+            assertEquals("hello",session.text)
+            assertTrue(connection.committed.isEmpty())
+            val token=session.begin()
+            invoke("openTool","ai")
+            session.complete(token,"late result")
+            assertFalse(session.enabled); assertEquals("",session.result)
+        }
+    }
+
+    fun testAiSelectedTextCanBeExplicitlyReplaced() {
+        onMainChecked { connection.selectedText="original"; invoke("openTool","ai") }
+        waitFor("AI imports selection") { field<io.secure.keyboard.translation.TranslationSession>("translation").text=="original" }
+        onMainChecked {
+            val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
+            session.complete(session.begin(),"improved")
+            assertTrue(connection.committed.isEmpty())
+            invoke("applyAiResult")
+        }
+        waitFor("AI result applied") { connection.committed==listOf("improved") }
+    }
+
+    fun testAiRejectsChangedSelectionBeforeReplacing() {
+        onMainChecked { connection.selectedText="original"; invoke("openTool","ai") }
+        waitFor("AI selection captured") { field<io.secure.keyboard.translation.TranslationSession>("translation").text=="original" }
+        onMainChecked {
+            val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
+            session.complete(session.begin(),"improved")
+            connection.selectedText="different selection"
+            invoke("applyAiResult")
+        }
+        waitFor("replacement check complete") { !field<Boolean>("aiApplying") }
+        onMainChecked { assertTrue(connection.committed.isEmpty()) }
+    }
+
+    fun testTranslationImportsSelectionAndRestoresSavedLanguages() {
+        val settings = SettingsStore(context)
+        val oldSource = settings.translationSource; val oldTarget = settings.translationTarget
+        try {
+            settings.translationSource = "ja"; settings.translationTarget = "zh-CN"
+            onMainChecked { connection.selectedText = "選択した文章"; invoke("openTool", "translate") }
+            waitFor("selected text imported") {
+                field<io.secure.keyboard.translation.TranslationSession>("translation").text == "選択した文章"
+            }
+            onMainChecked {
+                val session = field<io.secure.keyboard.translation.TranslationSession>("translation")
+                assertEquals("ja",session.source); assertEquals("zh-CN",session.target)
+                assertTrue(connection.committed.isEmpty())
+                session.source="en"; session.target="fr"; invoke("saveTranslationLanguages")
+                assertEquals("en",SettingsStore(context).translationSource)
+                assertEquals("fr",SettingsStore(context).translationTarget)
+                invoke("openTool","translate"); invoke("openTool","translate")
+                assertEquals("en",session.source); assertEquals("fr",session.target)
+            }
+        } finally { settings.translationSource=oldSource; settings.translationTarget=oldTarget }
+    }
+
+    fun testTranslationSelectionCannotOverwriteNewTyping() {
+        val release = gateWorker()
+        try {
+            onMainChecked {
+                connection.selectedText = "old selection"
+                invoke("openTool","translate")
+                setField("chinese",false); invoke("type","new draft")
+            }
+        } finally { release.countDown() }
+        drainWorker(); instrumentation.waitForIdleSync()
+        onMainChecked {
+            assertEquals("new draft",field<io.secure.keyboard.translation.TranslationSession>("translation").text)
+            assertTrue(connection.committed.isEmpty())
+        }
+    }
+
+    fun testAiAddsTemporaryHeightWithoutShrinkingKeys() {
+        onMainChecked {
+            fun layout(): Int {
+                val root = field<View>("root")
+                val height = root.layoutParams.height
+                root.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+                root.layout(0, 0, 1080, height)
+                fun findKey(view: View): View? {
+                    if (view is io.secure.keyboard.ui.KeyContainer && view.contentDescription?.toString() == "q") return view
+                    if (view is ViewGroup) for (i in 0 until view.childCount) findKey(view.getChildAt(i))?.let { return it }
+                    return null
+                }
+                return findKey(root)!!.height
+            }
+            // Activity fixture replaces the IME root LayoutParams with MATCH_PARENT.
+            invoke("applyLiveLayout")
+            val profile = field<SettingsStore.LayoutProfile>("profile")
+            val normalKeyHeight = layout()
+            val normalTotal = field<View>("root").layoutParams.height
+            invoke("openTool", "ai")
+            val translatedKeyHeight = layout()
+            assertTrue(field<View>("root").layoutParams.height > normalTotal)
+            assertTrue(kotlin.math.abs(normalKeyHeight - translatedKeyHeight) <= 1)
+            assertEquals(profile, field<SettingsStore.LayoutProfile>("profile"))
+            invoke("openTool", "ai")
+            assertEquals(normalKeyHeight, layout())
+            assertEquals(normalTotal, field<View>("root").layoutParams.height)
+            assertEquals(profile, field<SettingsStore.LayoutProfile>("profile"))
+        }
+    }
+
+    fun testTranslationAddsTemporaryHeightWithoutShrinkingKeys() {
+        onMainChecked {
+            fun layout(): Int {
+                val root = field<View>("root")
+                val height = root.layoutParams.height
+                root.measure(View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+                root.layout(0, 0, 1080, height)
+                fun findKey(view: View): View? {
+                    if (view is io.secure.keyboard.ui.KeyContainer && view.contentDescription?.toString() == "q") return view
+                    if (view is ViewGroup) for (i in 0 until view.childCount) findKey(view.getChildAt(i))?.let { return it }
+                    return null
+                }
+                return findKey(root)!!.height
+            }
+            // Activity fixture replaces the IME root LayoutParams with MATCH_PARENT.
+            invoke("applyLiveLayout")
+            val profile = field<SettingsStore.LayoutProfile>("profile")
+            val normalKeyHeight = layout()
+            val normalTotal = field<View>("root").layoutParams.height
+            invoke("openTool", "translate")
+            val translatedKeyHeight = layout()
+            assertTrue(field<View>("root").layoutParams.height > normalTotal)
+            assertTrue(kotlin.math.abs(normalKeyHeight - translatedKeyHeight) <= 1)
+            assertEquals(profile, field<SettingsStore.LayoutProfile>("profile"))
+            invoke("openTool", "translate")
+            assertEquals(normalKeyHeight, layout())
+            assertEquals(normalTotal, field<View>("root").layoutParams.height)
+            assertEquals(profile, field<SettingsStore.LayoutProfile>("profile"))
+        }
+    }
+
+    fun testTranslationKeepsOriginalOutOfHostAndResetsOnEditorChange() {
+        onMainChecked {
+            invoke("openTool", "translate")
+            setField("chinese", false)
+            invoke("type", "hello")
+            invoke("space")
+            invoke("type", "😀")
+            invoke("backspace")
+            val session = field<io.secure.keyboard.translation.TranslationSession>("translation")
+            assertEquals("hello ", session.text)
+            assertTrue(connection.committed.isEmpty())
+            val token = session.begin()
+            session.complete(token, "你好")
+            invoke("updateTranslationPreview")
+            val root = field<View>("root")
+            root.measure(View.MeasureSpec.makeMeasureSpec(root.width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(root.layoutParams.height.coerceAtLeast(1), View.MeasureSpec.EXACTLY))
+            root.layout(0, 0, root.measuredWidth, root.measuredHeight)
+            val bitmap = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
+            root.draw(Canvas(bitmap))
+            File(context.getExternalFilesDir(null), "translation-panel.png").outputStream().use {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+            bitmap.recycle()
+            fun findInsert(view: View): TextView? {
+                if (view is TextView && view.text.toString() == "插入") return view
+                if (view is ViewGroup) for (i in 0 until view.childCount) findInsert(view.getChildAt(i))?.let { return it }
+                return null
+            }
+            assertTrue(findInsert(root)!!.performClick())
+            assertEquals(listOf("你好"), connection.committed)
+            session.edit("another draft")
+            service.onFinishInput()
+            assertFalse(session.enabled)
+            assertEquals("", session.text)
+            session.complete(token, "late result")
+            assertEquals("", session.result)
+        }
+    }
+
+    fun testTranslationChineseCandidateGoesToDraft() {
+        onMainChecked { invoke("openTool", "translate"); invoke("type", "n"); invoke("type", "i") }
+        awaitResults()
+        onMainChecked {
+            val candidate = field<List<String>>("candidateTexts").first()
+            assertEquals(true, invoke("choose", candidate))
+            assertEquals(candidate, field<io.secure.keyboard.translation.TranslationSession>("translation").text)
+            assertTrue(connection.committed.isEmpty())
+        }
     }
 
     fun testSlowHostThousandRefreshesRetainOneCurrentPendingQueryAndSkipObsoleteEditors() {
@@ -1082,8 +1466,11 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         val originalTheme = settings.theme
         try {
             for (theme in listOf("light", "dark")) {
+                instrumentation.runOnMainSync { settings.theme = theme }
+                // Theme changes now rebuild the live IME asynchronously. Drain that callback
+                // before attaching this synthetic Activity host to the current keyboard view.
+                instrumentation.waitForIdleSync()
                 instrumentation.runOnMainSync {
-                    settings.theme = theme
                     activity.setContentView(service.onCreateInputView())
                 }
                 instrumentation.waitForIdleSync()

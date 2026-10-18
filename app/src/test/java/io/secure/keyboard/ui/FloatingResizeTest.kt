@@ -4,6 +4,21 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class FloatingResizeTest {
+    @Test fun floatingKeyboardCanReachTopInPortraitAndLandscape() {
+        assertEquals(540, FloatingResize.maxBottom(800, 260))
+        assertEquals(160, FloatingResize.maxBottom(420, 260))
+        assertEquals(0, FloatingResize.maxBottom(200, 260))
+    }
+
+    @Test fun resizingAtScreenTopPreservesTopAndRemainsVisible() {
+        val top = FloatingResize.Bounds(280, 260, 40, 540)
+        for (dy in -500..500 step 10) {
+            val result = FloatingResize.resize(top, 0, dy, 540, 600, 800)
+            assertEquals(800, result.height + result.bottom)
+            assertEquals(result.bottom, FloatingResize.maxBottom(800, result.height))
+        }
+    }
+
     private val start = FloatingResize.Bounds(280, 260, 40, 120)
     private fun resize(dx: Int, dy: Int) = FloatingResize.resize(start, dx, dy, 540, 700, 320)
 

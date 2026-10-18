@@ -268,13 +268,15 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
     }
 
     fun testVoicePreviewCentersPlaceholderAndMultilineTextWithoutHidingStatusOrErrors() {
-        instrumentation.runOnMainSync {
+        onMainChecked {
+            setField("usingAiVoice", false)
             val listener = syntheticListener()
             val preview = field<TextView>("voiceText")
             val status = field<TextView>("voiceStatus")
             val scroll = preview.parent as ScrollView
             val column = scroll.parent as ViewGroup
-            val cancel = column.getChildAt(column.childCount - 1) as TextView
+            val actions = column.getChildAt(column.childCount - 1) as ViewGroup
+            val cancel = actions.getChildAt(actions.childCount - 1) as TextView
             val body = field<View>("body")
             val density = context.resources.displayMetrics.density
             fun layoutPreview() {
@@ -294,8 +296,8 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
                             textLayout.width / 2f) <= 1f)
                 }
                 assertEquals("取消", cancel.text.toString())
-                assertEquals("Cancel stays at the bottom", column.height - column.paddingBottom, cancel.bottom)
-                assertTrue("Preview never overlaps Cancel", scroll.bottom <= cancel.top)
+                assertEquals("Cancel stays at the bottom", column.height - column.paddingBottom, actions.bottom)
+                assertTrue("Preview never overlaps Cancel", scroll.bottom <= actions.top)
             }
             // Native production View.draw evidence; this is not a compositor screenshot.
             fun savePreviewRender(name: String) {
@@ -434,19 +436,126 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
         instrumentation.runOnMainSync { assertTrue(connection.commits.isEmpty()) }
     }
 
+    fun testAiSuccessClearsPreviewAndRestartsOnlyAfterCleanup() {
+        lateinit var listener: OfflineVoiceSession.Listener
+        onMainChecked {
+            setField("usingAiVoice", true)
+            listener = syntheticListener()
+            listener.onState(OfflineVoiceSession.State.PROCESSING)
+            listener.onPreview("本轮语音", true)
+            listener.onSegment(1, "本轮语音")
+        }
+        waitFor { connection.commits.size == 1 }
+        onMainChecked {
+            assertEquals("", field<String>("voicePreview"))
+            assertEquals("", field<TextView>("voiceText").text.toString())
+            assertNull(field<Runnable?>("aiVoiceRestart"))
+            listener.onState(OfflineVoiceSession.State.IDLE)
+            val restart = field<Runnable?>("aiVoiceRestart")
+            assertNotNull(restart)
+            listener.onState(OfflineVoiceSession.State.IDLE)
+            assertSame(restart, field<Runnable?>("aiVoiceRestart"))
+            invoke("cancelVoice")
+            assertNull(field<Runnable?>("aiVoiceRestart"))
+        }
+        SystemClock.sleep(650)
+        onMainChecked { assertFalse(field<Boolean>("voiceStarting")); assertNull(field<VoiceCommitGuard?>("voiceGuard")) }
+    }
+
+    fun testAiCleanupBeforeHostCommitStillSchedulesExactlyOneRestart() {
+        val release = gateValidationWorker()
+        onMainChecked {
+            setField("usingAiVoice", true)
+            val listener = syntheticListener()
+            listener.onPreview("下一轮", true)
+            listener.onSegment(1, "下一轮")
+            listener.onState(OfflineVoiceSession.State.IDLE)
+            assertNull(field<Runnable?>("aiVoiceRestart"))
+        }
+        release.countDown()
+        waitFor { connection.commits.size == 1 }
+        onMainChecked {
+            assertNotNull(field<Runnable?>("aiVoiceRestart"))
+            service.onFinishInputView(false)
+            assertNull(field<Runnable?>("aiVoiceRestart"))
+        }
+    }
+
+    fun testAiRejectedCommitDoesNotRestartOrRetainTranscript() {
+        onMainChecked {
+            setField("usingAiVoice", true)
+            connection.acceptCommit = false
+            val listener = syntheticListener()
+            listener.onSegment(1, "被拒绝的语音")
+            listener.onState(OfflineVoiceSession.State.IDLE)
+        }
+        waitFor { field<VoiceCommitGuard?>("voiceGuard") == null }
+        onMainChecked {
+            assertTrue(connection.commits.isEmpty())
+            assertNull(field<Runnable?>("aiVoiceRestart"))
+        }
+    }
+
+    fun testAiVoiceStatusUsesExplicitListeningAndCompletion() {
+        onMainChecked {
+            val settings = io.secure.keyboard.data.SettingsStore(context)
+            val previous = settings.voiceMode
+            try {
+                settings.voiceMode = "ai"
+                setField("usingAiVoice", true)
+                val listener = syntheticListener()
+                listener.onState(OfflineVoiceSession.State.LISTENING)
+                assertEquals("聆听中", field<TextView>("voiceStatus").text.toString())
+                listener.onState(OfflineVoiceSession.State.PROCESSING)
+                assertEquals("正在识别…", field<TextView>("voiceStatus").text.toString())
+                setField("aiVoiceRoundCommitted", true)
+                listener.onState(OfflineVoiceSession.State.IDLE)
+                assertEquals("识别完成", field<TextView>("voiceStatus").text.toString())
+                invoke("cancelVoice")
+            } finally { settings.voiceMode = previous }
+        }
+    }
+
     fun testVoicePanelContainsOnlyCancelAction() {
-        instrumentation.runOnMainSync {
-            val texts = mutableListOf<TextView>()
-            fun walk(view: View) {
-                if (view is TextView) texts.add(view)
-                if (view is ViewGroup) for (i in 0 until view.childCount) walk(view.getChildAt(i))
-            }
-            walk(field("body"))
-            assertEquals(listOf("取消"), texts.filter { it.isClickable }.map { it.text.toString() })
-            texts.single { it.text == "取消" }.performClick()
+        onMainChecked {
+            val settings = io.secure.keyboard.data.SettingsStore(context)
+            val previous = settings.voiceMode
+            settings.voiceMode = "offline"
+            try { invoke("renderBody") } finally { settings.voiceMode = previous }
+            val texts = voiceButtons()
+            assertEquals(listOf("取消"), texts.map { it.text.toString() })
+            texts.single().performClick()
             assertEquals("keys", field<String>("panel"))
             assertNull(field<VoiceCommitGuard?>("voiceGuard"))
         }
+    }
+
+    fun testAiVoiceActionsShareSpacedHorizontalRow() {
+        onMainChecked {
+            val settings = io.secure.keyboard.data.SettingsStore(context)
+            val previous = settings.voiceMode
+            setField("heldVoice", false)
+            settings.voiceMode = "ai"
+            try { invoke("renderBody") } finally { settings.voiceMode = previous }
+            val texts = voiceButtons()
+            assertEquals(listOf("识别语音", "取消"), texts.map { it.text.toString() })
+            assertSame(texts[0].parent, texts[1].parent)
+            assertEquals(LinearLayout.HORIZONTAL, (texts[0].parent as LinearLayout).orientation)
+            val first = texts[0].layoutParams as LinearLayout.LayoutParams
+            val second = texts[1].layoutParams as LinearLayout.LayoutParams
+            assertTrue(first.rightMargin > 0)
+            assertEquals(first.weight, second.weight)
+        }
+    }
+
+    private fun voiceButtons(): List<TextView> {
+        val texts = mutableListOf<TextView>()
+        fun walk(view: View) {
+            if (view is TextView && view.isClickable) texts.add(view)
+            if (view is ViewGroup) for (i in 0 until view.childCount) walk(view.getChildAt(i))
+        }
+        walk(field("body"))
+        return texts
     }
 
     fun testRetappingVoiceClosesPanelAndRevokesPendingSegment() {

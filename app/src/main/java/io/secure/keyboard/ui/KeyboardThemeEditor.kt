@@ -578,7 +578,7 @@ internal class PalettePreview(activity: Activity, initial: Map<String, String>) 
             radius: Float = 8f,
         ) {
             paint.color = color(id)
-            canvas.drawRoundRect(RectF(x, y, x + width, y + height), radius, radius, paint)
+            canvas.drawRoundRect(x, y, x + width, y + height, radius, radius, paint)
         }
         fun text(value: String, x: Float, y: Float, size: Float, id: String) {
             paint.color = color(id)

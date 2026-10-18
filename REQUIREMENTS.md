@@ -1,3 +1,5 @@
+> 历史基线文档：以下描述对应早期离线版。1.0.11 的功能、权限和联网范围以 README.md 为准。
+
 # 离线键盘：已确认需求
 
 Implementation baseline 2026-10-11. Target Android phones and Samsung foldable (exact model/OS requires hardware verification).

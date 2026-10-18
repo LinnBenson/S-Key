@@ -1,1329 +1,725 @@
 package io.secure.keyboard
 
-import android.app.Activity
-import android.app.AlertDialog
-import android.content.Intent
-import android.content.res.ColorStateList
-import android.graphics.Rect
+import android.Manifest
+import android.content.*
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.provider.Settings
-import android.text.InputType
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.view.ViewTreeObserver
 import android.view.inputmethod.InputMethodManager
-import android.widget.*
-import java.util.concurrent.Executors
-import io.secure.keyboard.data.ContentStore
-import io.secure.keyboard.data.DictionaryKind
-import io.secure.keyboard.data.DictionaryTextReader
-import io.secure.keyboard.data.SettingsStore
-import io.secure.keyboard.ui.DictionaryEntryRow
-import io.secure.keyboard.ui.KeyboardThemeEditor
-import io.secure.keyboard.settings.SettingsScreen
-import io.secure.keyboard.settings.SettingsPalette
-import io.secure.keyboard.settings.SettingsDialogs
-import io.secure.keyboard.settings.SettingsInputs
-import io.secure.keyboard.settings.SettingsNavigation
-import io.secure.keyboard.settings.SettingsEditableDraft
-import io.secure.keyboard.settings.SettingsDraftBudget
-import io.secure.keyboard.settings.applySettingsActivityTheme
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.window.DialogProperties
+import io.secure.keyboard.data.*
+import io.secure.keyboard.settings.*
+import io.secure.keyboard.voice.*
+import top.yukonga.miuix.kmp.basic.*
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import kotlin.math.roundToInt
 
-/**
- * Offline settings and manual content management. No analytics, cloud, or background collection.
- */
-class SettingsActivity : Activity() {
-    private lateinit var config: SettingsStore
-    private lateinit var content: ContentStore
-    private lateinit var body: LinearLayout
-    private lateinit var ui: SettingsScreen
-    private var group: LinearLayout? = null
-    private val navigation = SettingsNavigation()
-    private val contentPageIndices = mutableMapOf<String, Int>()
-    private val dictionaryPageIndices = mutableMapOf<DictionaryKind, Int>()
-    private var currentDictionaryKind: DictionaryKind? = null
-    private lateinit var dictionaryTransfer: DictionaryTransfer
-    private lateinit var lifetimeState: SettingsLifetimeState
-    private var transferDialog: AlertDialog? = null
-    private var editor: KeyboardThemeEditor? = null
-    private var restoredEditorDraft: Bundle? = null
-    private var toolbarEditor: io.secure.keyboard.settings.ToolbarEditor? = null
-    private var activeDialog: AlertDialog? = null
-    private var activeDraft: Bundle? = null
-    private var draftFields = emptyList<EditText>()
-    private var pendingSelectionRestore: Pair<View, ViewTreeObserver.OnWindowFocusChangeListener>? = null
-    private val dialogs = mutableSetOf<AlertDialog>()
-    private val numberEditors = mutableMapOf<String, (Bundle?) -> Unit>()
-    private var pendingLayout: Pair<View, ViewTreeObserver.OnGlobalLayoutListener>? = null
-    private var recoveryMessage: String? = null
-    private var backCallback: android.window.OnBackInvokedCallback? = null
+open class SettingsActivity : ComponentActivity() {
+    protected open val initialPage = "home"
+    private val model: SettingsModel by viewModels()
+    private var incomingPage by mutableStateOf<String?>(null)
+    private var voiceState by mutableStateOf<ModelImportCoordinator.State>(ModelImportCoordinator.State.Idle)
+    private var microphone by mutableStateOf(false)
+    private var enabledIme by mutableStateOf(false)
+    private var selectedIme by mutableStateOf(false)
+    private val voiceObserver: (ModelImportCoordinator.State) -> Unit = { voiceState = it }
+    private val micPicker = registerForActivityResult(ActivityResultContracts.RequestPermission()) { microphone = it }
+    private val modelPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let { ModelImportTransfer.start(applicationContext, it) }
+    }
+    private val importPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val kind = model.pendingKind
+            val epoch = model.importEpoch
+            val resolver = applicationContext.contentResolver
+            model.task(success = { model.message = "词库导入完成" }) {
+                val input = resolver.openInputStream(uri) ?: error("无法读取文件")
+                model.content.importDictionary(DictionaryTextReader.read(input), epoch, kind)
+            }
+        }
+    }
+    private val exportPicker = registerForActivityResult(ActivityResultContracts.CreateDocument("text/tab-separated-values")) { uri ->
+        val snapshot = model.exportText
+        model.exportText = null
+        if (uri != null && snapshot != null) {
+            val resolver = applicationContext.contentResolver
+            model.task(success = { model.message = "词库导出完成" }) {
+                (resolver.openOutputStream(uri, "wt") ?: error("无法写入文件")).bufferedWriter(Charsets.UTF_8).use { it.write(snapshot) }
+            }
+        } else if (uri != null) model.message = "导出已中断，请重新选择导出。"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        config = SettingsStore(this)
-        content = ContentStore(this)
-        applySettingsActivityTheme()
         super.onCreate(savedInstanceState)
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            backCallback = android.window.OnBackInvokedCallback { navigateBack() }.also {
-                onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, it)
-            }
-        }
-        lifetimeState = lastNonConfigurationInstance as? SettingsLifetimeState ?: SettingsLifetimeState()
-        dictionaryTransfer = lifetimeState.dictionaryTransfer
-        // Consume before render() closes prior UI. The current fields become the only edit owner.
-        val retainedDraft = lifetimeState.editableDraft
-        lifetimeState.editableDraft = null
-        DictionaryKind.values().forEach { kind ->
-            dictionaryPageIndices[kind] = savedInstanceState?.getInt("dictionary_page_${kind.name}") ?: 0
-        }
-        for (route in listOf("clipboard", "phrases")) {
-            contentPageIndices[route] = savedInstanceState?.getInt("content_page_$route") ?: 0
-        }
-        recoveryMessage = savedInstanceState?.getString("recovery_message")
-        if (savedInstanceState?.containsKey("settings_route") == true) {
-            navigation.restore(savedInstanceState.getString("settings_route"),
-                savedInstanceState.getStringArrayList("settings_history").orEmpty())
-            savedInstanceState.getBundle("settings_positions")?.let { positions ->
-                positions.keySet().filter { it in SettingsNavigation.routes }.forEach { route ->
-                    positions.getBundle(route)?.let {
-                        navigation.positions[route] = SettingsNavigation.Position(
-                            it.getInt("offset").coerceAtLeast(0), it.getString("anchor"), it.getInt("anchor_offset"), it.getString("focus"))
-                    }
-                }
-            }
-            navigation.expandedHelp.addAll(savedInstanceState.getStringArrayList("settings_help").orEmpty())
-        } else {
-            val restoredKind = savedInstanceState?.getString("dictionary_kind")
-            navigation.reset(when (restoredKind) {
-                DictionaryKind.CHINESE.name -> "dictionary"
-                DictionaryKind.ENGLISH.name -> "english_dictionary"
-                else -> intent?.getStringExtra("page") ?: "home"
-            })
-        }
-        restoredEditorDraft = savedInstanceState?.getBundle("editor_draft")
-        safely { render(navigation.current) }
-        val editableDraft = retainedDraft?.toEditorBundle() ?: savedInstanceState?.getBundle("editable_draft")
-        if (editableDraft != null) safely { restoreEditableDraft(editableDraft) }
-        else if (savedInstanceState?.getBoolean("oversized_editable_draft") == true) {
-            showDialog(SettingsDialogs.builder(this)
-                .setTitle("未保存的编辑未恢复")
-                .setMessage("应用进程结束，较大的未保存编辑无法恢复。已保存内容不受影响。")
-                .setPositiveButton("知道了", null).create())
-        }
+        incomingPage = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: initialPage
+        model.pendingKind = savedInstanceState?.getString("pending_kind")?.let { runCatching { DictionaryKind.valueOf(it) }.getOrNull() }
+            ?: model.pendingKind
+        if (savedInstanceState?.containsKey("import_epoch") == true) model.importEpoch = savedInstanceState.getLong("import_epoch")
+        setContent { ApplicationUi() }
     }
-
     override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        closeDialogs()
-        toolbarEditor?.close()
-        toolbarEditor = null
-        editor?.close()
-        editor = null
-        restoredEditorDraft = null
-        if (::ui.isInitialized) ui.dispose()
-        cancelLayoutRestore()
-        navigation.reset(intent.getStringExtra("page") ?: "home")
-        // A fresh destination must not capture the unrelated old page's position.
-        if (::body.isInitialized) body.tag = null
-        safely { render(navigation.current, fresh = true) }
-        showTransferProgress()
+        super.onNewIntent(intent); setIntent(intent)
+        incomingPage = intent.getStringExtra("page") ?: initialPage
     }
-
-    private fun render(route: String, fresh: Boolean = false) {
-        if (fresh) suppressPositionCapture = true
-        when (route) {
-            "clipboard" -> clipboard()
-            "phrases" -> phrases()
-            "dictionary" -> dictionary(DictionaryKind.CHINESE)
-            "english_dictionary" -> dictionary(DictionaryKind.ENGLISH)
-            "toolbar" -> toolbar()
-            "emoji" -> emoji()
-            "layout" -> profiles()
-            "behavior" -> behavior()
-            "feedback" -> feedback()
-            "input" -> inputPreferences()
-            "cleanup" -> cleanup()
-            "theme_light" -> themeEditor(false)
-            "theme_dark" -> themeEditor(true)
-            "profile_outer_portrait" -> profile(true, false)
-            "profile_outer_landscape" -> profile(true, true)
-            "profile_inner_portrait" -> profile(false, false)
-            "profile_inner_landscape" -> profile(false, true)
-            "recovery" -> recoveryPage()
-            else -> home()
-        }
+    override fun onStart() { super.onStart(); ModelImportTransfer.attach(voiceObserver) }
+    override fun onStop() { ModelImportTransfer.detach(voiceObserver); super.onStop() }
+    override fun onResume() {
+        super.onResume()
+        microphone = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val manager = getSystemService(InputMethodManager::class.java)
+        enabledIme = manager.enabledInputMethodList.any { it.packageName == packageName }
+        selectedIme = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+            ?.substringBefore('/') == packageName
+        model.refresh()
     }
-
-    private var suppressPositionCapture = false
-
-    private fun page(route: String, title: String, back: Boolean = true) {
-        if (!suppressPositionCapture) rememberPosition()
-        suppressPositionCapture = false
-        cancelLayoutRestore()
-        closeDialogs()
-        toolbarEditor?.close()
-        toolbarEditor = null
-        editor?.close()
-        editor = null
-        if (::ui.isInitialized) ui.dispose()
-        navigation.navigate(route)
-        currentDictionaryKind = null
-        numberEditors.clear()
-        group = null
-        this.title = title
-        ui = SettingsScreen(this)
-        val backLabel = when {
-            route.startsWith("profile_") -> "‹ 返回布局配置"
-            route.startsWith("theme_") || route == "feedback" -> "‹ 返回外观与按键"
-            else -> "‹ 返回设置"
-        }
-        body = ui.root(title, if (back) backLabel else null, if (back) ({ navigateBack() }) else null)
-        body.tag = route
-        val position = navigation.positions[route] ?: SettingsNavigation.Position()
-        val targetBody = body
-        val listener = object : ViewTreeObserver.OnGlobalLayoutListener {
-            override fun onGlobalLayout() {
-                val observer = targetBody.viewTreeObserver
-                if (observer.isAlive) observer.removeOnGlobalLayoutListener(this)
-                pendingLayout = null
-                if (isDestroyed || body !== targetBody || body.tag != route) return
-                position.focus?.let { body.findViewWithTag<View>(it)?.requestFocus() }
-                val anchor = position.anchor?.let { body.findViewWithTag<View>(it) }
-                val target = if (anchor == null) position.offset else topInBody(anchor) + position.anchorOffset
-                ui.restoreScroll(target.coerceAtLeast(0))
-            }
-        }
-        pendingLayout = targetBody to listener
-        targetBody.viewTreeObserver.addOnGlobalLayoutListener(listener)
-    }
-
-    private fun topInBody(view: View): Int {
-        val bounds = Rect()
-        view.getDrawingRect(bounds)
-        body.offsetDescendantRectToMyCoords(view, bounds)
-        return bounds.top
-    }
-
-    private fun rememberPosition() {
-        if (!::ui.isInitialized || !::body.isInitialized || !body.isLaidOut) return
-        val route = body.tag as? String ?: return
-        val y = ui.scrollY()
-        val candidates = mutableListOf<View>()
-        fun visit(view: View) {
-            if (view !== body && (view.tag as? String)?.startsWith("anchor:") == true) candidates.add(view)
-            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
-        }
-        visit(body)
-        val anchor = candidates.firstOrNull { topInBody(it) + it.height > y }
-        navigation.positions[route] = SettingsNavigation.Position(y, anchor?.tag as? String,
-            if (anchor == null) 0 else y - topInBody(anchor), currentFocus?.tag as? String)
-    }
-
-    private fun keepItemVisible(anchor: String) {
-        rememberPosition()
-        val current = navigation.positions[navigation.current] ?: SettingsNavigation.Position()
-        navigation.positions[navigation.current] = current.copy(anchor = anchor, anchorOffset = 0)
-        suppressPositionCapture = true
-    }
-
-    private fun cancelLayoutRestore() {
-        pendingLayout?.let { (view, listener) ->
-            val observer = view.viewTreeObserver
-            if (observer.isAlive) observer.removeOnGlobalLayoutListener(listener)
-        }
-        pendingLayout = null
-    }
-
-    private fun navigateBack() {
-        if (editor?.dismissDialog() == true) return
-        dialogs.lastOrNull { it.isShowing }?.let {
-            if (it !== transferDialog) it.cancel()
-            return
-        }
-        val focused = currentFocus
-        if (focused is EditText) {
-            (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(focused.windowToken, 0)
-            focused.clearFocus()
-            return
-        }
-        rememberPosition()
-        val destination = navigation.back() ?: run { finish(); return }
-        suppressPositionCapture = true
-        safely { render(destination) }
-    }
-
-    @Deprecated("Uses platform back dispatch for dependency-free API 26 compatibility")
-    override fun onBackPressed() = navigateBack()
-
-    private fun target(): LinearLayout = group ?: body
-
-    private fun label(text: String, size: Float = 14f): TextView = ui.text(target(), text, size)
-
-    private fun button(text: String, primary: Boolean = false, action: () -> Unit): Button =
-        ui.button(target(), text, primary) { safely(action) }.apply {
-            gravity = Gravity.CENTER
-            tag = "action:${target().tag ?: navigation.current}:$text"
-            if (text.startsWith("删除") || text.startsWith("清空")) setTextColor(SettingsPalette.error)
-        }
-
-    private fun compactActions(parent: LinearLayout): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.END or Gravity.CENTER_VERTICAL
-        parent.addView(this, LinearLayout.LayoutParams(-1, -2))
-    }
-
-    private fun compactAction(parent: LinearLayout, label: String, icon: String? = null, action: () -> Unit) {
-        val button = Button(this).apply {
-            text = if (icon == null) label else ""
-            contentDescription = label
-            tag = "action:${target().tag ?: navigation.current}:$label"
-            SettingsPalette.styleButton(this)
-            minWidth = dp(48); minimumWidth = dp(48)
-            minHeight = dp(48); minimumHeight = dp(48)
-            textSize = 13f
-            setPadding(dp(8), 0, dp(8), 0)
-            background = SettingsPalette.rowBackground(this@SettingsActivity)
-            if (label.startsWith("删除")) setTextColor(SettingsPalette.error)
-            setOnClickListener { safely(action) }
-        }
-        if (icon == null) parent.addView(button, LinearLayout.LayoutParams(-2, dp(48)))
-        else {
-            val frame = android.widget.FrameLayout(this)
-            parent.addView(frame, LinearLayout.LayoutParams(dp(48), dp(48)))
-            frame.addView(button, android.widget.FrameLayout.LayoutParams(-1, -1))
-            frame.addView(io.secure.keyboard.ui.ToolIcon(this, icon,
-                if (label.startsWith("删除")) SettingsPalette.error else ui.ink, artworkSizeDp = 20f).apply {
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                isClickable = false
-            }, android.widget.FrameLayout.LayoutParams(-1, -1))
-        }
-    }
-
-    private fun navigateRow(text: String, summary: String? = null, action: () -> Unit): Button =
-        ui.actionRow(target(), text, summary) { safely(action) }.apply {
-            tag = "action:${target().tag ?: navigation.current}:$text"
-        }
-
-    private fun toggle(text: String, value: Boolean, change: (Boolean) -> Unit): Switch =
-        Switch(this).apply {
-            this.text = text
-            tag = "toggle:${target().tag ?: navigation.current}:$text"
-            isChecked = value
-            textSize = 15f
-            setTextColor(ui.ink)
-            minHeight = dp(56)
-            minimumHeight = dp(56)
-            switchPadding = dp(16)
-            setPadding(dp(4), dp(12), dp(4), dp(12))
-            thumbTintList = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(SettingsPalette.accent, SettingsPalette.outline))
-            trackTintList = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(SettingsPalette.outline, SettingsPalette.functional))
-            target().addView(this, LinearLayout.LayoutParams(-1, -2))
-            setOnCheckedChangeListener { _, checked -> safely { change(checked) } }
-        }
-
-    private fun number(text: String, value: Int, min: Int, max: Int, save: (Int) -> Unit) {
-        var current = value
-        val key = "${navigation.current}:$text"
-        lateinit var row: Button
-        val open: (Bundle?) -> Unit = { draft ->
-            val input = SettingsInputs.field(this).apply {
-                id = R.id.settings_numeric_input
-                inputType = InputType.TYPE_CLASS_NUMBER
-                filters = emptyArray() // Validate on Save; never silently truncate an editable draft.
-                setText(current.toString())
-                contentDescription = text
-            }
-            val container = ui.column()
-            SettingsInputs.labeled(container, "$text ($min–$max)", input)
-            val dialog = SettingsDialogs.builder(this)
-                .setTitle(text)
-                .setView(SettingsDialogs.scrollable(this, container))
-                .setNegativeButton("取消", null)
-                .setPositiveButton("保存", null).create()
-            dialog.setOnShowListener {
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                    val v = input.text.toString().toIntOrNull()
-                    if (v == null || v !in min..max) SettingsInputs.error(input, "请输入 $min–$max 之间的数值")
-                    else safely {
-                        save(v)
-                        current = v
-                        row.text = "$text: $v"
-                        dialog.dismiss()
-                    }
-                }
-            }
-            showEditable(dialog, Bundle().apply { putString("type", "number"); putString("key", key) }, listOf(input), draft)
-        }
-        row = navigateRow("$text: $value") { open(null) }
-        row.tag = "anchor:number:$key"
-        numberEditors[key] = open
-    }
-
-    private fun toolName(value: String) =
-        when (value) {
-            "clipboard" -> "剪贴板"
-            "phrases" -> "常用语"
-            "voice" -> "语音"
-            "quickedit" -> "快捷编辑"
-            "emoji" -> "表情"
-            "layout" -> "布局"
-            "floating" -> "悬浮"
-            "split" -> "分离"
-            "theme" -> "主题"
-            "dictionary" -> "中文词库"
-            "english_dictionary" -> "英文词库"
-            "settings" -> "设置"
-            else -> value
-        }
-
-    private fun slider(title: String, value: Int, minValue: Int, maxValue: Int, step: Int,
-        unit: String, save: (Int) -> Unit) {
-        val parent = target()
-        val caption = ui.text(parent, "$title：$value $unit", 15f, true)
-        parent.addView(SeekBar(this).apply {
-            max = (maxValue - minValue) / step
-            progress = (value.coerceIn(minValue, maxValue) - minValue) / step
-            contentDescription = title
-            minimumHeight = dp(48)
-            thumbTintList = ColorStateList.valueOf(SettingsPalette.accent)
-            progressTintList = ColorStateList.valueOf(SettingsPalette.accent)
-            progressBackgroundTintList = ColorStateList.valueOf(SettingsPalette.functional)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                    val current = minValue + progress * step
-                    caption.text = "$title：$current $unit"
-                    if (fromUser) safely { save(current) }
-                }
-                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
-            })
-        }, LinearLayout.LayoutParams(-1, -2))
-    }
-
-    private fun home() {
-        intent.removeExtra("page")
-        page("home", "偏好设置")
-        ui.card(body).also {
-            ui.text(it, "安心输入，只在本机", 17f, true)
-            ui.text(it, "不学习输入内容，不保存输入历史。", 12f)
-        }
-        section("输入体验")
-        navigateRow("外观与按键", "主题配色、字号与按键角标") { behavior() }
-        navigateRow("输入与补全", "自动上屏、英文补全、模糊拼音") { inputPreferences() }
-        navigateRow("布局配置", "外屏 / 内屏 · 横屏 / 竖屏") { profiles() }
-        navigateRow("定制工具栏", "添加、移除与拖动排序") { toolbar() }
-        section("本机内容")
-        navigateRow("剪贴板", "${content.clipboard().size} 条记录") { clipboard() }
-        navigateRow("常用语", "${content.phrases().size} 条手动添加") { phrases() }
-        navigateRow("中文词库", "${content.dictionary(DictionaryKind.CHINESE).size} 条自定义词条") { dictionary(DictionaryKind.CHINESE) }
-        navigateRow("英文词库", "${content.dictionary(DictionaryKind.ENGLISH).size} 条自定义词条") { dictionary(DictionaryKind.ENGLISH) }
-        navigateRow("最近表情", "${content.recentEmoji().size} / 50") { emoji() }
-        section("更多")
-        navigateRow("启用 S Key", "前往 Android 输入法设置") { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
-        navigateRow("切换输入法") { (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker() }
-        navigateRow("离线语音", "模型与麦克风权限") { startActivity(Intent(this, VoiceSetupActivity::class.java)) }
-        navigateRow("内容清理", "保留布局、配色与输入设置") { cleanup() }
-    }
-
-    private fun cleanup() {
-        page("cleanup", "内容清理")
-        section("本次会删除")
-        label("剪贴板历史、手动常用语、中文与英文自定义词库、最近表情。")
-        section("这些会保留")
-        label("布局、配色与输入设置；Android 系统剪贴板和已导出的文件。")
-        button("清空全部用户内容") {
-            confirm("清空剪贴板、常用语、中文词库、英文词库和最近表情？布局与设置会保留，Android 系统剪贴板和已导出的文件不会被删除。") {
-                content.clearAll()
-                home()
-            }
-        }
-    }
-
-    private fun section(title: String) {
-        group = ui.card(body).apply { tag = "anchor:section:$title" }
-        ui.text(requireNotNull(group), title, 17f, true).apply {
-            if (android.os.Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
-        }
-    }
-
-    private fun notice(text: String) {
-        group = null
-        ui.card(body, ui.tint).also { ui.text(it, text, 14f) }
-    }
-
-    private fun behavior() {
-        page("behavior", "外观与按键")
-        section("键盘主题")
-        val modes = listOf("system", "light", "dark")
-        ui.segmented(target(), listOf("跟随系统", "浅色", "深色"), modes.indexOf(config.theme).coerceAtLeast(0)) {
-            safely { config.theme = modes[it] }
-        }
-        navigateRow("自定义浅色主题", "浅色配色独立保存") { themeEditor(false) }
-        navigateRow("自定义深色主题", "深色配色独立保存") { themeEditor(true) }
-        section("候选词字体")
-        slider("候选栏字号", config.candidateTextSize, 12, 32, 1, "sp") { config.candidateTextSize = it }
-        slider("展开候选字号", config.expandedCandidateTextSize, 12, 32, 1, "sp") { config.expandedCandidateTextSize = it }
-        label("默认候选栏为20 sp，展开候选为18 sp；修改后重新打开键盘生效，并跟随系统字体缩放。")
-        section("按键角标")
-        val hintModes = listOf("all", "digits", "hidden")
-        ui.segmented(target(), listOf("全部", "仅数字", "隐藏"), hintModes.indexOf(config.symbolHints).coerceAtLeast(0)) {
-            safely { config.symbolHints = hintModes[it] }
-        }
-        label("仅调整提示显示，不改变长按输入。", 12f)
-        section("触感与手势")
-        navigateRow("按键反馈与手势", "声音、振动、长按与滑动删除") { feedback() }
-    }
-
-    private fun feedback() {
-        page("feedback", "按键反馈与手势")
-        section("按键与手势")
-        toggle("按键声音", config.keySound) { config.keySound = it }
-        label("默认关闭。开启后使用系统键盘音效，遵循系统触摸音效、静音与系统音量设置。")
-        toggle("按键振动", config.vibration) { config.vibration = it }
-        slider("振动强度", config.vibrationStrength, 1, 100, 1, "%") { config.vibrationStrength = it }
-        label("10% 及以下使用系统键盘触感；更高强度在设备支持时调节短促触感，否则仍使用系统触感。遵循系统振动设置，实际力度因机型而异，无法指定物理马达。")
-        toggle("长按输入符号", config.longPressSymbols) { config.longPressSymbols = it }
-        slider("长按延迟", config.longPressDelay, 150, 1500, 10, "毫秒") { config.longPressDelay = it }
-        toggle("滑动退格键删除", config.swipeDelete) { config.swipeDelete = it }
-    }
-
-    private fun inputPreferences() {
-        page("input", "输入与补全")
-        section("输入规则")
-        toggle("四码自动上屏", config.fourCodeAutoCommit) { config.fourCodeAutoCommit = it }
-        toggle("英文补全", config.englishCompletion) { config.englishCompletion = it }
-        section("模糊拼音")
-        toggle("模糊拼音", config.fuzzyPinyin) { config.fuzzyPinyin = it }
-        label("逐项选择需要混用的声母和韵母。关闭总开关会暂停全部模糊匹配，保留以下选择。")
-        val pairs =
-            linkedMapOf(
-                "zh_z" to "zh ↔ z",
-                "ch_c" to "ch ↔ c",
-                "sh_s" to "sh ↔ s",
-                "n_l" to "n ↔ l",
-                "r_l" to "r ↔ l",
-                "f_h" to "f ↔ h",
-                "an_ang" to "an ↔ ang",
-                "en_eng" to "en ↔ eng",
-                "in_ing" to "in ↔ ing",
-            )
-        pairs.forEach { (id, label) ->
-            toggle(label, id in config.fuzzyPairs) { enabled ->
-                config.fuzzyPairs = if (enabled) config.fuzzyPairs + id else config.fuzzyPairs - id
-            }
-        }
-    }
-
-    private fun themeEditor(dark: Boolean) {
-        page(if (dark) "theme_dark" else "theme_light", if (dark) "深色主题配色" else "浅色主题配色")
-        val draft = restoredEditorDraft
-        restoredEditorDraft = null
-        editor = KeyboardThemeEditor(this, config, ui, dark).also { it.show(body, draft) }
-    }
-
-    private fun profiles() {
-        page("layout", "四套独立布局")
-        notice("外屏、内屏分别保存竖屏和横屏配置。尺寸单位为 dp，每套配置独立生效。")
-        val wide = resources.configuration.screenWidthDp >= 600 && resources.configuration.fontScale <= 1.25f
-        val profiles = listOf(true to false, true to true, false to false, false to true)
-        profiles.chunked(if (wide) 2 else 1).forEach { row ->
-            val rowParent = if (wide) LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                body.addView(this, LinearLayout.LayoutParams(-1, -2))
-            } else body
-            row.forEachIndexed { index, (outer, landscape) ->
-                val cardParent = if (wide) ui.column().apply {
-                    rowParent.addView(this, LinearLayout.LayoutParams(0, -2, 1f).apply {
-                        if (index > 0) marginStart = dp(12)
-                    })
-                } else body
-                group = ui.card(cardParent).apply { tag = "anchor:${SettingsNavigation.profile(outer, landscape)}" }
-                val p = config.profile(outer, landscape)
-                ui.actionRow(target(), profileName(outer, landscape)) { profile(outer, landscape) }
-                label("高度 ${p.heightDp} dp · 两侧 ${p.sideGapDp} dp · 底部 ${p.bottomGapDp} dp")
-                label(if (p.floating) "悬浮模式已开启" else if (!outer && p.split) "分离布局已开启" else "标准布局")
-            }
-        }
-        group = null
-    }
-
-    private fun profileName(outer: Boolean, landscape: Boolean) =
-        "${if (outer) "外屏" else "内屏"} · ${if (landscape) "横屏" else "竖屏"}"
-
-    private fun profile(outer: Boolean, landscape: Boolean) {
-        page(SettingsNavigation.profile(outer, landscape), profileName(outer, landscape))
-        notice("数字点击后编辑并保存；开关立即保存。仅影响这套布局，单位为 dp。")
-        val p = config.profile(outer, landscape)
-        fun save(change: (SettingsStore.LayoutProfile) -> SettingsStore.LayoutProfile) {
-            // Every edit merges into the latest profile, never a stale page snapshot.
-            config.saveProfile(outer, landscape, change(config.profile(outer, landscape)))
-        }
-        section("尺寸与留白")
-        number("键盘高度", p.heightDp, 200, 700) { value -> save { it.copy(heightDp = value) } }
-        number("两侧对称留白", p.sideGapDp, 0, 300) { value -> save { it.copy(sideGapDp = value) } }
-        number("底部留白", p.bottomGapDp, 0, 300) { value -> save { it.copy(bottomGapDp = value) } }
-        section("悬浮窗口")
-        toggle("悬浮模式", p.floating) { value -> save { it.copy(floating = value) } }
-        number("悬浮横向位置（距左）", p.floatingXDp, 0, 2000) { value -> save { it.copy(floatingXDp = value) } }
-        number("悬浮纵向位置（距底）", p.floatingYDp, 0, 2000) { value -> save { it.copy(floatingYDp = value) } }
-        number("悬浮宽度", p.floatingWidthDp, 220, 1600) { value -> save { it.copy(floatingWidthDp = value) } }
-        number("悬浮高度", p.floatingHeightDp, 200, 700) { value -> save { it.copy(floatingHeightDp = value) } }
-        if (!outer) {
-            section("分离布局")
-            toggle("分离布局", p.split) { value -> save { it.copy(split = value) } }
-            number("分离中央间距", p.splitGapDp, 0, 180) { value -> save { it.copy(splitGapDp = value) } }
-        }
-    }
-
-    private fun toolbar() {
-        page("toolbar", "定制工具栏")
-        toolbarEditor = io.secure.keyboard.settings.ToolbarEditor(this, config, ui, ::toolName).also { it.show(body) }
-    }
-
-    private fun clipboard() {
-        page("clipboard", "剪贴板")
-        val clipboardHelp = "置顶仅改变顺序；超出上限优先删除最旧未置顶，全部置顶时删除最旧记录。不自动过期，相同内容合并去重。置顶记录也会随内容清空。仅在 Android 允许访问时响应复制事件，不在后台轮询，不收集密码输入场景或带敏感标记的内容。单条最多65536字符，历史合计最多100万字符；超长或短时大量复制可能跳过自动保存，系统剪贴板仍可粘贴。清空不会修改 Android 系统剪贴板，旧内容也不会再次收集，直到您重新复制。"
-        section("保存设置")
-        number("保存条数上限", config.clipboardLimit, 1, 1000) {
-            config.clipboardLimit = it
-            content.trimClipboard()
-            clipboard()
-        }
-        navigateRow("保存与清理规则", "查看隐私、去重与容量说明") {
-            showDialog(SettingsDialogs.builder(this).setTitle("保存与清理规则").setMessage(clipboardHelp).setPositiveButton("关闭", null).create())
-        }
-        val records = content.clipboard().asReversed()
-        group = null
-        ui.text(body, "已保存 ${records.size} 条", 16f, true)
-        if (records.isEmpty()) notice("还没有保存的剪贴板记录。")
-        contentPage(records, "clipboard", ::clipboard).forEach { (index, item) ->
-            group = ui.card(body).apply { tag = "anchor:clipboard:${item.id}" }
-            label(item.text, 15f).setTextColor(ui.ink)
-            compactAction(compactActions(target()), "删除这条记录", "delete") {
-                content.deleteClipboard(item.id)
-                (records.getOrNull(index + 1) ?: records.getOrNull(index - 1))?.let {
-                    keepItemVisible("anchor:clipboard:${it.id}")
-                }
-                clipboard()
-            }
-        }
-        section("内容清理")
-        button("清空已保存的剪贴板") {
-            confirm("删除本应用保存的全部剪贴板记录？") {
-                content.clearClipboard()
-                clipboard()
-            }
-        }
-    }
-
-    /** Bound management-page view creation while retaining global move/delete indices. */
-    private fun <T> contentPage(values: List<T>, route: String, refresh: () -> Unit): List<IndexedValue<T>> {
-        val lastPage = ((values.size - 1) / 100).coerceAtLeast(0)
-        val pageIndex = (contentPageIndices[route] ?: 0).coerceIn(0, lastPage)
-        contentPageIndices[route] = pageIndex
-        if (lastPage > 0) {
-            section("第 ${pageIndex + 1} / ${lastPage + 1} 页 · 每页最多100条")
-            if (pageIndex > 0) button("上一页") {
-                contentPageIndices[route] = pageIndex - 1
-                refresh()
-            }
-            if (pageIndex < lastPage) button("下一页") {
-                contentPageIndices[route] = pageIndex + 1
-                refresh()
-            }
-        }
-        val start = pageIndex * 100
-        return values.subList(start, minOf(start + 100, values.size)).mapIndexed { offset, value ->
-            IndexedValue(start + offset, value)
-        }
-    }
-
-    private fun phrases() {
-        page("phrases", "常用语")
-        notice("只保存您手动添加的常用语。不自动收集，不分类，不导入。编辑点击「保存」后生效；移动顺序立即保存。")
-        button("添加常用语", true) { editPhrase(null) }
-        val phrases = content.phrases()
-        if (phrases.isEmpty()) notice("还没有常用语，添加一条常用内容即可开始。")
-        contentPage(phrases, "phrases", ::phrases).forEach { (index, item) ->
-            group = ui.card(body).apply { tag = "anchor:phrase:${item.id}" }
-            label(item.text, 15f).setTextColor(ui.ink)
-            val actions = compactActions(target())
-            compactAction(actions, "编辑", "edit") { editPhrase(item.id) }
-            if (index > 0) compactAction(actions, "上移") {
-                content.movePhrase(item.id, index - 1)
-                contentPageIndices["phrases"] = (index - 1) / 100
-                keepItemVisible("anchor:phrase:${item.id}")
-                phrases()
-            }
-            if (index < phrases.lastIndex) compactAction(actions, "下移") {
-                content.movePhrase(item.id, index + 1)
-                contentPageIndices["phrases"] = (index + 1) / 100
-                keepItemVisible("anchor:phrase:${item.id}")
-                phrases()
-            }
-            compactAction(actions, "删除", "delete") {
-                content.deletePhrase(item.id)
-                (phrases.getOrNull(index + 1) ?: phrases.getOrNull(index - 1))?.let {
-                    keepItemVisible("anchor:phrase:${it.id}")
-                }
-                phrases()
-            }
-        }
-        section("内容清理")
-        button("清空常用语") {
-            confirm("删除全部常用语？") { content.clearPhrases(); phrases() }
-        }
-    }
-
-    private fun dictionaryName(kind: DictionaryKind) =
-        if (kind == DictionaryKind.CHINESE) "中文词库" else "英文词库"
-
-    private fun dictionary(
-        kind: DictionaryKind = DictionaryKind.CHINESE,
-        requestedPage: Int = dictionaryPageIndices[kind] ?: 0,
-    ) {
-        val name = dictionaryName(kind)
-        val route = if (kind == DictionaryKind.CHINESE) "dictionary" else "english_dictionary"
-        if (currentDictionaryKind == kind && requestedPage != dictionaryPageIndices[kind]) {
-            keepItemVisible("anchor:dictionary:page")
-        }
-        page(route, name)
-        currentDictionaryKind = kind
-        intent.putExtra("page", route)
-        section("管理词条")
-        button("添加词条", true) { editDictionary(null, kind) }
-        val transferActions = compactActions(target())
-        compactAction(transferActions, "导入 TSV") {
-            startActivityForResult(
-                Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/*", "application/octet-stream"))
-                },
-                if (kind == DictionaryKind.CHINESE) IMPORT_CHINESE else IMPORT_ENGLISH,
-            )
-        }
-        compactAction(transferActions, "导出 TSV") {
-            startActivityForResult(
-                Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "text/tab-separated-values"
-                    putExtra(
-                        Intent.EXTRA_TITLE,
-                        if (kind == DictionaryKind.CHINESE) "offline-keyboard-chinese-dictionary.tsv"
-                        else "offline-keyboard-english-dictionary.tsv",
-                    )
-                },
-                if (kind == DictionaryKind.CHINESE) EXPORT_CHINESE else EXPORT_ENGLISH,
-            )
-        }
-        for (index in 0 until transferActions.childCount) {
-            transferActions.getChildAt(index).apply {
-                background = SettingsPalette.buttonBackground(this@SettingsActivity)
-                layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
-                    if (index > 0) marginStart = dp(8)
-                }
-            }
-        }
-        val completeHelp = label(
-            "导入导出格式为 UTF-8 TSV：每行「词语 + 制表符 + 编码」，可选首行为 word<TAB>reading。字段内不能有制表符或换行。每个词库最多 10,000 条，单次导入最多 400 万字符，先校验完整文件，再追加到$name。导出文件保存在您选择的位置，清空应用内容不会删除这些文件。\n" +
-            if (kind == DictionaryKind.ENGLISH)
-                "编码须为 1–40 个英文字母，匹配时不区分大小写。词语按原样输出，可含空格和标点，但首尾不能有空白。开启「英文补全」后，仅在英文输入中使用。"
-            else "拼音／编码与词语按原样保存，仅用于中文输入。"
-        ).apply { visibility = if (route in navigation.expandedHelp) View.VISIBLE else View.GONE }
-        lateinit var helpButton: Button
-        helpButton = navigateRow(if (route in navigation.expandedHelp) "收起格式说明" else "展开完整格式说明") {
-            val expand = completeHelp.visibility != View.VISIBLE
-            completeHelp.visibility = if (expand) View.VISIBLE else View.GONE
-            if (expand) navigation.expandedHelp.add(route) else navigation.expandedHelp.remove(route)
-            helpButton.text = if (expand) "收起格式说明" else "展开完整格式说明"
-        }
-        val entries = content.dictionary(kind)
-        val lastPage = ((entries.size - 1).coerceAtLeast(0)) / DICTIONARY_PAGE_SIZE
-        val pageIndex = requestedPage.coerceIn(0, lastPage)
-        dictionaryPageIndices[kind] = pageIndex
-        group = null
-        fun pageControls(first: Boolean = false) {
-            group = ui.card(body, ui.tint).apply { if (first) tag = "anchor:dictionary:page" }
-            if (entries.isEmpty()) {
-                label("还没有词条，添加或导入后即可在这里管理。")
-                group = null
-                return
-            }
-            label("共 ${entries.size} 条 · 第 ${pageIndex + 1} / ${lastPage + 1} 页")
-            if (pageIndex > 0) button("上一页") { dictionary(kind, pageIndex - 1) }
-            if (pageIndex < lastPage) button("下一页") { dictionary(kind, pageIndex + 1) }
-            group = null
-        }
-        val visibleEntries = entries.drop(pageIndex * DICTIONARY_PAGE_SIZE).take(DICTIONARY_PAGE_SIZE)
-        val entriesCard = ui.card(body).apply { tag = "anchor:dictionary:page" }
-        ui.text(entriesCard, "自定义词条 · ${entries.size}", 17f, true)
-        ui.text(entriesCard, if (entries.isEmpty()) "还没有词条，添加或导入后即可在这里管理。"
-            else "第 ${pageIndex + 1} / ${lastPage + 1} 页", 12f)
-        visibleEntries.forEachIndexed { index, item ->
-            entriesCard.addView(
-                DictionaryEntryRow(
-                    this,
-                    item,
-                    ui.ink,
-                    ui.muted,
-                    ui.surface,
-                    ui.blue,
-                    SettingsPalette.error,
-                    onEdit = { entry -> safely { editDictionary(entry, kind) } },
-                    onDelete = { entry ->
-                        confirm("删除$name 中的该词条？不会影响其他词条。", "删除词条？") {
-                            content.deleteDictionary(entry.id, kind)
-                            (visibleEntries.getOrNull(index + 1) ?: visibleEntries.getOrNull(index - 1))?.let {
-                                keepItemVisible("anchor:dictionary:${kind.name}:${it.id}")
-                            }
-                            dictionary(kind)
-                        }
-                    },
-                ).apply { tag = "anchor:dictionary:${kind.name}:${item.id}" },
-                LinearLayout.LayoutParams(-1, -2),
-            )
-            if (index < visibleEntries.lastIndex) entriesCard.addView(View(this).apply {
-                setBackgroundColor(SettingsPalette.divider)
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(-1, dp(1)))
-        }
-        if (entries.size > DICTIONARY_PAGE_SIZE) pageControls()
-        group = entriesCard
-        button("清空$name") {
-            confirm("删除$name 的全部词条？另一个词库和已导出的文件不会被删除。", "清空$name？") {
-                content.clearDictionary(kind)
-                dictionary(kind)
-            }
-        }
-    }
-
-    private fun editDictionary(item: ContentStore.DictionaryEntry?, kind: DictionaryKind, draft: Bundle? = null) {
-        val group = ui.column()
-        val word = SettingsInputs.field(this).apply {
-            id = R.id.settings_dictionary_word
-            hint = if (kind == DictionaryKind.ENGLISH) "词语／短语（按原样输出）" else "词语"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            filters = emptyArray() // Android may install an implicit single-line 5000-character cap.
-            setText(item?.word ?: "")
-        }
-        val reading = SettingsInputs.field(this).apply {
-            id = R.id.settings_dictionary_reading
-            hint = if (kind == DictionaryKind.ENGLISH) "编码（1–40 个英文字母）" else "拼音／编码"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            filters = emptyArray()
-            setText(item?.reading ?: "")
-            textDirection = View.TEXT_DIRECTION_LTR
-        }
-        SettingsInputs.labeled(group, word.hint.toString(), word)
-        SettingsInputs.labeled(group, reading.hint.toString(), reading)
-        ui.text(group, "完整内容按原样保存。点击「取消」不会修改词条。", 13f)
-        val dialog = SettingsDialogs.builder(this)
-            .setTitle("${if (item == null) "添加" else "编辑"}${dictionaryName(kind)}词条")
-            .setView(SettingsDialogs.scrollable(this, group))
-            .setNegativeButton("取消", null)
-            .setPositiveButton("保存", null).create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val output = word.text.toString()
-                val code = reading.text.toString()
-                SettingsInputs.error(word, null)
-                SettingsInputs.error(reading, null)
-                if (kind == DictionaryKind.ENGLISH) {
-                    var valid = true
-                    if (output.isBlank() || output.any { it == '\t' || it == '\r' || it == '\n' }) {
-                        SettingsInputs.error(word, "请输入词语或短语，不能含制表符或换行")
-                        valid = false
-                    } else if (output.first().isWhitespace() || output.last().isWhitespace()) {
-                        SettingsInputs.error(word, "词语首尾不能有空白；内部空格会按原样保留")
-                        valid = false
-                    }
-                    if (code.length !in 1..40 || code.any { it !in 'a'..'z' && it !in 'A'..'Z' }) {
-                        SettingsInputs.error(reading, "编码须为 1–40 个英文字母（A–Z），不区分大小写")
-                        valid = false
-                    }
-                    if (!valid) {
-                        (if (word.error != null) word else reading).requestFocus()
-                        return@setOnClickListener
-                    }
-                }
-                safely {
-                    try {
-                        if (item == null) content.addDictionary(output, code, kind)
-                        else content.updateDictionary(item.id, output, code, kind)
-                        dialog.dismiss()
-                        dictionary(kind)
-                    } catch (error: IllegalArgumentException) {
-                        SettingsInputs.error(if (output.isBlank()) word else reading, error.message ?: "请检查词语与编码")
-                    }
-                }
-            }
-        }
-        showEditable(dialog, Bundle().apply {
-            putString("type", "dictionary")
-            putString("kind", kind.name)
-            putString("item_id", item?.id)
-        }, listOf(word, reading), draft)
-    }
-
-    private fun emoji() {
-        page("emoji", "最近表情")
-        notice("最多保存 50 个最近使用的表情，最新的排在前面，不统计使用次数。")
-        section("最近使用")
-        val recent = content.recentEmoji()
-        label(if (recent.isEmpty()) "还没有最近使用的表情。" else recent.joinToString("  "), 24f)
-        section("内容清理")
-        button("清空最近表情") {
-            confirm("删除最近使用的表情记录？") { content.clearEmoji(); emoji() }
-        }
-    }
-
-    private fun editPhrase(itemId: String?, draft: Bundle? = null) {
-        val item = itemId?.let { id -> content.phrases().firstOrNull { it.id == id } }
-        if (itemId != null && item == null) return
-        val input = SettingsInputs.field(this).apply {
-            id = R.id.settings_phrase_input
-            setText(item?.text.orEmpty())
-            minLines = 3
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            gravity = Gravity.TOP or Gravity.START
-        }
-        val parent = ui.column()
-        SettingsInputs.labeled(parent, "常用语内容", input)
-        ui.text(parent, "保留原始换行与文字。点击「保存」后生效。", 13f)
-        val dialog = SettingsDialogs.builder(this)
-            .setTitle(if (itemId == null) "添加常用语" else "编辑常用语")
-            .setView(SettingsDialogs.scrollable(this, parent))
-            .setNegativeButton("取消", null).setPositiveButton("保存", null).create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                if (input.text.isBlank()) SettingsInputs.error(input, "请输入内容")
-                else safely {
-                    if (itemId == null) {
-                        content.addPhrase(input.text.toString())
-                        contentPageIndices["phrases"] = (content.phrases().size - 1) / 100
-                    }
-                    else content.updatePhrase(itemId, input.text.toString())
-                    dialog.dismiss()
-                    phrases()
-                }
-            }
-        }
-        showEditable(dialog, Bundle().apply {
-            putString("type", "phrase"); putString("item_id", itemId)
-        }, listOf(input), draft)
-    }
-
-    private fun confirm(message: String, title: String = "清空用户内容？", action: () -> Unit) {
-        showDialog(SettingsDialogs.builder(this).setTitle(title).setMessage(message)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("删除") { _, _ -> safely(action) }.create())
-    }
-
-    private fun showDialog(dialog: AlertDialog): AlertDialog {
-        dialogs.add(dialog)
-        dialog.setOnDismissListener {
-            dialog.currentFocus?.clearFocus()
-            dialogs.remove(dialog)
-            if (transferDialog === dialog) transferDialog = null
-            if (activeDialog === dialog) {
-                cancelSelectionRestore()
-                activeDialog = null
-                activeDraft = null
-                draftFields = emptyList()
-                lifetimeState.editableDraft = null
-            }
-            dialog.setOnShowListener(null)
-            dialog.setOnDismissListener(null)
-            for (which in listOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL)) {
-                dialog.getButton(which)?.setOnClickListener(null)
-            }
-        }
-        return SettingsDialogs.show(dialog)
-    }
-
-    private fun showEditable(dialog: AlertDialog, descriptor: Bundle, fields: List<EditText>, restored: Bundle?) {
-        closeDialogs()
-        fields.forEach {
-            // These fields have a complete manual restore path. Never duplicate their text in
-            // the hierarchy state, even if a future parent starts saving the dialog hierarchy.
-            it.isSaveEnabled = false
-            it.isSaveFromParentEnabled = false
-        }
-        restored?.let { state ->
-            fields.forEachIndexed { index, field ->
-                if (state.containsKey("field_$index")) field.setText(state.getString("field_$index").orEmpty())
-                state.getString("error_$index")?.let { SettingsInputs.error(field, it) }
-            }
-        }
-        activeDialog = dialog
-        activeDraft = descriptor
-        draftFields = fields
-        showDialog(dialog)
-        val focus = restored?.getInt("focused", -1) ?: -1
-        if (focus in fields.indices) fields[focus].requestFocus()
-        // Android can normalize the selection again when the newly shown window gains focus.
-        // Retain only offsets until that first focus event, never a second copy of the text.
-        restored?.let { state ->
-            val offsets = fields.mapIndexed { index, field ->
-                val start = state.getInt("selection_start_$index", field.length()).coerceIn(0, field.length())
-                start to state.getInt("selection_end_$index", start).coerceIn(0, field.length())
-            }
-            fun restoreSelection() = fields.forEachIndexed { index, field ->
-                field.setSelection(offsets[index].first.coerceAtMost(field.length()), offsets[index].second.coerceAtMost(field.length()))
-            }
-            restoreSelection()
-            val decor = dialog.window!!.decorView
-            if (!decor.hasWindowFocus()) {
-                val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
-                    if (focused) {
-                        cancelSelectionRestore()
-                        if (activeDialog === dialog) restoreSelection()
-                    }
-                }
-                pendingSelectionRestore = decor to listener
-                decor.viewTreeObserver.addOnWindowFocusChangeListener(listener)
-            }
-        }
-    }
-
-    private fun cancelSelectionRestore() {
-        pendingSelectionRestore?.let { (view, listener) ->
-            if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
-        }
-        pendingSelectionRestore = null
-    }
-
-    private fun captureEditableDraft(): SettingsEditableDraft? = activeDraft?.let { descriptor ->
-        SettingsEditableDraft(
-            route = navigation.current,
-            type = descriptor.getString("type").orEmpty(),
-            key = descriptor.getString("key"),
-            kind = descriptor.getString("kind"),
-            itemId = descriptor.getString("item_id"),
-            fields = draftFields.map { field ->
-                SettingsEditableDraft.Field(field.text.toString(), field.selectionStart,
-                    field.selectionEnd, field.error?.toString())
-            },
-            focused = draftFields.indexOfFirst { it.hasFocus() },
-        )
-    }
-
-    private fun editableDraftFitsSavedStateBudget(): Boolean = SettingsDraftBudget.accepts(sequence {
-        yield(navigation.current)
-        yield(activeDraft?.getString("type"))
-        yield(activeDraft?.getString("key"))
-        yield(activeDraft?.getString("kind"))
-        yield(activeDraft?.getString("item_id"))
-        draftFields.forEach { field ->
-            yield(field.text)
-            yield(field.error)
-        }
-    })
-
-    private fun restoreEditableDraft(draft: Bundle) {
-        if (draft.getString("route") != navigation.current) return
-        when (draft.getString("type")) {
-            "number" -> numberEditors[draft.getString("key")]?.invoke(draft)
-            "phrase" -> editPhrase(draft.getString("item_id"), draft)
-            "dictionary" -> {
-                val kind = DictionaryKind.values().firstOrNull { it.name == draft.getString("kind") } ?: return
-                val id = draft.getString("item_id")
-                val item = id?.let { content.dictionary(kind).firstOrNull { entry -> entry.id == it } }
-                if (id != null && item == null) return
-                editDictionary(item, kind, draft)
-            }
-        }
-    }
-
-    private fun closeDialogs() = dismissOwnedDialogs(keepRetainedDraft = false)
-
-    private fun dismissOwnedDialogs(keepRetainedDraft: Boolean) {
-        cancelSelectionRestore()
-        if (!keepRetainedDraft && ::lifetimeState.isInitialized) lifetimeState.editableDraft = null
-        // Clear before dismiss: a queued callback from the old Activity must not erase the
-        // snapshot retained for its replacement (or a new edit owned by that replacement).
-        activeDialog = null
-        activeDraft = null
-        draftFields = emptyList()
-        dialogs.toList().forEach { dialog ->
-            dialog.currentFocus?.clearFocus()
-            dialog.dismiss()
-        }
-        dialogs.clear()
-    }
-
-    override fun onStart() {
-        super.onStart()
-        dictionaryTransfer.observer = { completion ->
-            transferDialog?.dismiss()
-            transferDialog = null
-            safely { dictionary(completion.kind) }
-            completion.result.fold(
-                onSuccess = { message ->
-                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-                },
-                onFailure = { error ->
-                    if (error is ContentStore.ContentReadException) storageRecovery(error)
-                    else
-                        showDialog(SettingsDialogs.builder(this)
-                            .setTitle("${dictionaryName(completion.kind)}操作未完成")
-                            .setMessage(error.message ?: "请检查文件和可用空间后重试。")
-                            .setPositiveButton("知道了", null)
-                            .create())
-                },
-            )
-        }
-        dictionaryTransfer.deliver()
-        showTransferProgress()
-    }
-
-    override fun onStop() {
-        dictionaryTransfer.observer = null
-        transferDialog?.dismiss()
-        transferDialog = null
-        super.onStop()
-    }
-
     override fun onSaveInstanceState(outState: Bundle) {
-        rememberPosition()
-        outState.putString("settings_route", navigation.current)
-        outState.putStringArrayList("settings_history", ArrayList(navigation.history))
-        outState.putBundle("settings_positions", Bundle().apply {
-            navigation.positions.forEach { (route, position) ->
-                putBundle(route, Bundle().apply {
-                    putInt("offset", position.offset)
-                    putString("anchor", position.anchor)
-                    putInt("anchor_offset", position.anchorOffset)
-                    putString("focus", position.focus)
-                })
-            }
-        })
-        outState.putStringArrayList("settings_help", ArrayList(navigation.expandedHelp))
-        outState.remove("editable_draft")
-        outState.remove("oversized_editable_draft")
-        if (activeDraft != null) {
-            if (editableDraftFitsSavedStateBudget()) {
-                outState.putBundle("editable_draft", captureEditableDraft()?.toEditorBundle())
-            } else {
-                // No prefix, history file, or large temporary serialization. The complete edit
-                // is retained only if Android later requests configuration-instance retention.
-                outState.putBoolean("oversized_editable_draft", true)
-            }
-        }
-        outState.putBundle("editor_draft", editor?.saveDraft())
-        outState.putString("recovery_message", recoveryMessage)
-        for (route in listOf("clipboard", "phrases")) {
-            outState.putInt("content_page_$route", contentPageIndices[route] ?: 0)
-        }
-        currentDictionaryKind?.let { outState.putString("dictionary_kind", it.name) }
-        DictionaryKind.values().forEach { kind ->
-            outState.putInt("dictionary_page_${kind.name}", dictionaryPageIndices[kind] ?: 0)
-        }
+        outState.putString("page", incomingPage)
+        outState.putString("pending_kind", model.pendingKind.name)
+        model.importEpoch?.let { outState.putLong("import_epoch", it) }
         super.onSaveInstanceState(outState)
     }
+    private fun launch(action: () -> Unit) {
+        try { action() } catch (e: Exception) { model.message = e.message ?: "设备不支持此操作" }
+    }
+    private fun openPage(page: String) { incomingPage = page }
 
-    @Deprecated("Retains the transfer and one complete immutable edit; never Activity/View state")
-    override fun onRetainNonConfigurationInstance(): Any {
-        lifetimeState.editableDraft = captureEditableDraft()
-        return lifetimeState
+    @Composable private fun ApplicationUi() {
+        val revision = model.revision
+        val config = model.settings
+        val systemDark = LocalConfiguration.current.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val dark = remember(revision, systemDark) { config.isDark(systemDark) }
+        val tokens = remember(revision, dark) { config.themeTokens(dark) }
+        val route = incomingPage ?: initialPage
+        var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+        fun ask(message: String, action: () -> Unit) { confirm = message to action }
+        fun back() {
+            incomingPage = when {
+                route.startsWith("input_") -> "input"
+                route.startsWith("profile_") -> "layout"
+                route.startsWith("theme_") -> "behavior"
+                route == "feedback" -> "keyboard"
+                route == "home" && initialPage == "dashboard" -> "dashboard"
+                route == "dashboard" || route == "home" || (route == "voice" && initialPage == "voice") -> { finish(); return }
+                else -> "home"
+            }
+        }
+        BackHandler { if (model.edit != null) model.edit = null else back() }
+        SKeyTheme(tokens, dark) {
+            SideEffect {
+                val background = android.graphics.Color.parseColor(tokens.keyboardBackground)
+                window.statusBarColor = background
+                io.secure.keyboard.ui.styleSystemBars(window, android.graphics.Color.luminance(background) < .5f, background)
+            }
+            Scaffold(topBar = {
+                TopAppBar(title = pageTitle(route), navigationIcon = {
+                    IconButton(onClick = { back() }) { UiIcon("back", "返回") }
+                })
+            }) { padding ->
+                key(route) {
+                    LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).imePadding(),
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        item {
+                            when (route) {
+                                "dashboard" -> Dashboard()
+                                "home", "settings" -> Home()
+                                "input" -> InputSettings()
+                                "input_english" -> EnglishSettings()
+                                "keyboard", "feedback" -> KeyboardSettings()
+                                "behavior" -> Appearance()
+                                "layout" -> Layouts()
+                                "toolbar" -> ToolbarSettings()
+                                "voice" -> VoiceSettings()
+                                "api" -> ApiSettings()
+                                "custom_ai" -> Group("我的自定义 AI") {
+                                    Info("为提示词取名，在键盘的自定义模式中按名称选择。上下箭头决定选择列表的顺序。")
+                                    Action("添加自定义 AI", !model.busy) { model.edit = ContentEdit("custom_ai") }
+                                    if (model.aiPresets.isEmpty()) Info("还没有自定义 AI，例如：邮件润色、简短回复。")
+                                }
+                                "cleanup", "recovery" -> Group("本机内容") {
+                                    Info("清理不会删除主题、布局或输入偏好，也不会修改 Android 系统剪贴板。")
+                                    Nav("清空全部用户内容", "剪贴板、常用语、词库、最近表情和 自定义 AI", "delete") {
+                                        ask("确定清空全部用户内容？此操作无法撤销。") { model.task { model.content.clearAll() } }
+                                    }
+                                }
+                                "emoji" -> Group("最近表情") {
+                                    Info(model.emoji.joinToString("  ").ifEmpty { "还没有最近使用的表情" })
+                                    Action("清空最近表情") { ask("清空最近表情？") { model.task { model.content.clearEmoji() } } }
+                                }
+                                "licenses" -> Licenses()
+                                else -> when {
+                                    route.startsWith("profile_") -> ProfileSettings(route)
+                                    route.startsWith("theme_") -> ThemeSettings(route == "theme_dark") { message, action -> ask(message, action) }
+                                    route in listOf("clipboard", "phrases", "dictionary", "english_dictionary") -> ContentHeader(route) { message, action -> ask(message, action) }
+                                    else -> Home()
+                                }
+                            }
+                        }
+                        if (route == "clipboard") items(model.clipboard, key = { it.id }) { item ->
+                            ContentCard(item.text, if (item.pinned) "已置顶" else "剪贴板", listOf(
+                                (if (item.pinned) "取消置顶" else "置顶") to { model.task { model.content.setClipboardPinned(item.id, !item.pinned) } },
+                                "复制" to { copy(item.text) },
+                                "删除" to { ask("删除这条剪贴板记录？") { model.task { model.content.deleteClipboard(item.id) } } }))
+                        }
+                        if (route == "phrases") items(model.phrases, key = { it.id }) { item ->
+                            ContentCard(item.text, if (item.pinned) "已置顶" else "常用语", listOf(
+                                "编辑" to { model.edit = ContentEdit(route, item.id, TextFieldValue(item.text)) },
+                                (if (item.pinned) "取消置顶" else "置顶") to { model.task { model.content.setPhrasePinned(item.id, !item.pinned) } },
+                                "上移" to { model.task { val index = model.content.phrases().indexOfFirst { it.id == item.id }; model.content.movePhrase(item.id, index - 1) } },
+                                "删除" to { ask("删除这条常用语？") { model.task { model.content.deletePhrase(item.id) } } }))
+                        }
+                        if (route == "custom_ai") items(model.aiPresets, key = { it.id }) { preset ->
+                            Card(Modifier.fillMaxWidth()) {
+                                val index = model.aiPresets.indexOfFirst { it.id == preset.id }
+                                BasicComponent(title = preset.name, summary = "${index + 1} / ${model.aiPresets.size}",
+                                    leftAction = { UiIcon("ai", null) }, rightActions = {
+                                        IconButton(enabled = !model.busy && index > 0, onClick = { model.task { model.content.moveAiPreset(preset.id, -1) } }) { UiIcon("arrow_up", "上移 ${preset.name}") }
+                                        IconButton(enabled = !model.busy && index < model.aiPresets.lastIndex, onClick = { model.task { model.content.moveAiPreset(preset.id, 1) } }) { UiIcon("arrow_down", "下移 ${preset.name}") }
+                                    })
+                                Text(preset.prompt, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = MiuixTheme.colorScheme.onSurface)
+                                Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(text = "编辑", enabled = !model.busy, modifier = Modifier.weight(1f), onClick = {
+                                        model.edit = ContentEdit("custom_ai", preset.id, TextFieldValue(preset.name), TextFieldValue(preset.prompt))
+                                    })
+                                    TextButton(text = "删除", enabled = !model.busy, modifier = Modifier.weight(1f), onClick = {
+                                        ask("删除自定义 AI「${preset.name}」？") { model.task { model.content.deleteAiPreset(preset.id) } }
+                                    })
+                                }
+                            }
+                        }
+                        if (route in listOf("dictionary", "english_dictionary")) {
+                            val kind = if (route == "dictionary") DictionaryKind.CHINESE else DictionaryKind.ENGLISH
+                            items(if (kind == DictionaryKind.CHINESE) model.chinese else model.english, key = { it.id }) { item ->
+                                ContentCard(item.word, item.reading, listOf(
+                                    "编辑" to { model.edit = ContentEdit(route, item.id, TextFieldValue(item.word), TextFieldValue(item.reading)) },
+                                    "删除" to { ask("删除此词条？") { model.task { model.content.deleteDictionary(item.id, kind) } } }))
+                            }
+                        }
+                        item { if (model.busy) Info("正在处理…") else Spacer(Modifier.height(8.dp)) }
+                    }
+                }
+            }
+            confirm?.let { (text, action) -> Modal("确认操作", { confirm = null }) {
+                Info(text)
+                Action("取消") { confirm = null }
+                Action("确认", enabled = !model.busy) { confirm = null; action() }
+            } }
+            model.edit?.let { edit -> EditDialog(edit) }
+            model.message?.let { message -> Modal("提示", { model.message = null }) {
+                Info(message); Action("知道了") { model.message = null }
+            } }
+        }
     }
 
-    override fun onDestroy() {
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            backCallback?.let { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it) }
+    @Composable private fun Dashboard() {
+        model.revision
+        Group("S Key") {
+            Info("离线输入 · 自由定制", strong = true)
+            Info("原版 S Key 输入逻辑 · 26 键布局")
+            Nav(if (enabledIme) "输入法已启用" else "启用输入法", "在 Android 设置中管理", "settings") {
+                launch { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
+            }
+            Nav(if (selectedIme) "当前正在使用 S Key" else "切换到 S Key", icon = "globe") {
+                getSystemService(InputMethodManager::class.java).showInputMethodPicker()
+            }
+            var trial by remember { mutableStateOf("") }
+            TextField(value = trial, onValueChange = { trial = it }, label = "在这里试打，不保存内容", modifier = Modifier.fillMaxWidth().padding(16.dp))
         }
-        backCallback = null
-        dictionaryTransfer.observer = null
-        transferDialog?.dismiss()
-        transferDialog = null
-        dismissOwnedDialogs(keepRetainedDraft = isChangingConfigurations)
-        toolbarEditor?.close()
-        toolbarEditor = null
-        editor?.close()
-        editor = null
-        numberEditors.clear()
-        cancelLayoutRestore()
-        if (::ui.isInitialized) ui.dispose()
-        if (!isChangingConfigurations) dictionaryTransfer.finishPermanently(applicationContext)
-        super.onDestroy()
+        Spacer(Modifier.height(16.dp))
+        Group("开始定制") {
+            Nav("偏好设置", "输入、键盘、主题与本机内容", "settings") { openPage("home") }
+            Nav("输入方式", "原版混输偏好与英文补全", "input") { openPage("input") }
+            Nav("主题工作室", "黑白默认主题与自定义配色", "theme") { openPage("behavior") }
+        }
+    }
+    @Composable private fun Home() {
+        model.revision
+        Group("输入与外观") {
+            Nav("输入方式", "原版混输偏好与英文补全", "input") { openPage("input") }
+            Nav("键盘操作", "声音、触感、长按、工具栏", "keyboard") { openPage("keyboard") }
+            Nav("主题与外观", "自定义配色、黑白切换、跟随系统", "theme") { openPage("behavior") }
+            Nav("布局配置", "横竖屏、折叠屏、悬浮与分离", "layout") { openPage("layout") }
+        }
+        Spacer(Modifier.height(16.dp))
+        Group("本机内容") {
+            Nav("剪贴板", "${model.clipboard.size} 条", "clipboard") { openPage("clipboard") }
+            Nav("常用语", "${model.phrases.size} 条", "phrases") { openPage("phrases") }
+            Nav("自定义 AI", "${model.aiPresets.size} 个 · 提示词与排序", "ai") { openPage("custom_ai") }
+            Nav("中文自定义词库", "${model.chinese.size} 条 · 手动短语", "dictionary") { openPage("dictionary") }
+            Nav("英文自定义词库", "${model.english.size} 条", "english_dictionary") { openPage("english_dictionary") }
+            Nav("最近表情", "${model.emoji.size} / 50", "emoji") { openPage("emoji") }
+        }
+        Spacer(Modifier.height(16.dp))
+        Group("应用与隐私") {
+            Nav("接口 API 配置", "Google 翻译 · Grok · 模型选择", "input") { openPage("api") }
+            Nav("语音输入", "离线语音 / AI 语音", "voice") { openPage("voice") }
+            Nav("Android 输入法设置", icon = "settings") { launch { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) } }
+            Nav("内容清理", "保留主题与设置", "delete") { openPage("cleanup") }
+            Nav("开源许可", "Miuix、图标、词库与语音组件", "dictionary") { openPage("licenses") }
+            Info("普通输入离线处理，不学习输入历史。翻译、AI 生成、AI 语音和获取模型列表时使用网络。剪贴板、常用语、自定义词库、最近表情和自定义 AI 提示词仅保存在本机；只保存手动添加的名称和提示词，不记录原文或 AI 结果。")
+        }
+    }
+    @Composable private fun ApiSettings() {
+        val draft = model.apiDraft
+        var showKeys by remember { mutableStateOf(false) }
+        @Composable fun field(label: String, value: String, secret: Boolean = false, change: (String) -> Unit) {
+            TextField(value = value, onValueChange = change, label = label,
+                visualTransformation = if (secret && !showKeys) androidx.compose.ui.text.input.PasswordVisualTransformation()
+                    else androidx.compose.ui.text.input.VisualTransformation.None,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
+        }
+        Group("Google 翻译 API") {
+            field("接口地址（完整翻译端点）", draft.googleUrl) { model.apiDraft = draft.copy(googleUrl = it) }
+            field("Google API Key", draft.googleKey, true) { model.apiDraft = draft.copy(googleKey = it) }
+            Choice("默认 NMT 模型", draft.googleModel == "nmt") { model.apiDraft = draft.copy(googleModel = "nmt") }
+            field("模型 ID / 完整模型资源名", draft.googleModel) { model.apiDraft = draft.copy(googleModel = it) }
+            Info("默认使用 Cloud Translation Basic v2。其他模型可填写账号支持的完整资源名。")
+        }
+        Group("Grok API") {
+            field("接口地址（包含 /v1）", draft.grokUrl) { model.apiModels = emptyList(); model.apiDraft = draft.copy(grokUrl = it) }
+            field("Grok API Key", draft.grokKey, true) { model.apiModels = emptyList(); model.apiDraft = draft.copy(grokKey = it) }
+            field("模型 ID", draft.grokModel) { model.apiDraft = draft.copy(grokModel = it) }
+            Action("获取可用模型", !model.busy) { model.fetchApiModels() }
+            model.apiModels.forEach { id -> Choice(id, draft.grokModel == id) { model.apiDraft = draft.copy(grokModel = id) } }
+            Info("使用当前填写的地址和密钥获取模型。也可手动输入模型 ID，修改后点击保存。")
+        }
+        Group("AI 语音 API") {
+            field("语音识别端点（完整 HTTPS 地址）", draft.voiceUrl) { model.apiDraft = draft.copy(voiceUrl = it) }
+            field("语音 API Key", draft.voiceKey, true) { model.apiDraft = draft.copy(voiceKey = it) }
+            field("语音模型 ID", draft.voiceModel) { model.apiDraft = draft.copy(voiceModel = it) }
+            Action("使用 Grok 地址与密钥") {
+                model.apiDraft = draft.copy(voiceUrl = draft.grokUrl.trimEnd('/') + "/stt", voiceKey = draft.grokKey)
+            }
+            Info("使用语音转文字接口，不能使用文字聊天模型。默认适配 xAI /stt；兼容服务需支持 WAV multipart 上传和 text 响应。结束收音后上传录音，不在本机保存音频。")
+        }
+        Group("保存配置") {
+            Toggle("显示密钥", showKeys) { showKeys = it }
+            Action("保存 API 配置", !model.busy) {
+                val snapshot = model.apiDraft
+                model.task(success = { model.message = "API 配置已保存" }) { model.apiStore.save(snapshot) }
+            }
+            Action("重新载入已保存配置", !model.busy) { model.loadApi(); model.apiModels = emptyList() }
+            Action("清除已保存的 API 配置", !model.busy) {
+                model.task(success = { model.apiDraft = ApiConfiguration(); model.apiModels = emptyList(); model.message = "API 配置已清除" }) { model.apiStore.clear() }
+            }
+            Info("密钥仅在本机加密保存。获取模型只发送接口鉴权信息，不发送输入内容。键盘“更多 → 翻译”使用 Google 配置，只有点击翻译才发送原文；键盘“更多 → AI 助手”使用 Grok 配置，点击生成才发送原文和指令。选择 AI 语音后，结束收音时上传录音进行识别。")
+        }
     }
 
-    private fun showTransferProgress() {
-        if (!dictionaryTransfer.running || isFinishing || isDestroyed || transferDialog != null) return
-        val progress = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(20), dp(16), dp(20), dp(16))
-            addView(ProgressBar(this@SettingsActivity).apply {
-                indeterminateTintList = ColorStateList.valueOf(SettingsPalette.accent)
-            }, LinearLayout.LayoutParams(dp(32), dp(32)))
-            addView(TextView(this@SettingsActivity).apply {
-                text = "正在处理${dictionaryName(dictionaryTransfer.kind)}，请稍候…"
-                setTextColor(SettingsPalette.ink)
-                textSize = 15f
-                setPadding(dp(16), 0, 0, 0)
-                accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-            }, LinearLayout.LayoutParams(0, -2, 1f))
+    @Composable private fun InputSettings() {
+        model.revision
+        val s = model.settings
+        Group("原版输入偏好") {
+            Info("沿用 S Key 原版混输引擎与26键布局。")
+            Toggle("五笔四码自动上屏", s.fourCodeAutoCommit) { s.fourCodeAutoCommit = it }
+            Toggle("模糊拼音", s.fuzzyPinyin, "用于原版混输中的拼音候选") { s.fuzzyPinyin = it }
+            if (s.fuzzyPinyin) SettingsStore.fuzzyPairIds.forEach { pair ->
+                Toggle(pair.replace("_", " ↔ "), pair in s.fuzzyPairs) {
+                    s.fuzzyPairs = if (it) s.fuzzyPairs + pair else s.fuzzyPairs - pair
+                }
+            }
         }
-        transferDialog = showDialog(SettingsDialogs.builder(this)
-            .setTitle(dictionaryTransfer.title).setView(SettingsDialogs.scrollable(this, progress))
-            .setCancelable(false).create())
+        Spacer(Modifier.height(16.dp))
+        EnglishSettings()
     }
-
-    @Deprecated("Platform activity result API is used for a dependency-free app")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK) return
-        // The request code is the durable picker destination, independent of navigation/rotation.
-        val kind = when (requestCode) {
-            IMPORT_CHINESE, EXPORT_CHINESE -> DictionaryKind.CHINESE
-            IMPORT_ENGLISH, EXPORT_ENGLISH -> DictionaryKind.ENGLISH
-            else -> return
+    @Composable private fun EnglishSettings() {
+        model.revision
+        Group("英文补全") {
+            Toggle("英文当前词补全", model.settings.englishCompletion) { model.settings.englishCompletion = it }
         }
-        val uri = data?.data ?: return
-        if (dictionaryTransfer.running) {
-            Toast.makeText(this, "词库操作仍在进行，请稍候。", Toast.LENGTH_SHORT).show()
+    }
+    @Composable private fun KeyboardSettings() {
+        model.revision
+        val s = model.settings
+        Group("按键反馈") {
+            Toggle("按键声音", s.keySound) { s.keySound = it }
+            Toggle("按键振动", s.vibration) { s.vibration = it }
+            Range("振动强度", s.vibrationStrength, 1, 100, "%") { s.vibrationStrength = it }
+            Info("声音和触感遵循系统设置，实际效果由设备决定。")
+        }
+        Spacer(Modifier.height(16.dp))
+        Group("手势与长按") {
+            Toggle("长按输入符号", s.longPressSymbols) { s.longPressSymbols = it }
+            Range("长按延迟", s.longPressDelay, 150, 1500, "ms", 10) { s.longPressDelay = it }
+            Toggle("滑动退格删除", s.swipeDelete) { s.swipeDelete = it }
+            Info("空格左右滑动移动光标，长按空格离线听写。")
+            Nav("定制工具栏", "固定工具与排列顺序", "more") { openPage("toolbar") }
+        }
+    }
+    @Composable private fun Appearance() {
+        model.revision
+        val s = model.settings
+        Group("默认主题与切换") {
+            Toggle("跟随系统深浅色", s.theme == "system", "键盘与应用设置同步切换") {
+                s.theme = if (it) "system" else if (s.manualDark) "dark" else "light"
+            }
+            Choice("白色主题", s.theme == "light") { s.manualDark = false; s.theme = "light" }
+            Choice("黑色主题", s.theme == "dark") { s.manualDark = true; s.theme = "dark" }
+            Nav("自定义白色主题", "以默认黑白配色为基础，独立保存15项颜色", "theme") { openPage("theme_light") }
+            Nav("自定义黑色主题", "以默认黑白配色为基础，独立保存15项颜色", "theme") { openPage("theme_dark") }
+            Info("默认使用原有黑白配色。选择黑色或白色会关闭跟随系统；两套颜色可分别自定义，键盘和设置同步应用。恢复默认只重置所选主题。")
+        }
+        Spacer(Modifier.height(16.dp))
+        Group("文字与提示") {
+            Range("候选栏字号", s.candidateTextSize, 12, 32, "sp") { s.candidateTextSize = it }
+            Range("展开候选字号", s.expandedCandidateTextSize, 12, 32, "sp") { s.expandedCandidateTextSize = it }
+            listOf("all" to "全部按键角标", "digits" to "仅数字角标", "hidden" to "隐藏角标").forEach { (id, label) ->
+                Choice(label, s.symbolHints == id) { s.symbolHints = id }
+            }
+        }
+    }
+    @Composable private fun Layouts() {
+        model.revision
+        Group("独立布局") {
+            for (outer in listOf(true, false)) for (landscape in listOf(false, true)) {
+                val id = "profile_${if (outer) "outer" else "inner"}_${if (landscape) "landscape" else "portrait"}"
+                Nav("${if (outer) "外屏" else "内屏"} · ${if (landscape) "横屏" else "竖屏"}", icon = "layout") { openPage(id) }
+            }
+        }
+    }
+    @Composable private fun ProfileSettings(route: String) {
+        model.revision
+        val outer = route.contains("outer")
+        val landscape = route.endsWith("landscape")
+        val s = model.settings
+        val p = s.profile(outer, landscape)
+        fun save(value: SettingsStore.LayoutProfile) = s.saveProfile(outer, landscape, value)
+        Group("尺寸与留白") {
+            Range("键盘高度", p.heightDp, 200, 700, "dp") { save(p.copy(heightDp = it)) }
+            Range("两侧留白", p.sideGapDp, 0, 300, "dp") { save(p.copy(sideGapDp = it)) }
+            Range("底部留白", p.bottomGapDp, 0, 300, "dp") { save(p.copy(bottomGapDp = it)) }
+        }
+        Spacer(Modifier.height(16.dp))
+        Group("布局形态") {
+            Toggle("悬浮键盘", p.floating) { save(p.copy(floating = it)) }
+            if (!outer) {
+                Toggle("分离键盘", p.split) { save(p.copy(split = it)) }
+                Range("分离间距", p.splitGapDp, 0, 180, "dp") { save(p.copy(splitGapDp = it)) }
+            }
+            Info("悬浮键盘可在键盘内拖动和缩放。内外屏按窗口宽度识别。")
+        }
+    }
+    @Composable private fun ToolbarSettings() {
+        model.revision
+        val s = model.settings
+        Group("固定工具") {
+            Info("开关控制是否固定；使用上下箭头调整顺序。")
+            s.toolbarPins.forEachIndexed { index, id ->
+                BasicComponent(title = toolName(id), leftAction = { UiIcon(id, null) }, rightActions = {
+                    IconButton(onClick = { val pins = s.toolbarPins.toMutableList(); if (index > 0) { java.util.Collections.swap(pins, index, index - 1); s.toolbarPins = pins } }) { UiIcon("arrow_up", "上移") }
+                    IconButton(onClick = { val pins = s.toolbarPins.toMutableList(); if (index < pins.lastIndex) { java.util.Collections.swap(pins, index, index + 1); s.toolbarPins = pins } }) { UiIcon("arrow_down", "下移") }
+                })
+            }
+            SettingsStore.availablePins.forEach { id -> Toggle(toolName(id), id in s.toolbarPins) {
+                s.toolbarPins = if (it) s.toolbarPins + id else s.toolbarPins - id
+            } }
+        }
+    }
+    @Composable private fun ThemeSettings(dark: Boolean, ask: (String, () -> Unit) -> Unit) {
+        model.revision
+        val s = model.settings
+        val tokens = s.themeTokens(dark)
+        var editing by remember { mutableStateOf<String?>(null) }
+        Group("主题预览") {
+            SKeyTheme(tokens, dark) {
+                KeyboardThemePreview(tokens, s.toolbarPins, s.symbolHints)
+                Info("完整26键配色预览；可切换工具栏/候选栏，点击大写键查看选中配色。")
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Group("颜色") {
+            themeLabels.forEach { (id, label) ->
+                BasicComponent(title = label, summary = tokens.asMap().getValue(id), onClick = { editing = id },
+                    rightActions = { Box(Modifier.size(28.dp).background(hexColor(tokens.asMap().getValue(id)), RoundedCornerShape(8.dp)).border(1.dp, MiuixTheme.colorScheme.outline, RoundedCornerShape(8.dp))) })
+            }
+            Action("恢复默认${if (dark) "黑色" else "白色"}主题") {
+                ask("恢复此主题的默认颜色？另一套主题不会改变。") { s.resetThemeTokens(dark) }
+            }
+        }
+        editing?.let { id ->
+            ColorEditor(themeLabels.getValue(id), tokens.asMap().getValue(id), { editing = null }, preview = { color ->
+                val draft = tokens.previewColor(id, color)
+                SKeyTheme(draft, dark) {
+                    KeyboardThemePreview(draft, s.toolbarPins, s.symbolHints,
+                        initialCandidates = id in listOf("candidate", "candidateSelected", "preedit", "divider"),
+                        initialShifted = id in listOf("selectedKeyBackground", "selectedKeyText"))
+                }
+            }) { color ->
+                s.setThemeToken(dark, id, color); editing = null
+            }
+        }
+    }
+    @Composable private fun ColorEditor(label: String, initial: String, close: () -> Unit, preview: @Composable (String) -> Unit, save: (String) -> Unit) {
+        var hex by remember { mutableStateOf(initial) }
+        val initialHsv = remember { FloatArray(3).also { android.graphics.Color.colorToHSV(android.graphics.Color.parseColor(initial), it) } }
+        var hue by remember { mutableFloatStateOf(initialHsv[0]) }
+        var saturation by remember { mutableFloatStateOf(initialHsv[1]) }
+        var brightness by remember { mutableFloatStateOf(initialHsv[2]) }
+        fun update() { hex = String.format("#%06X", android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, brightness)) and 0xFFFFFF) }
+        var lastValid by remember { mutableStateOf(initial) }
+        val valid = hex.matches(Regex("#[0-9a-fA-F]{6}"))
+        Modal(label, close) {
+            val display = if (valid) hex else lastValid
+            SideEffect { if (valid) lastValid = hex }
+            preview(display)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.weight(1f).height(24.dp).background(hexColor(initial), RoundedCornerShape(6.dp)))
+                Box(Modifier.weight(1f).height(24.dp).background(hexColor(display), RoundedCornerShape(6.dp)))
+            }
+            Text("左：原颜色　右：当前选择", fontSize = 12.sp)
+            Text("调色盘：拖动选择饱和度和明度", fontSize = 14.sp)
+            AndroidView(factory = { context -> ColorPickerView(context, ColorPickerView.Component.SATURATION_VALUE) },
+                update = { view ->
+                    view.setSelection(hue, saturation, brightness)
+                    view.onChange = { h, s, v, _ -> hue = h; saturation = s; brightness = v; update() }
+                }, modifier = Modifier.fillMaxWidth().height(160.dp))
+            Text("色相", fontSize = 14.sp)
+            AndroidView(factory = { context -> ColorPickerView(context, ColorPickerView.Component.HUE) },
+                update = { view ->
+                    view.setSelection(hue, saturation, brightness)
+                    view.onChange = { h, s, v, _ -> hue = h; saturation = s; brightness = v; update() }
+                }, modifier = Modifier.fillMaxWidth().height(40.dp))
+            listOf("#FFFFFF", "#EFEFF1", "#171717", "#2B2B2B", "#637A91", "#336699",
+                "#F06292", "#EF5350", "#FFB74D", "#66BB6A", "#42A5F5", "#AB47BC").chunked(6).forEach { colors ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    colors.forEach { color ->
+                        Box(Modifier.weight(1f).height(32.dp).background(hexColor(color), RoundedCornerShape(8.dp))
+                            .border(1.dp, MiuixTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                            .clickable {
+                                hex = color
+                                val hsv = FloatArray(3); android.graphics.Color.colorToHSV(android.graphics.Color.parseColor(color), hsv)
+                                hue = hsv[0]; saturation = hsv[1]; brightness = hsv[2]
+                            }.semantics { contentDescription = "选择颜色 $color" })
+                    }
+                }
+            }
+            TextField(value = hex, onValueChange = { value ->
+                hex = value
+                if (value.matches(Regex("#[0-9a-fA-F]{6}"))) {
+                    val hsv = FloatArray(3); android.graphics.Color.colorToHSV(android.graphics.Color.parseColor(value), hsv)
+                    hue = hsv[0]; saturation = hsv[1]; brightness = hsv[2]
+                }
+            }, label = "颜色 HEX，例如 #2B2B2B", singleLine = true, modifier = Modifier.fillMaxWidth())
+            Info("文字与背景请保持足够对比度。取消不会保存修改。")
+            Action("保存颜色", valid) { save(hex.uppercase()) }
+            Action("取消", action = close)
+        }
+    }
+    @Composable private fun ContentHeader(route: String, ask: (String, () -> Unit) -> Unit) {
+        model.revision
+        Group(pageTitle(route)) {
+            if (route == "clipboard") {
+                Range("历史条数上限", model.settings.clipboardLimit, 1, 1000, "条") { value ->
+                    model.settings.clipboardLimit = value
+                }
+                Info("新复制内容按上限淘汰旧记录；置顶内容优先保留。敏感标记内容不采集。")
+                Action("清空剪贴板历史") { ask("清空剪贴板历史？系统剪贴板不受影响。") { model.task { model.content.clearClipboard() } } }
+                if (model.clipboard.isEmpty()) Info("还没有剪贴板记录")
+            } else {
+                Action(if (route == "phrases") "添加常用语" else "添加词条", !model.busy) { model.edit = ContentEdit(route) }
+                if (route != "phrases") {
+                    val kind = if (route == "dictionary") DictionaryKind.CHINESE else DictionaryKind.ENGLISH
+                    Info("UTF-8 文本，每行：词语 + 制表符 + 编码。可选表头 word + 制表符 + reading。中文手动短语支持拼音或五笔编码。")
+                    Action("导入词库", !model.busy) {
+                        model.pendingKind = kind
+                        model.task(success = { launch { importPicker.launch(arrayOf("text/*", "application/octet-stream")) } }) {
+                            model.importEpoch = model.content.captureDictionaryEpoch(kind)
+                        }
+                    }
+                    Action("导出词库", !model.busy) {
+                        model.pendingKind = kind
+                        model.task(success = { launch { exportPicker.launch("S-Key-2-${kind.name.lowercase()}.tsv") } }) {
+                            model.exportText = model.content.exportDictionary(kind)
+                        }
+                    }
+                    Action("清空本词库") { ask("清空${pageTitle(route)}？") { model.task { model.content.clearDictionary(kind) } } }
+                } else Action("清空常用语") { ask("清空全部常用语？") { model.task { model.content.clearPhrases() } } }
+            }
+        }
+    }
+    @Composable private fun EditDialog(edit: ContentEdit) {
+        val customAi = edit.category == "custom_ai"
+        val title = if (customAi) { if (edit.id == null) "添加自定义 AI" else "编辑自定义 AI" }
+            else if (edit.id == null) "添加内容" else "编辑内容"
+        Modal(title, { if (!model.busy) model.edit = null }) {
+            TextField(value = edit.first, onValueChange = { if (!customAi || it.text.length <= 40) model.edit = edit.copy(first = it) },
+                label = if (customAi) "名称，例如：邮件润色" else if (edit.category == "phrases") "常用语" else "词语",
+                singleLine = customAi, modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp))
+            if (edit.category != "phrases") TextField(value = edit.second, onValueChange = { if (!customAi || it.text.length <= 1000) model.edit = edit.copy(second = it) },
+                label = if (customAi) "自定义提示词" else "拼音 / 编码",
+                modifier = if (customAi) Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 260.dp) else Modifier.fillMaxWidth(), singleLine = !customAi)
+            if (customAi) Info("${edit.first.text.length}/40 名称 · ${edit.second.text.length}/1000 提示词")
+            Action("保存", !model.busy && (!customAi || (edit.first.text.isNotBlank() && edit.second.text.isNotBlank()))) { model.saveEdit() }
+            Action("取消", !model.busy) { model.edit = null }
+        }
+    }
+    @Composable private fun VoiceSettings() {
+        model.revision
+        val ai = model.settings.voiceMode == "ai"
+        Group("识别方式") {
+            Choice("离线语音", !ai) { model.settings.voiceMode = "offline" }
+            Choice("AI 语音", ai) { model.settings.voiceMode = "ai" }
+            Info(if(ai) "录音交给 AI 识别，无需下载本地模型。需要联网，结束收音后会上传录音。" else "本地识别普通话，录音和转写均不上传。")
+        }
+        if(ai) {
+            Group("AI 语音") {
+                Info("点击工具栏语音开始，点击“识别语音”后上传识别，成功上屏后清空预览并继续聆听，点击取消结束。也可长按空格说话、松手识别；长按模式不会自动继续。单次录音最多 60 秒。")
+                Nav("接口 API 配置", "配置语音端点、密钥与模型", "settings") { openPage("api") }
+                Action("允许麦克风权限", !microphone) { micPicker.launch(Manifest.permission.RECORD_AUDIO) }
+            }
             return
         }
-        // The worker holds application-scoped objects only. No persistent URI grant is requested.
-        val resolver = applicationContext.contentResolver
-        val store = content
-        val importing = requestCode == IMPORT_CHINESE || requestCode == IMPORT_ENGLISH
-        val expectedEpoch = if (importing) store.captureDictionaryEpoch(kind) else null
-        val name = dictionaryName(kind)
-        dictionaryTransfer.start(kind, if (importing) "导入$name" else "导出$name") {
-            if (importing) {
-                val tsv =
-                    resolver.openInputStream(uri)?.use { DictionaryTextReader.read(it) }
-                        ?: error("无法打开所选文件")
-                // ContentStore validates every row and the cumulative 10,000-entry limit before
-                // writing.
-                val count = store.importDictionary(tsv, expectedEpoch, kind)
-                "已向$name 导入 $count 条词条"
-            } else {
-                // Read and validate local content before opening (and truncating) the destination.
-                val exported = store.exportDictionary(kind)
-                resolver.openOutputStream(uri, "wt")?.bufferedWriter(Charsets.UTF_8)?.use {
-                    it.write(exported)
-                } ?: error("无法写入所选文件")
-                "$name 已导出"
+        val installed = remember(voiceState) { ModelRepository(applicationContext).isInstalled() }
+        Group("离线普通话") {
+            Info("模型：${if (installed) "已导入" else "未导入"} · 麦克风：${if (microphone) "已允许" else "未允许"}", true)
+            Info("不保存录音，不上传转写。工具栏点击语音，或长按空格开始；松开空格结束收音。")
+            Info("下载指定约25 MB模型，解压后选择包含 model.int8.onnx 和 tokens.txt 的文件夹。")
+            Action("浏览器下载模型") { launch { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ModelRepository.DOWNLOAD_URL))) } }
+            Action("选择模型文件夹", voiceState !is ModelImportCoordinator.State.Running) { launch { modelPicker.launch(null) } }
+            Action("允许麦克风权限", !microphone) { micPicker.launch(Manifest.permission.RECORD_AUDIO) }
+            when (val state = voiceState) {
+                is ModelImportCoordinator.State.Running -> Info("正在复制并校验模型…")
+                is ModelImportCoordinator.State.Failure -> Info(state.message)
+                else -> Unit
+            }
+            Nav("开源声明", icon = "dictionary") { openPage("licenses") }
+        }
+    }
+    @Composable private fun Licenses() {
+        var notices by remember { mutableStateOf("正在读取声明…") }
+        LaunchedEffect(Unit) {
+            notices = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                listOf("SHERPA_ONNX_LICENSE", "ONNXRUNTIME_LICENSE", "ONNXRUNTIME_THIRD_PARTY_NOTICES")
+                    .joinToString("\n\n") { assets.open("voice-licenses/$it").bufferedReader().use { reader -> reader.readText() } }
             }
         }
-        showTransferProgress()
+        Group("开源组件") {
+            Info("Miuix 0.5.1 · Apache-2.0\nMiuix Icons Regular / Material Symbols Rounded · Apache-2.0\nKotlin、AndroidX / Compose：随包保留各组件许可。\n词库及字体的来源与许可保留在源码 third_party 与应用 assets。")
+            Info(notices)
+        }
     }
-
-    /** Non-inner owner. The snapshot is consumed once; subsequent edits never form a history. */
-    private class SettingsLifetimeState {
-        val dictionaryTransfer = DictionaryTransfer()
-        var editableDraft: SettingsEditableDraft? = null
+    private fun copy(text: String) {
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("S Key", text))
+        model.message = "已复制"
     }
-
-    /** Kept across rotation; completion is delivered only to the currently started Activity. */
-    private class DictionaryTransfer {
-        private val worker = Executors.newSingleThreadExecutor()
-        private val main = Handler(Looper.getMainLooper())
-        var running = false
-            private set
-
-        var title = "词库操作"
-            private set
-
-        var kind = DictionaryKind.CHINESE
-            private set
-
-        data class Completion(val kind: DictionaryKind, val result: Result<String>)
-
-        var observer: ((Completion) -> Unit)? = null
-        private var pending: Completion? = null
-        private var finishedContext: android.content.Context? = null
-
-        fun start(kind: DictionaryKind, title: String, work: () -> String) {
-            check(!running)
-            check(pending == null)
-            this.kind = kind
-            this.title = title
-            running = true
-            worker.execute {
-                val result = runCatching(work)
-                main.post {
-                    running = false
-                    pending = Completion(kind, result)
-                    deliver()
+    @Composable private fun Group(title: String, content: @Composable ColumnScope.() -> Unit) {
+        Column {
+            SmallTitle(text = title)
+            Card(modifier = Modifier.fillMaxWidth(), content = content)
+        }
+    }
+    @Composable private fun Info(value: String, strong: Boolean = false) {
+        Text(value, modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            fontSize = if (strong) 19.sp else 14.sp,
+            fontWeight = if (strong) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (strong) MiuixTheme.colorScheme.onSurface else MiuixTheme.colorScheme.onSurfaceSecondary)
+    }
+    @Composable private fun Nav(title: String, summary: String? = null, icon: String = "settings", action: () -> Unit) {
+        BasicComponent(title = title, summary = summary, leftAction = { Box(Modifier.padding(end = 16.dp)) { UiIcon(icon, null) } },
+            rightActions = { UiIcon("forward", null) }, onClick = action)
+    }
+    @Composable private fun Toggle(title: String, checked: Boolean, summary: String? = null, change: (Boolean) -> Unit) {
+        BasicComponent(title = title, summary = summary, onClick = { change(!checked) },
+            rightActions = { Switch(checked = checked, onCheckedChange = change) })
+    }
+    @Composable private fun Choice(title: String, checked: Boolean, action: () -> Unit) {
+        BasicComponent(title = title, onClick = action, rightActions = { if (checked) UiIcon("check", "已选择") })
+    }
+    @Composable private fun Range(title: String, value: Int, minimum: Int, maximum: Int, unit: String, step: Int = 1, save: (Int) -> Unit) {
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Text("$title  $value $unit")
+            Slider(progress = value.coerceIn(minimum, maximum).toFloat(), minValue = minimum.toFloat(), maxValue = maximum.toFloat(),
+                decimalPlaces = 0, onProgressChange = { save((minimum + ((it - minimum) / step).roundToInt() * step).coerceIn(minimum, maximum)) })
+        }
+    }
+    @Composable private fun Action(text: String, enabled: Boolean = true, action: () -> Unit) {
+        TextButton(text = text, onClick = action, enabled = enabled,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
+    }
+    @Composable private fun ContentCard(text: String, summary: String, actions: List<Pair<String, () -> Unit>>) {
+        Card(Modifier.fillMaxWidth()) {
+            Text(text, maxLines = 5, modifier = Modifier.padding(20.dp), color = MiuixTheme.colorScheme.onSurface)
+            Info(summary)
+            // Vertical controls remain reachable at narrow widths and large system font scales.
+            actions.forEach { (label, action) -> Action(label, !model.busy, action) }
+        }
+    }
+    @Composable private fun Modal(title: String, close: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+        Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Card(Modifier.fillMaxWidth().padding(20.dp).widthIn(max = 560.dp).heightIn(max = (LocalConfiguration.current.screenHeightDp * .85f).dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(title, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                    content()
                 }
             }
         }
-
-        fun deliver() {
-            val result = pending ?: return
-            val callback = observer
-            if (callback != null) {
-                pending = null
-                callback(result)
-            } else
-                finishedContext?.let { context ->
-                    pending = null
-                    Toast.makeText(
-                            context,
-                            result.result.getOrElse { it.message ?: "${title}未完成" },
-                            Toast.LENGTH_LONG,
-                        )
-                        .show()
-                }
-        }
-
-        fun finishPermanently(context: android.content.Context) {
-            finishedContext = context.applicationContext
-            deliver()
-            worker.shutdown()
-        }
     }
-
-    private fun storageRecovery(error: ContentStore.ContentReadException) {
-        recoveryMessage = error.message ?: "本机内容无法读取，已停止保存以免覆盖原数据。"
-        recoveryPage()
+    @Composable private fun UiIcon(kind: String, description: String?) {
+        Icon(painter = painterResource(io.secure.keyboard.ui.KeyboardIcons.resource(kind)), contentDescription = description,
+            modifier = Modifier.size(24.dp), tint = hexColor(model.settings.themeTokens(model.settings.isDark(LocalConfiguration.current.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)).toolbarIcon))
     }
-
-    private fun recoveryPage() {
-        page("recovery", "本机内容读取失败", false)
-        notice(recoveryMessage ?: "本机内容无法读取，已停止保存以免覆盖原数据。")
-        section("恢复读取")
-        label("可以先重试。布局与键盘设置仍可正常调整，清空内容前会再次确认。")
-        button("重试读取", true) { home() }
-        button("外观与按键") { behavior() }
-        button("布局配置") { profiles() }
-        section("重新开始")
-        button("清空全部用户内容并重新开始") {
-            confirm("删除无法读取的内容，以及全部剪贴板、常用语、中文词库、英文词库和最近表情？布局与设置会保留；已导出的文件不会被删除。") {
-                content.clearAll()
-                home()
-            }
-        }
+    private fun pageTitle(route: String): String = when(route) {
+        "dashboard" -> "S Key"
+        "input" -> "输入方式"
+        "input_english" -> "英文设置"
+        "keyboard", "feedback" -> "键盘操作"
+        "behavior" -> "主题与外观"
+        "theme_light" -> "自定义白色主题"
+        "theme_dark" -> "自定义黑色主题"
+        "layout" -> "布局配置"
+        "toolbar" -> "定制工具栏"
+        "clipboard" -> "剪贴板"
+        "phrases" -> "常用语"
+        "custom_ai" -> "自定义 AI"
+        "dictionary" -> "中文自定义词库"
+        "english_dictionary" -> "英文自定义词库"
+        "emoji" -> "最近表情"
+        "ai" -> "AI 助手"
+        "translate" -> "翻译"
+        "api" -> "接口 API 配置"
+        "voice" -> "语音输入"
+        "cleanup", "recovery" -> "内容清理"
+        "licenses" -> "开源声明"
+        else -> if (route.startsWith("profile_")) "${if (route.contains("outer")) "外屏" else "内屏"} · ${if (route.endsWith("landscape")) "横屏" else "竖屏"}" else "偏好设置"
     }
-
-    private fun safely(action: () -> Unit) {
-        try {
-            action()
-        } catch (e: ContentStore.ContentReadException) {
-            storageRecovery(e)
-        } catch (e: Exception) {
-            Toast.makeText(this, e.message ?: "操作未完成", Toast.LENGTH_LONG).show()
-        }
+    private fun toolName(id: String) = when(id) {
+        "floating" -> "悬浮键盘"; "split" -> "分离键盘"; "theme" -> "切换主题"
+        "quickedit" -> "快捷编辑"; "more" -> "更多"; else -> pageTitle(id)
     }
-
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
-
     companion object {
-        private const val DICTIONARY_PAGE_SIZE = 100
-        private const val IMPORT_CHINESE = 100
-        private const val EXPORT_CHINESE = 101
-        private const val IMPORT_ENGLISH = 102
-        private const val EXPORT_ENGLISH = 103
+        private val themeLabels = linkedMapOf(
+            "keyboardBackground" to "页面与键盘背景", "normalKeyBackground" to "卡片与普通键背景",
+            "specialKeyBackground" to "功能面与功能键背景", "text" to "主要文字", "hint" to "次要文字与角标",
+            "toolbarIcon" to "键盘与设置图标", "candidate" to "候选文字", "candidateSelected" to "首选候选",
+            "accent" to "强调色与回车背景", "enterText" to "强调色上的文字", "preedit" to "编码文字",
+            "divider" to "分隔线", "specialKeyText" to "功能键文字", "selectedKeyBackground" to "选中键背景",
+            "selectedKeyText" to "选中键文字")
     }
 }

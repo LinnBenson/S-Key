@@ -2,6 +2,9 @@ package io.secure.keyboard.ui
 
 /** Bottom margins are measured upwards, so height + bottom stays constant at a fixed top. */
 internal object FloatingResize {
+    fun maxBottom(screenHeight: Int, keyboardHeight: Int): Int =
+        (screenHeight - keyboardHeight).coerceAtLeast(0)
+
     data class Bounds(val width: Int, val height: Int, val left: Int, val bottom: Int)
 
     fun resize(start: Bounds, dx: Int, dy: Int, screenWidth: Int, maxHeight: Int, maxBottom: Int): Bounds {

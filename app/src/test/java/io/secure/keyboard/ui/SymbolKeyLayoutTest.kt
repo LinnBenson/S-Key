@@ -7,10 +7,10 @@ class SymbolKeyLayoutTest {
     @Test
     fun allFourPagesKeepExactCodePointsAndOrder() {
         val expected = listOf(
-            Triple(true, false, listOf("1234567890", "@#${'$'}_&-+（）/", "、“”：；！？")),
-            Triple(true, true, listOf("~`|•《》÷×*§", ".,€¥^°=「」\\", "%‘’™✓［］")),
-            Triple(false, false, listOf("1234567890", "@#${'$'}_&-+()/", "*\"':;!?")),
-            Triple(false, true, listOf("~`|•<>÷×§∆", ".,€¥^°={}\\", "%©®™✓[]")),
+            Triple(true, false, listOf("1234567890", "@#${'$'}_&-+（）/", "、.,：；！？")),
+            Triple(true, true, listOf("~`|•《》÷×*§", "“”€¥^°=「」\\", "%‘’™✓［］")),
+            Triple(false, false, listOf("1234567890", "@#${'$'}_&-+()/", "*.,:;!?")),
+            Triple(false, true, listOf("~`|•<>÷×§∆", "\"'€¥^°={}\\", "%©®™✓[]")),
         )
         for ((chinese, secondary, rows) in expected) {
             val actual = SymbolKeyLayout.rows(chinese, secondary)
@@ -31,10 +31,10 @@ class SymbolKeyLayoutTest {
         val englishFirst = SymbolKeyLayout.rows(false, false)
         val englishSecond = SymbolKeyLayout.rows(false, true)
         assertEquals(listOf(0xff08, 0xff09), chineseFirst[1].drop(7).take(2).map { it.code })
-        assertEquals(listOf(0x201c, 0x201d), chineseFirst[2].drop(1).take(2).map { it.code })
+        assertEquals(listOf(0x201c, 0x201d), chineseSecond[1].take(2).map { it.code })
         assertEquals(listOf(0x2018, 0x2019), chineseSecond[2].drop(1).take(2).map { it.code })
         assertEquals(listOf(0xff3b, 0xff3d), chineseSecond[2].takeLast(2).map { it.code })
-        assertEquals(listOf(0x22, 0x27), englishFirst[2].drop(1).take(2).map { it.code })
+        assertEquals(listOf(0x22, 0x27), englishSecond[1].take(2).map { it.code })
         assertEquals(listOf(0x5b, 0x5d), englishSecond[2].takeLast(2).map { it.code })
         assertEquals(listOf(0x300a, 0x300b), chineseSecond[0].drop(4).take(2).map { it.code })
         assertEquals(listOf(0x3c, 0x3e), englishSecond[0].drop(4).take(2).map { it.code })

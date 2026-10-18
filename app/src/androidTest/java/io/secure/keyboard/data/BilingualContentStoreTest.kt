@@ -30,6 +30,45 @@ class BilingualContentStoreTest : AndroidTestCase() {
         super.tearDown()
     }
 
+    fun testNamedAiPresetsPersistAndSupportEditingAndOrdering() {
+        store.saveAiPreset(null, "润色", "保留原意并润色")
+        store.saveAiPreset(null, "简短", "缩短到两句话")
+        val first = store.aiPresets().first()
+        val last = store.aiPresets().last()
+        store.moveAiPreset(last.id, -1)
+        assertEquals(listOf("简短", "润色"), ContentStore(sandbox).aiPresets().map { it.name })
+        store.saveAiPreset(first.id, "正式润色", "改成正式语气")
+        assertEquals("改成正式语气", store.aiPresets().last().prompt)
+        assertEquals(first.id, store.aiPresets().last().id)
+        store.moveAiPreset(last.id, 1)
+        assertEquals("正式润色", store.aiPresets().first().name)
+    }
+
+    fun testAiPresetValidationAndDeletionPreserveOtherContent() {
+        store.addPhrase("保留常用语")
+        store.saveAiPreset(null, "邮件", "润色邮件")
+        val preset = store.aiPresets().single()
+        for ((name, prompt) in listOf("邮件" to "重复", "" to "提示词", "长".repeat(41) to "提示词", "名称" to "", "名称" to "长".repeat(1001))) {
+            try { store.saveAiPreset(null, name, prompt); fail("Invalid preset accepted") } catch (_: IllegalArgumentException) {}
+        }
+        assertEquals(listOf(preset), store.aiPresets())
+        store.deleteAiPreset(preset.id)
+        assertTrue(store.aiPresets().isEmpty())
+        assertEquals("保留常用语", store.phrases().single().text)
+    }
+
+    fun testClearAllRemovesAiPresetsAndStaleEditsCannotRecreateThem() {
+        store.saveAiPreset(null, "旧配置", "旧提示词")
+        val old = store.aiPresets().single()
+        val epoch = store.customAiEpoch()
+        ContentStore(sandbox).clearAll()
+        assertTrue(store.customAiEpoch() > epoch)
+        assertTrue(store.aiPresets().isEmpty())
+        try { store.saveAiPreset(old.id, "旧配置", "延迟编辑"); fail("Deleted preset recreated") }
+        catch (_: IllegalArgumentException) {}
+        assertTrue(store.aiPresets().isEmpty())
+    }
+
     fun testLegacyChineseFixtureReadsWithoutRewriteAndEnglishWritesPreserveIt() {
         val longCode = "Legacy NÜ ' " + "x".repeat(80)
         val original = JSONObject()

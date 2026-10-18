@@ -3,37 +3,21 @@ package io.secure.keyboard.settings
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.ColorFilter
-import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
+import io.secure.keyboard.ui.KeyboardIcons
 
-/** Application navigation only; independent of keyboard artwork and palettes. */
-internal class SettingsChevron(context: Context, private val back: Boolean = false) : Drawable() {
+/** Shared Miuix artwork for legacy View-based navigation. */
+internal class SettingsChevron(context: Context, back: Boolean = false) : Drawable() {
     private val size = SettingsPalette.dp(context, 24)
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = if (back) SettingsPalette.ink else SettingsPalette.secondaryText
-        style = Paint.Style.STROKE
-        strokeWidth = 1.8f
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
+    private val artwork = context.getDrawable(KeyboardIcons.resource(if (back) "back" else "forward"))!!.mutate().apply {
+        setTint(if (back) SettingsPalette.ink else SettingsPalette.secondaryText)
     }
-    private val path = Path().apply {
-        moveTo(if (back) 15f else 9f, 4f)
-        lineTo(if (back) 7f else 17f, 12f)
-        lineTo(if (back) 15f else 9f, 20f)
-    }
-    override fun draw(canvas: Canvas) {
-        canvas.save()
-        canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
-        canvas.scale(bounds.width() / 24f, bounds.height() / 24f)
-        canvas.drawPath(path, paint)
-        canvas.restore()
-    }
+    override fun draw(canvas: Canvas) { artwork.bounds = bounds; artwork.draw(canvas) }
     override fun getIntrinsicWidth() = size
     override fun getIntrinsicHeight() = size
-    override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }
-    override fun setColorFilter(filter: ColorFilter?) { paint.colorFilter = filter; invalidateSelf() }
+    override fun setAlpha(alpha: Int) { artwork.alpha = alpha; invalidateSelf() }
+    override fun setColorFilter(filter: ColorFilter?) { artwork.colorFilter = filter; invalidateSelf() }
     @Deprecated("Drawable opacity is no longer used")
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }

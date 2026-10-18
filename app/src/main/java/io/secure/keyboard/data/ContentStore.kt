@@ -18,6 +18,8 @@ import org.json.JSONObject
 class ContentStore(context: Context) {
     data class ClipboardItem(val id: String, val text: String, val pinned: Boolean = false)
 
+    data class AiPreset(val id: String, val name: String, val prompt: String)
+
     data class Phrase(val id: String, val text: String, val pinned: Boolean = false)
 
     data class DictionaryEntry(val id: String, val word: String, val reading: String)
@@ -26,6 +28,7 @@ class ContentStore(context: Context) {
     private val settings = SettingsStore(app)
     private val dir = File(app.noBackupFilesDir, "content").apply { mkdirs() }
     private val file = File(dir, "content.json")
+    private val aiPresetEpoch = aiPresetEpochs.computeIfAbsent(file.canonicalPath) { AtomicLong(0L) }
     private data class DictionaryCacheKey(val path: String, val kind: DictionaryKind)
 
     private val dictionaryCacheKeys =
@@ -108,7 +111,7 @@ class ContentStore(context: Context) {
                 return JSONObject()
             }
             JSONObject(file.readText()).also { root ->
-                for (key in listOf("clipboard", "phrases", "dictionary", "englishDictionary", "emoji")) {
+                for (key in listOf("clipboard", "phrases", "dictionary", "englishDictionary", "emoji", "aiPresets")) {
                     if (!root.has(key)) continue
                     val entries = root.getJSONArray(key)
                     for (index in 0 until entries.length()) {
@@ -117,7 +120,8 @@ class ContentStore(context: Context) {
                             val row = entries.getJSONObject(index)
                             val isDictionary = DictionaryKind.entries.any { it.storageKey == key }
                             val fields =
-                                if (isDictionary) listOf("id", "word", "reading")
+                                if (key == "aiPresets") listOf("id", "name", "prompt")
+                                else if (isDictionary) listOf("id", "word", "reading")
                                 else listOf("id", "text")
                             fields.forEach { require(row.get(it) is String) }
                             if (!isDictionary && row.has("pinned"))
@@ -240,7 +244,8 @@ class ContentStore(context: Context) {
         }
 
     private fun contentCharacters(rows: List<JSONObject>): Long = rows.sumOf { row ->
-        if (row.has("text")) row.getString("text").length.toLong()
+        if (row.has("prompt")) row.getString("name").length.toLong() + row.getString("prompt").length
+        else if (row.has("text")) row.getString("text").length.toLong()
         else row.getString("word").length.toLong() + row.getString("reading").length
     }
 
@@ -490,6 +495,37 @@ class ContentStore(context: Context) {
     fun exportDictionary(kind: DictionaryKind = DictionaryKind.CHINESE): String =
         "word\treading\n" + dictionary(kind).joinToString("\n") { "${it.word}\t${it.reading}" }
 
+    fun customAiEpoch(): Long = aiPresetEpoch.get()
+
+    fun aiPresets(): List<AiPreset> = objects("aiPresets").map {
+        AiPreset(it.getString("id"), it.getString("name"), it.getString("prompt"))
+    }
+
+    fun saveAiPreset(id: String?, name: String, prompt: String) = mutate("aiPresets") { rows ->
+        val title = name.trim(); val instruction = prompt.trim()
+        require(title.isNotBlank() && title.length <= 40) { "名称需为 1–40 个字符" }
+        require(instruction.isNotBlank() && instruction.length <= 1000) { "提示词需为 1–1000 个字符" }
+        require(rows.none { it.getString("id") != id && it.getString("name").equals(title, ignoreCase = true) }) { "已有同名自定义 AI，请换个名称" }
+        if (id == null) {
+            require(rows.size < 100) { "最多保存 100 个自定义 AI" }
+            rows.add(JSONObject().put("id", UUID.randomUUID().toString()).put("name", title).put("prompt", instruction))
+        } else {
+            val row = rows.find { it.getString("id") == id }
+            require(row != null) { "此自定义 AI 已删除，请重新添加" }
+            row.put("name", title).put("prompt", instruction)
+        }
+    }
+
+    fun deleteAiPreset(id: String) = mutate("aiPresets") { rows -> rows.removeAll { it.getString("id") == id } }
+
+    fun moveAiPreset(id: String, offset: Int) = mutate("aiPresets") { rows ->
+        val index = rows.indexOfFirst { it.getString("id") == id }
+        if (index >= 0 && offset in listOf(-1, 1)) {
+            val target = (index + offset).coerceIn(0, rows.lastIndex)
+            if (index != target) Collections.swap(rows, index, target)
+        }
+    }
+
     fun recentEmoji(): List<String> =
         synchronized(lock) {
             val a = array(read(), "emoji")
@@ -529,6 +565,7 @@ class ContentStore(context: Context) {
     fun clearAll() =
         synchronized(lock) {
             clipboardEpoch.incrementAndGet()
+            aiPresetEpoch.incrementAndGet()
             DictionaryKind.entries.forEach { advanceDictionaryEpoch(it) }
             invalidateDictionarySnapshots()
             suppressCurrentClipboard()
@@ -560,6 +597,7 @@ class ContentStore(context: Context) {
         const val MAX_DICTIONARY_CHARACTERS = 4_000_000
         const val MAX_DICTIONARY_ENTRIES = 10_000
         private const val DICTIONARY_LIMIT_MESSAGE = "用户词库最多保存 10000 条。此次操作未写入任何词条，请减少导入数量或先删除部分词条。"
+        private val aiPresetEpochs = ConcurrentHashMap<String, AtomicLong>()
         private val lock = Any()
         private val clipboardEpoch = AtomicLong(0L)
         private val dictionaryEpochs = mutableMapOf<DictionaryCacheKey, Long>()

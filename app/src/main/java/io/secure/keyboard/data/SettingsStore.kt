@@ -10,6 +10,17 @@ class SettingsStore(context: Context) {
     private val prefs =
         context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
+    var voiceMode: String
+        get() = prefs.getString("voiceMode", "offline")?.takeIf { it == "ai" } ?: "offline"
+        set(value) { prefs.edit().putString("voiceMode", if(value == "ai") "ai" else "offline").apply() }
+
+    var translationSource: String
+        get() = prefs.getString("translationSource", "auto") ?: "auto"
+        set(value) { prefs.edit().putString("translationSource", value).apply() }
+    var translationTarget: String
+        get() = prefs.getString("translationTarget", "en") ?: "en"
+        set(value) { prefs.edit().putString("translationTarget", value).apply() }
+
     data class LayoutProfile(
         val heightDp: Int = 260,
         val sideGapDp: Int = 0,
@@ -138,8 +149,19 @@ class SettingsStore(context: Context) {
                     "theme",
                     value.takeIf { it in listOf("system", "light", "dark") } ?: "system",
                 )
+                .putBoolean("manualDark", if (value == "system") manualDark else value == "dark")
                 .apply()
         }
+
+    var manualDark: Boolean
+        get() = prefs.getBoolean("manualDark", false)
+        set(value) { prefs.edit().putBoolean("manualDark", value).apply() }
+
+    fun isDark(systemDark: Boolean): Boolean = when (theme) {
+        "dark" -> true
+        "light" -> false
+        else -> systemDark
+    }
 
     /** Independent opt-in for platform keyboard sounds; existing installs stay silent. */
     var keySound: Boolean
@@ -317,7 +339,7 @@ class SettingsStore(context: Context) {
 
         fun defaultThemeTokens(dark: Boolean): ThemeTokens {
             val text = if (dark) "#F0F4FC" else "#17283E"
-            val accent = if (dark) "#88BFFF" else "#2B2B2B"
+            val accent = if (dark) "#88BFFF" else "#007AFF"
             val special = if (dark) "#3D5164" else "#D0D2D9"
             // Dark accent is pale: a dark foreground keeps accent/selected keys legible.
             val accentText = if (dark) "#17283E" else "#FFFFFF"
@@ -343,7 +365,7 @@ class SettingsStore(context: Context) {
         val defaultPins = listOf("floating", "clipboard", "quickedit", "emoji", "voice")
         // Keep the complete tool catalog independent of which tools are pinned by default.
         val availablePins = listOf(
-            "clipboard", "phrases", "voice", "quickedit", "emoji", "layout",
+            "ai", "translate", "clipboard", "phrases", "voice", "quickedit", "emoji", "layout",
             "floating", "split", "theme", "dictionary", "english_dictionary", "settings",
         )
     }

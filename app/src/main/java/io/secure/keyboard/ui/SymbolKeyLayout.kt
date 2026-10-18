@@ -5,21 +5,21 @@ object SymbolKeyLayout {
     private val chinesePrimary = listOf(
         "1234567890",
         "@#${'$'}_&-+（）/",
-        "、“”：；！？",
+        "、.,：；！？",
     )
     private val chineseSecondary = listOf(
         "~`|•《》÷×*§",
-        ".,€¥^°=「」\\",
+        "“”€¥^°=「」\\",
         "%‘’™✓［］",
     )
     private val englishPrimary = listOf(
         "1234567890",
         "@#${'$'}_&-+()/",
-        "*\"':;!?",
+        "*.,:;!?",
     )
     private val englishSecondary = listOf(
         "~`|•<>÷×§∆",
-        ".,€¥^°={}\\",
+        "\"'€¥^°={}\\",
         "%©®™✓[]",
     )
 

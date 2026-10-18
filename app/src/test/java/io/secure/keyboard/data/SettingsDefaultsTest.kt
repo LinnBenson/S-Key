@@ -91,7 +91,7 @@ class SettingsDefaultsTest {
         )
         assertEquals(
             listOf(
-                "clipboard", "phrases", "voice", "quickedit", "emoji", "layout",
+                "ai", "translate", "clipboard", "phrases", "voice", "quickedit", "emoji", "layout",
                 "floating", "split", "theme", "dictionary", "english_dictionary", "settings",
             ),
             SettingsStore.availablePins,
