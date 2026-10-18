@@ -57,55 +57,70 @@ internal object AiWriting {
                     else -> "生成失败（HTTP $status），请稍后重试"
                 } }
                 val result = conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                    val output = StringBuilder()
-                    val line = StringBuilder()
-                    val event = StringBuilder()
-                    var total = 0
-                    var finished = false
-                    var lastUpdate = 0L
-                    fun dispatch() {
-                        if (event.isEmpty()) return
-                        val data = event.toString().trim(); event.setLength(0)
-                        if (data == "[DONE]") { finished = true; return }
-                        val json = JSONObject(data)
-                        check(!json.has("error")) { "生成失败，请重试" }
-                        val choice = json.optJSONArray("choices")?.optJSONObject(0) ?: return
-                        val reason = choice.optString("finish_reason")
-                        check(reason != "length") { "结果超出长度限制，请缩短原文后重试" }
-                        check(reason != "content_filter") { "服务未返回完整结果" }
-                        val delta = choice.optJSONObject("delta")?.opt("content") as? String
-                        if (delta != null) {
-                            check(output.length + delta.length <= 20000) { "AI 响应过大，请缩短原文" }
-                            output.append(delta)
-                            val now = System.nanoTime()
-                            if (now - lastUpdate >= 40_000_000L) {
-                                check(!canceled.get()) { "已停止生成" }
-                                onPartial(output.toString()); lastUpdate = now
-                            }
-                        }
-                        if (reason == "stop") finished = true
-                    }
-                    while (!finished) {
-                        check(!canceled.get()) { "已停止生成" }
-                        val ch = reader.read()
-                        if (ch < 0) break
-                        check(++total <= 1024 * 1024) { "AI 响应过大，请缩短原文" }
-                        if (ch == 10) {
-                            val value = line.toString().trimEnd('\r'); line.setLength(0)
-                            if (value.isEmpty()) dispatch()
-                            else if (value.startsWith("data:")) {
-                                if (event.isNotEmpty()) event.append('\n')
-                                event.append(value.substring(5).trimStart())
-                            }
-                        } else line.append(ch.toChar())
-                    }
-                    check(!canceled.get()) { "已停止生成" }
-                    check(finished) { "生成连接中断，请重新生成" }
-                    output.toString().trim()
+                    readStream(reader, onPartial)
                 }
                 check(result.isNotEmpty()) { "未收到可用的文字结果，请重试" }
                 return result
             } finally { bytes.fill(0); connection=null; conn.disconnect() }
+        }
+        internal fun readStream(reader: java.io.Reader, onPartial: (String) -> Unit = {}): String {
+            val output = StringBuilder()
+            val line = StringBuilder()
+            val event = StringBuilder()
+            var total = 0
+            var finished = false
+            var lastUpdate = 0L
+            val started = System.nanoTime()
+            var previousCr = false
+            fun dispatch() {
+                if (event.isEmpty()) return
+                val data = event.toString().trim(); event.setLength(0)
+                if (data == "[DONE]") { finished = true; return }
+                val json = try { JSONObject(data) } catch (_: Exception) { error("流式响应格式错误，请检查接口") }
+                check(!json.has("error")) { "生成失败，请重试" }
+                val choice = json.optJSONArray("choices")?.optJSONObject(0) ?: return
+                val reason = choice.optString("finish_reason")
+                check(reason != "length") { "结果超出长度限制，请缩短原文后重试" }
+                check(reason.isEmpty() || reason == "null" || reason == "stop") { "服务未返回完整文字结果" }
+                val delta = choice.optJSONObject("delta")?.opt("content") as? String
+                if (delta != null) {
+                    check(output.length + delta.length <= 20000) { "AI 响应过大，请缩短原文" }
+                    output.append(delta)
+                    val now = System.nanoTime()
+                    if (now - lastUpdate >= 40_000_000L) {
+                        check(!canceled.get()) { "已停止生成" }
+                        onPartial(output.toString()); lastUpdate = now
+                    }
+                }
+                if (reason == "stop") finished = true
+            }
+            fun finishLine() {
+                val value = line.toString(); line.setLength(0)
+                if (value.isEmpty()) dispatch()
+                else if (value.startsWith("data:")) {
+                    if (event.isNotEmpty()) event.append('\n')
+                    event.append(value.substring(5).removePrefix(" "))
+                }
+            }
+            while (!finished) {
+                check(!canceled.get()) { "已停止生成" }
+                check(System.nanoTime() - started < 180_000_000_000L) { "生成超时，请重试" }
+                val ch = reader.read()
+                if (ch < 0) {
+                    if (line.isNotEmpty()) finishLine()
+                    dispatch()
+                    break
+                }
+                check(++total <= 1024 * 1024) { "AI 响应过大，请缩短原文" }
+                when (ch) {
+                    13 -> { finishLine(); previousCr = true }
+                    10 -> { if (!previousCr) finishLine(); previousCr = false }
+                    else -> { previousCr = false; line.append(ch.toChar()) }
+                }
+            }
+            check(!canceled.get()) { "已停止生成" }
+            check(finished) { "生成连接中断，请重新生成" }
+            return output.toString().trim()
         }
     }
 }

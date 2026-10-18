@@ -691,7 +691,10 @@ class RapidTypingTest : InstrumentationTestCase() {
             assertEquals("keys", field<String>("panel"))
             assertFalse(field<Boolean>("heldVoice"))
             up(7)
-            assertEquals("Below the cursor threshold, release remains an ordinary space", " ", editor.text.toString())
+        }
+        // Auto-spacing can commit asynchronously; do not assert before its worker completes.
+        waitFor("Below the cursor threshold, release remains an ordinary space", 5000) {
+            editor.text.toString() == " "
         }
     }
 

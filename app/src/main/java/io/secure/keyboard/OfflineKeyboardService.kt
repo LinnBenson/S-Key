@@ -2408,6 +2408,7 @@ class OfflineKeyboardService : InputMethodService() {
         var cursorDownX = 0f
         var cursorDownY = 0f
         var cursorSwiping = false
+        var movedCursorY = 0
         var movedCursor = 0
         var movedDelete = 0
         var long = false
@@ -2493,6 +2494,7 @@ class OfflineKeyboardService : InputMethodService() {
                     cursorDownX = e.rawX
                     cursorDownY = e.rawY
                     cursorSwiping = false
+                    movedCursorY = 0
                     movedCursor = 0
                     movedDelete = 0
                     long = false
@@ -2512,15 +2514,14 @@ class OfflineKeyboardService : InputMethodService() {
                     // Cancel voice eligibility on an early directional move, before the 18dp
                     // cursor step. Returning to center must never re-arm the hold timer.
                     if (isSpace && spaceHoldEligible &&
-                        abs(cursorDx) >= ViewConfiguration.get(this).scaledTouchSlop &&
-                        abs(cursorDx) > abs(cursorDy) * 1.2f) {
+                        maxOf(abs(cursorDx), abs(cursorDy)) >= ViewConfiguration.get(this).scaledTouchSlop) {
                         spaceHoldEligible = false
                         main.removeCallbacks(hold)
                     }
                     if (
                         isSpace &&
                             (cursorSwiping ||
-                                (abs(cursorDx) >= dp(18) && abs(cursorDx) > abs(cursorDy) * 1.2f))
+                                maxOf(abs(cursorDx), abs(cursorDy)) >= dp(18))
                     ) {
                         main.removeCallbacks(hold)
                         long = true
@@ -2530,9 +2531,15 @@ class OfflineKeyboardService : InputMethodService() {
                             renderHeader()
                         }
                         val steps = (cursorDx / dp(18)).toInt()
+                        val stepsY = (cursorDy / dp(18)).toInt()
                         val delta = steps - movedCursor
+                        val deltaY = stepsY - movedCursorY
                         repeat(abs(delta)) { moveCursor(if (delta < 0) -1 else 1) }
+                        if (!translation.enabled) repeat(abs(deltaY)) {
+                            arrow(if (deltaY < 0) KeyEvent.KEYCODE_DPAD_UP else KeyEvent.KEYCODE_DPAD_DOWN)
+                        }
                         movedCursor = steps
+                        movedCursorY = stepsY
                     } else if (delete && settings.swipeDelete) {
                         val count = ((downX - e.x) / dp(20)).toInt().coerceAtLeast(0)
                         if (count > movedDelete) {
