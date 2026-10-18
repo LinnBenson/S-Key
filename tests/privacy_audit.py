@@ -42,7 +42,9 @@ assert 'voiceTargetIsCurrent(request, editor, connection)' in service
 assert 'voiceGuard !== guard' in service and 'guard.reserve(' in service
 assert 'currentInputConnection === connection' in service and 'voiceSegments.clear()' in service
 assert 'segmentId <= lastSegmentId' in guard and 'selectionStart != expectedCursor' in guard
-preview = service.split('override fun onPreview(text: String, isFinal: Boolean)', 1)[1].split('override fun onSegment', 1)[0]
+# Scope the dictation callback; AI command preview is a separate listener.
+listener = service.split('private fun voiceListener()', 1)[1].split('private fun failVoice', 1)[0]
+preview = listener.split('override fun onPreview(text: String, isFinal: Boolean)', 1)[1].split('override fun onSegment', 1)[0]
 assert 'commit' not in preview and 'queueVoiceSegment' not in preview
 assert '确认插入' not in service and 'button("开始")' not in service
 print('PASS: manifest/privacy, keyboard-only preedit, no input logs/platform recognizer, endpoint-only deduplicated voice with editor/session/cursor guards')

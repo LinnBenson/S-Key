@@ -34,6 +34,8 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
     }
 
     interface Listener {
+        fun onLevel(level: Float) {}
+
         fun onState(state: State)
 
         fun onPreview(text: String, isFinal: Boolean)
@@ -212,6 +214,8 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                 val count = mic.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
                 if (count <= 0 && !recording) break
                 check(count > 0) { "麦克风读取失败" }
+                val level = VoiceLevel.measure(pcm, 0, count)
+                emit(id) { if (recording) listener.onLevel(level) }
                 samples += count
                 val chunk = FloatArray(count) { pcm[it] / 32768f }
                 floats = chunk

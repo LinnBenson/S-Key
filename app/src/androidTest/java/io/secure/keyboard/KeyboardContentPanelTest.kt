@@ -93,6 +93,17 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
         super.tearDown()
     }
 
+    private fun waitForInsertedText(expected: String) {
+        val deadline=android.os.SystemClock.uptimeMillis()+5000
+        while (android.os.SystemClock.uptimeMillis()<deadline) {
+            var complete=false
+            instrumentation.checkedMain { complete=editor.text.toString()==expected }
+            if (complete) return
+            android.os.SystemClock.sleep(20)
+        }
+        fail("Content insertion did not complete")
+    }
+
     fun testClipboardFullTextInsertionAndPinDeleteAreIndependentInKeyboard() {
         val longText = "完整剪贴板\n第二行\r\n👨‍👩‍👧‍👦𠀀".repeat(80)
         store.addClipboard(longText)
@@ -105,6 +116,9 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
         instrumentation.checkedMain {
             assertEquals(listOf("newer copy", longText), rows().map { it.textView.text.toString() })
             rows().last().textView.performClick()
+        }
+        waitForInsertedText(longText)
+        instrumentation.checkedMain {
             assertEquals(longText, editor.text.toString())
             rows().last().pinAction.performClick()
         }
@@ -149,6 +163,9 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
             assertEquals(longText, rows().first().textView.text.toString())
             assertEquals("取消置顶常用语", rows().first().pinAction.contentDescription)
             rows().first().textView.performClick()
+        }
+        waitForInsertedText(longText)
+        instrumentation.checkedMain {
             assertEquals(longText, editor.text.toString())
             rows().first().pinAction.performClick()
         }

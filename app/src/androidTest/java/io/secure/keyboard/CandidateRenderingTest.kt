@@ -159,6 +159,11 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 setField("aiMode",cycle%3==0)
                 setField("aiTask","custom")
                 setField("aiCustom",marker)
+                setField("aiFollowup",marker)
+                val constructor=Class.forName("io.secure.keyboard.OfflineKeyboardService\$AiVersion")
+                    .getDeclaredConstructor(String::class.java,String::class.java,String::class.java).apply { isAccessible=true }
+                val history=field<MutableList<Any>>("aiResults")
+                repeat(8) { history.add(constructor.newInstance(marker.repeat(100),marker.repeat(100),marker)) }
                 val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
                 session.enabled=cycle%3!=2
                 session.edit(marker)
@@ -167,10 +172,12 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 if(session.enabled) retired.add(java.lang.ref.WeakReference(field<View>("translationResultView")))
                 service.onFinishInputView(false)
                 session.close()
-                for(name in listOf("translationTextView","translationResultView","translationAction","translationInsert","aiInstructionView"))
+                for(name in listOf("translationTextView","translationResultView","translationAction","translationInsert","aiInstructionView","aiFollowupView","aiResultNavigation","aiCommandButton","aiCommandVoice"))
                     assertNull("Closed panel retains $name",field<Any?>(name))
                 assertEquals("",session.text); assertEquals("",session.result)
                 assertEquals("",field<String>("aiCustom"))
+                assertEquals("",field<String>("aiFollowup"))
+                assertTrue(field<List<*>>("aiResults").isEmpty())
                 setField("active",true)
             }
             instrumentation.waitForIdleSync()
@@ -275,7 +282,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             onMainChecked {
                 find(field<View>("body"), "选择自定义 AI")!!.performClick()
             }
-            waitFor("Named presets loaded") { field<android.widget.PopupWindow?>("popup")?.contentView?.let { find(it,"选择自定义 AI：简短回复") } != null }
+            waitFor("Named presets loaded") { field<android.widget.PopupWindow?>("popup")?.contentView?.let { find(it,"已选择自定义 AI：简短回复") } != null }
             instrumentation.waitForIdleSync()
             waitFor("Preset popup laid out") { field<android.widget.PopupWindow>("popup").contentView.width > 0 }
             onMainChecked {
@@ -295,7 +302,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                     if (v is ViewGroup) for (i in 0 until v.childCount) noDelete(v.getChildAt(i))
                 }
                 noDelete(view)
-                find(view, "选择自定义 AI：简短回复")!!.performClick()
+                find(view, "已选择自定义 AI：简短回复")!!.performClick()
                 assertEquals("缩短到两句话", field<String>("aiCustom"))
                 assertFalse(field<Boolean>("aiEditingInstruction"))
                 assertNull(field<android.widget.PopupWindow?>("popup"))
@@ -365,6 +372,64 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             invoke("openTool","ai")
             session.complete(token,"late result")
             assertFalse(session.enabled); assertEquals("",session.result)
+        }
+    }
+
+    fun testCancelAiRequestAlsoReleasesCommandVoice() {
+        onMainChecked {
+            invoke("openTool", "ai")
+            val voice=io.secure.keyboard.voice.AiVoiceSession(service,
+                io.secure.keyboard.data.ApiConfiguration(), object: io.secure.keyboard.voice.OfflineVoiceSession.Listener {
+                    override fun onState(state: io.secure.keyboard.voice.OfflineVoiceSession.State) {}
+                    override fun onPreview(text: String, isFinal: Boolean) {}
+                    override fun onError(message: String) {}
+                })
+            setField("aiCommandVoice",voice)
+            invoke("stopAiRequest")
+            assertNull(field<Any?>("aiCommandVoice"))
+            assertTrue(voice.javaClass.getDeclaredField("released").apply { isAccessible=true }.getBoolean(voice))
+        }
+    }
+
+    fun testAiHistorySwitchRestoresRegenerationContext() {
+        onMainChecked {
+            invoke("openTool", "ai")
+            val versions=field<MutableList<Any>>("aiResults")
+            val type=Class.forName("io.secure.keyboard.OfflineKeyboardService\$AiVersion")
+            val ctor=type.getDeclaredConstructor(String::class.java,String::class.java,String::class.java).apply { isAccessible=true }
+            versions.add(ctor.newInstance("one", "source one", "polish"))
+            versions.add(ctor.newInstance("two", "source two", "shorten"))
+            setField("aiResultIndex",1)
+            val select=OfflineKeyboardService::class.java.getDeclaredMethod("selectAiResult",Int::class.javaPrimitiveType).apply { isAccessible=true }
+            select.invoke(service,-1)
+            val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
+            assertEquals("one",session.result)
+            assertEquals("source one",field<String>("aiLastInput"))
+            assertEquals("polish",field<String>("aiLastInstruction"))
+            select.invoke(service,1)
+            assertEquals("two",session.result)
+            assertTrue(connection.committed.isEmpty())
+            invoke("openTool","ai")
+            assertTrue(versions.isEmpty())
+        }
+    }
+
+    fun testAiFollowupDraftPreservesResultAndClearsOnExit() {
+        onMainChecked {
+            invoke("openTool", "ai"); setField("chinese", false)
+            val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
+            session.edit("original")
+            session.complete(session.begin(), "existing result")
+            setField("aiEditingFollowup", true)
+            invoke("type", "short😀"); invoke("backspace")
+            assertEquals("short", field<String>("aiFollowup"))
+            assertEquals("existing result", session.result)
+            assertEquals("original", session.text)
+            assertTrue(connection.committed.isEmpty())
+            invoke("openTool", "ai")
+            assertEquals("", field<String>("aiFollowup"))
+            assertTrue(field<List<*>>("aiResults").isEmpty())
+            assertFalse(field<Boolean>("aiEditingFollowup"))
         }
     }
 
@@ -1524,6 +1589,33 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         } finally {
             settings.theme = originalTheme
         }
+    }
+
+    fun testAutomaticChineseSpacingAndContinuousMiddleWord() {
+        val host = attachActualHost()
+        val settings = SettingsStore(context)
+        val original = settings.autoChineseSpacing
+        try {
+            onMainChecked {
+                settings.autoChineseSpacing = true
+                host.editor.setText("中文")
+                host.editor.setSelection(1)
+                invoke("commitInputText", "a")
+            }
+            waitFor("Spaced middle insertion") { host.editor.text.toString() == "中 a 文" }
+            onMainChecked { invoke("commitInputText", "a") }
+            waitFor("Word stays contiguous") { host.editor.text.toString() == "中 aa 文" }
+            onMainChecked {
+                host.editor.setSelection(host.editor.length())
+                invoke("commitInputText", "123")
+            }
+            waitFor("Digits spaced") { host.editor.text.toString() == "中 aa 文 123" }
+            onMainChecked {
+                settings.autoChineseSpacing = false
+                invoke("commitInputText", "中")
+                assertEquals("中 aa 文 123中", host.editor.text.toString())
+            }
+        } finally { onMainChecked { settings.autoChineseSpacing = original; invoke("clearPending") } }
     }
 
     fun testActualEditorChineseAndWubiEnterCommitRawCodeWhileSpaceCommitsCandidate() {

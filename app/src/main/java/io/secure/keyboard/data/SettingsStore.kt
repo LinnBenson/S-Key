@@ -10,6 +10,22 @@ class SettingsStore(context: Context) {
     private val prefs =
         context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
+    var lastCustomAiPresetId: String?
+        get() = prefs.getString("lastCustomAiPresetId", null)
+        set(value) { prefs.edit().putString("lastCustomAiPresetId", value).apply() }
+
+    var aiAutoApply: Boolean
+        get() = prefs.getBoolean("aiAutoApply", false)
+        set(value) { prefs.edit().putBoolean("aiAutoApply", value).apply() }
+
+    var voiceAutoTranslate: Boolean
+        get() = prefs.getBoolean("voiceAutoTranslate", true)
+        set(value) { prefs.edit().putBoolean("voiceAutoTranslate", value).apply() }
+
+    var autoChineseSpacing: Boolean
+        get() = prefs.getBoolean("autoChineseSpacing", false)
+        set(value) { prefs.edit().putBoolean("autoChineseSpacing", value).apply() }
+
     var voiceMode: String
         get() = prefs.getString("voiceMode", "offline")?.takeIf { it == "ai" } ?: "offline"
         set(value) { prefs.edit().putString("voiceMode", if(value == "ai") "ai" else "offline").apply() }

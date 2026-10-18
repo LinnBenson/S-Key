@@ -28,9 +28,12 @@ class ToolIcon @JvmOverloads constructor(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         val artwork = drawable ?: return
-        val bounds = visibleBounds.getOrPut(resource) {
+        // Both Shift states use the locked artwork's bounds, so the arrow never
+        // changes scale or position when the underline appears.
+        val geometryResource = if (kind == "shift" || kind == "caps") KeyboardIcons.resource("caps") else resource
+        val bounds = visibleBounds.getOrPut(geometryResource) {
             // Measure once per resource; tint and theme changes never invalidate the geometry.
-            val sample = context.getDrawable(resource)!!.mutate()
+            val sample = context.getDrawable(geometryResource)!!.mutate()
             val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
             sample.setBounds(0, 0, 96, 96)
             sample.draw(Canvas(bitmap))

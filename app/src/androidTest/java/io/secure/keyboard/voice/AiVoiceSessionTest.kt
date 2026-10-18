@@ -36,6 +36,23 @@ class AiVoiceSessionTest : AndroidTestCase() {
         method.isAccessible=true
         return method.invoke(session,0L,ByteArray(3200),3200) as String
     }
+    fun testVoiceAutoTranslateDefaultsOnAndPersists() {
+        val name = "voice-auto-translate-fixture"
+        context.deleteSharedPreferences(name)
+        val isolated = object : android.content.ContextWrapper(context) {
+            override fun getApplicationContext(): android.content.Context = this
+            override fun getSharedPreferences(ignored: String, mode: Int) = context.getSharedPreferences(name, mode)
+        }
+        try {
+            val settings = SettingsStore(isolated)
+            assertTrue(settings.voiceAutoTranslate)
+            settings.voiceAutoTranslate = false
+            assertFalse(SettingsStore(isolated).voiceAutoTranslate)
+            settings.voiceAutoTranslate = true
+            assertTrue(SettingsStore(isolated).voiceAutoTranslate)
+        } finally { context.deleteSharedPreferences(name) }
+    }
+
     private fun output(session: AiVoiceSession, text: String): String =
         AiVoiceSession::class.java.getDeclaredMethod("prepareOutput", Long::class.javaPrimitiveType, String::class.java)
             .apply { isAccessible = true }.invoke(session, 0L, text) as String

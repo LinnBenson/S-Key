@@ -566,6 +566,7 @@ class ContentStore(context: Context) {
         synchronized(lock) {
             clipboardEpoch.incrementAndGet()
             aiPresetEpoch.incrementAndGet()
+            settings.lastCustomAiPresetId = null
             DictionaryKind.entries.forEach { advanceDictionaryEpoch(it) }
             invalidateDictionarySnapshots()
             suppressCurrentClipboard()

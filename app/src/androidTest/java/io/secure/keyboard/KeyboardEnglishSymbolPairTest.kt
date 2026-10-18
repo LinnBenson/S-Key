@@ -122,7 +122,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
             )
             for ((opener, closer) in pairs) {
                 for (host in hosts) {
-                    enterSymbols(secondary = opener == '{' || opener == '[')
+                    enterSymbols(secondary = true)
                     editor.setText(host.text)
                     editor.setSelection(host.start, host.end)
                     val before = host.text.substring(0, minOf(host.start, host.end))
@@ -148,8 +148,8 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     fun testChineseSymbolsEnglishParenthesesAndRightClosersStayLiteralOnSymbolPages() {
         instrumentation.runOnMainSync {
             val cases = listOf(
-                LiteralPage(chinese = true, secondary = false, symbols = "（）“”"),
-                LiteralPage(chinese = true, secondary = true, symbols = "「」‘’［］"),
+                LiteralPage(chinese = true, secondary = false, symbols = "（）"),
+                LiteralPage(chinese = true, secondary = true, symbols = "“”「」‘’［］"),
                 LiteralPage(chinese = false, secondary = false, symbols = "()"),
                 LiteralPage(chinese = false, secondary = true, symbols = "}]"),
             )

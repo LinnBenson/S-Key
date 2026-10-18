@@ -1,5 +1,5 @@
 {
-  "version": "1.0.13",
+  "version": "1.0.32",
   "contents": "Source, Gradle wrapper, static resources, notices and tests; no signing secrets, APK, voice models or AAR",
   "voice_dependency_setup": "python3 scripts/fetch_voice_dependency.py",
   "source_asset_setup": "python3 scripts/restore_source_assets.py"

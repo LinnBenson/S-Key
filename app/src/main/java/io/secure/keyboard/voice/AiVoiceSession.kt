@@ -74,7 +74,11 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
             while(current(id) && recording && count<pcm.size && SystemClock.elapsedRealtime()<deadline) {
                 val n=input.read(pcm,count,minOf(3200,pcm.size-count))
                 if(n<0) { if(!recording || !current(id)) break; error("录音中断，请重试") }
-                if(n>0) count+=n
+                if(n>0) {
+                    val level=VoiceLevel.measure(pcm,count,n)
+                    emit(id) { if(recording) listener.onLevel(level) }
+                    count+=n
+                }
             }
             gate.stop { recording=false; runCatching { input.stop() }; recorder=null }
             input.release(); mic=null

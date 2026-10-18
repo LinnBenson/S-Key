@@ -14,6 +14,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -123,6 +127,7 @@ open class SettingsActivity : ComponentActivity() {
                 route.startsWith("input_") -> "input"
                 route.startsWith("profile_") -> "layout"
                 route.startsWith("theme_") -> "behavior"
+                route == "custom_ai" -> "api"
                 route == "feedback" -> "keyboard"
                 route == "home" && initialPage == "dashboard" -> "dashboard"
                 route == "dashboard" || route == "home" || (route == "voice" && initialPage == "voice") -> { finish(); return }
@@ -197,21 +202,26 @@ open class SettingsActivity : ComponentActivity() {
                         if (route == "custom_ai") items(model.aiPresets, key = { it.id }) { preset ->
                             Card(Modifier.fillMaxWidth()) {
                                 val index = model.aiPresets.indexOfFirst { it.id == preset.id }
-                                BasicComponent(title = preset.name, summary = "${index + 1} / ${model.aiPresets.size}",
-                                    leftAction = { UiIcon("ai", null) }, rightActions = {
-                                        IconButton(enabled = !model.busy && index > 0, onClick = { model.task { model.content.moveAiPreset(preset.id, -1) } }) { UiIcon("arrow_up", "上移 ${preset.name}") }
-                                        IconButton(enabled = !model.busy && index < model.aiPresets.lastIndex, onClick = { model.task { model.content.moveAiPreset(preset.id, 1) } }) { UiIcon("arrow_down", "下移 ${preset.name}") }
-                                    })
-                                Text(preset.prompt, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = MiuixTheme.colorScheme.onSurface)
-                                Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TextButton(text = "编辑", enabled = !model.busy, modifier = Modifier.weight(1f), onClick = {
+                                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text(preset.name, modifier = Modifier.weight(1f), maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                        color = MiuixTheme.colorScheme.onSurface)
+                                    IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy && index > 0,
+                                        onClick = { model.task { model.content.moveAiPreset(preset.id, -1) } }) { UiIcon("arrow_up", "上移 ${preset.name}") }
+                                    IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy && index < model.aiPresets.lastIndex,
+                                        onClick = { model.task { model.content.moveAiPreset(preset.id, 1) } }) { UiIcon("arrow_down", "下移 ${preset.name}") }
+                                    IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy, onClick = {
                                         model.edit = ContentEdit("custom_ai", preset.id, TextFieldValue(preset.name), TextFieldValue(preset.prompt))
-                                    })
-                                    TextButton(text = "删除", enabled = !model.busy, modifier = Modifier.weight(1f), onClick = {
+                                    }) { UiIcon("edit", "编辑 ${preset.name}") }
+                                    IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy, onClick = {
                                         ask("删除自定义 AI「${preset.name}」？") { model.task { model.content.deleteAiPreset(preset.id) } }
-                                    })
+                                    }) { UiIcon("delete", "删除 ${preset.name}") }
                                 }
+                                Text(preset.prompt.replace('\n', ' ').replace('\r', ' '), maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, fontSize = 13.sp,
+                                    modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 16.dp),
+                                    color = MiuixTheme.colorScheme.onSurfaceSecondary)
                             }
                         }
                         if (route in listOf("dictionary", "english_dictionary")) {
@@ -241,8 +251,6 @@ open class SettingsActivity : ComponentActivity() {
     @Composable private fun Dashboard() {
         model.revision
         Group("S Key") {
-            Info("离线输入 · 自由定制", strong = true)
-            Info("原版 S Key 输入逻辑 · 26 键布局")
             Nav(if (enabledIme) "输入法已启用" else "启用输入法", "在 Android 设置中管理", "settings") {
                 launch { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
             }
@@ -250,7 +258,7 @@ open class SettingsActivity : ComponentActivity() {
                 getSystemService(InputMethodManager::class.java).showInputMethodPicker()
             }
             var trial by remember { mutableStateOf("") }
-            TextField(value = trial, onValueChange = { trial = it }, label = "在这里试打，不保存内容", modifier = Modifier.fillMaxWidth().padding(16.dp))
+            TextField(value = trial, onValueChange = { trial = it }, label = "试试您的 S Key 输入法 ...", modifier = Modifier.fillMaxWidth().padding(16.dp))
         }
         Spacer(Modifier.height(16.dp))
         Group("开始定制") {
@@ -271,14 +279,13 @@ open class SettingsActivity : ComponentActivity() {
         Group("本机内容") {
             Nav("剪贴板", "${model.clipboard.size} 条", "clipboard") { openPage("clipboard") }
             Nav("常用语", "${model.phrases.size} 条", "phrases") { openPage("phrases") }
-            Nav("自定义 AI", "${model.aiPresets.size} 个 · 提示词与排序", "ai") { openPage("custom_ai") }
             Nav("中文自定义词库", "${model.chinese.size} 条 · 手动短语", "dictionary") { openPage("dictionary") }
             Nav("英文自定义词库", "${model.english.size} 条", "english_dictionary") { openPage("english_dictionary") }
             Nav("最近表情", "${model.emoji.size} / 50", "emoji") { openPage("emoji") }
         }
         Spacer(Modifier.height(16.dp))
         Group("应用与隐私") {
-            Nav("接口 API 配置", "Google 翻译 · Grok · 模型选择", "input") { openPage("api") }
+            Nav("AI 设置", "Google 翻译 · Grok · 模型选择", "input") { openPage("api") }
             Nav("语音输入", "离线语音 / AI 语音", "voice") { openPage("voice") }
             Nav("Android 输入法设置", icon = "settings") { launch { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) } }
             Nav("内容清理", "保留主题与设置", "delete") { openPage("cleanup") }
@@ -294,6 +301,11 @@ open class SettingsActivity : ComponentActivity() {
                 visualTransformation = if (secret && !showKeys) androidx.compose.ui.text.input.PasswordVisualTransformation()
                     else androidx.compose.ui.text.input.VisualTransformation.None,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
+        }
+        Group("使用设置") {
+            Nav("自定义 AI", "${model.aiPresets.size} 个 · 提示词与排序", "ai") { openPage("custom_ai") }
+            Toggle("AI 生成后自动上屏", model.settings.aiAutoApply, "关闭时先预览；开启时自动插入或替换仍有效的选中文字") { model.settings.aiAutoApply = it }
+            Toggle("语音自动翻译", model.settings.voiceAutoTranslate, "英文键盘下将 AI 语音译为英文；关闭后直接上屏识别原文") { model.settings.voiceAutoTranslate = it }
         }
         Group("Google 翻译 API") {
             field("接口地址（完整翻译端点）", draft.googleUrl) { model.apiDraft = draft.copy(googleUrl = it) }
@@ -336,8 +348,8 @@ open class SettingsActivity : ComponentActivity() {
     @Composable private fun InputSettings() {
         model.revision
         val s = model.settings
-        Group("原版输入偏好") {
-            Info("沿用 S Key 原版混输引擎与26键布局。")
+        Group("中文输入偏好") {
+            Toggle("自动插入空格", s.autoChineseSpacing, "在中文与字母、数字之间插入空格，如：中 aa 文") { s.autoChineseSpacing = it }
             Toggle("五笔四码自动上屏", s.fourCodeAutoCommit) { s.fourCodeAutoCommit = it }
             Toggle("模糊拼音", s.fuzzyPinyin, "用于原版混输中的拼音候选") { s.fuzzyPinyin = it }
             if (s.fuzzyPinyin) SettingsStore.fuzzyPairIds.forEach { pair ->
@@ -351,7 +363,7 @@ open class SettingsActivity : ComponentActivity() {
     }
     @Composable private fun EnglishSettings() {
         model.revision
-        Group("英文补全") {
+        Group("英文输入偏好") {
             Toggle("英文当前词补全", model.settings.englishCompletion) { model.settings.englishCompletion = it }
         }
     }
@@ -568,6 +580,37 @@ open class SettingsActivity : ComponentActivity() {
         val customAi = edit.category == "custom_ai"
         val title = if (customAi) { if (edit.id == null) "添加自定义 AI" else "编辑自定义 AI" }
             else if (edit.id == null) "添加内容" else "编辑内容"
+        if (customAi) {
+            Modal(title, { if (!model.busy) model.edit = null }) {
+                Text("给常用指令取个名字，在键盘中一键使用", fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceSecondary)
+                Spacer(Modifier.height(8.dp))
+                AiEditorField("名称", "例如：邮件润色", edit.first, 40, false) {
+                    model.edit = edit.copy(first = it)
+                }
+                Spacer(Modifier.height(4.dp))
+                AiEditorField("提示词", "描述你希望 AI 如何处理原文…", edit.second, 1000, true) {
+                    model.edit = edit.copy(second = it)
+                }
+                Spacer(Modifier.height(8.dp))
+                val canSave = !model.busy && edit.first.text.isNotBlank() && edit.second.text.isNotBlank()
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    for (save in listOf(false, true)) {
+                        val enabled = if (save) canSave else !model.busy
+                        Box(Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(14.dp))
+                            .background(if (save) MiuixTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else .35f)
+                                else MiuixTheme.colorScheme.onSurface.copy(alpha = .06f))
+                            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) {
+                                if (save) model.saveEdit() else model.edit = null
+                            }, contentAlignment = Alignment.Center) {
+                            Text(if (save) "保存" else "取消", fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                                color = if (save) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+            }
+            return
+        }
         Modal(title, { if (!model.busy) model.edit = null }) {
             TextField(value = edit.first, onValueChange = { if (!customAi || it.text.length <= 40) model.edit = edit.copy(first = it) },
                 label = if (customAi) "名称，例如：邮件润色" else if (edit.category == "phrases") "常用语" else "词语",
@@ -578,6 +621,30 @@ open class SettingsActivity : ComponentActivity() {
             if (customAi) Info("${edit.first.text.length}/40 名称 · ${edit.second.text.length}/1000 提示词")
             Action("保存", !model.busy && (!customAi || (edit.first.text.isNotBlank() && edit.second.text.isNotBlank()))) { model.saveEdit() }
             Action("取消", !model.busy) { model.edit = null }
+        }
+    }
+    @Composable private fun AiEditorField(title: String, placeholder: String, value: TextFieldValue,
+        limit: Int, multiline: Boolean, change: (TextFieldValue) -> Unit) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = MiuixTheme.colorScheme.onSurface)
+                Text("${value.text.length}/$limit", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceSecondary)
+            }
+            BasicTextField(value = value, onValueChange = { if (it.text.length <= limit) change(it) },
+                enabled = !model.busy, singleLine = !multiline,
+                textStyle = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, color = MiuixTheme.colorScheme.onSurface),
+                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                modifier = Modifier.fillMaxWidth().semantics { contentDescription = title }
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MiuixTheme.colorScheme.onSurface.copy(alpha = .045f))
+                    .border(1.dp, MiuixTheme.colorScheme.onSurface.copy(alpha = .09f), RoundedCornerShape(14.dp))
+                    .padding(14.dp).heightIn(min = if (multiline) 136.dp else 24.dp, max = if (multiline) 200.dp else 48.dp),
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.TopStart) {
+                        if (value.text.isEmpty()) Text(placeholder, fontSize = 16.sp, color = MiuixTheme.colorScheme.onSurfaceSecondary)
+                        inner()
+                    }
+                })
         }
     }
     @Composable private fun VoiceSettings() {
@@ -591,7 +658,7 @@ open class SettingsActivity : ComponentActivity() {
         if(ai) {
             Group("AI 语音") {
                 Info("点击工具栏语音开始，点击“识别语音”后上传识别，成功上屏后清空预览并继续聆听，点击取消结束。也可长按空格说话、松手识别；长按模式不会自动继续。单次录音最多 60 秒。")
-                Nav("接口 API 配置", "配置语音端点、密钥与模型", "settings") { openPage("api") }
+                Nav("AI 设置", "配置语音端点、密钥与模型", "settings") { openPage("api") }
                 Action("允许麦克风权限", !microphone) { micPicker.launch(Manifest.permission.RECORD_AUDIO) }
             }
             return
@@ -703,7 +770,7 @@ open class SettingsActivity : ComponentActivity() {
         "emoji" -> "最近表情"
         "ai" -> "AI 助手"
         "translate" -> "翻译"
-        "api" -> "接口 API 配置"
+        "api" -> "AI 设置"
         "voice" -> "语音输入"
         "cleanup", "recovery" -> "内容清理"
         "licenses" -> "开源声明"
