@@ -104,6 +104,12 @@ class ContentStore(context: Context) {
             cause,
         )
 
+    /** Interrupted writes are never authoritative; leave the current content file untouched. */
+    fun cleanupTemporaryFiles() = synchronized(lock) {
+        val temporary = File(dir, "content.tmp")
+        if (temporary.exists()) deleteVerified(temporary)
+    }
+
     private fun read(): JSONObject {
         return try {
             if (!file.exists()) {
@@ -180,6 +186,8 @@ class ContentStore(context: Context) {
                 }
             }
         } catch (error: Exception) {
+            // A failed write must not leave a second copy of the user's saved content.
+            runCatching { cleanupTemporaryFiles() }
             invalidateDictionarySnapshots()
             throw error
         }

@@ -652,6 +652,58 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         } finally { onMainChecked { invoke("cancelAiCommandVoice"); settings.voiceMode = previousMode } }
     }
 
+    fun testAssistantToolsKeepDraftAndEditLocalSelectionWithoutHostWrites() {
+        onMainChecked {
+            fun find(view: View, name: String): View? {
+                if (view.contentDescription?.toString() == name || (view as? TextView)?.text?.toString() == name) return view
+                if (view is ViewGroup) for (i in 0 until view.childCount) find(view.getChildAt(i), name)?.let { return it }
+                return null
+            }
+            invoke("openTool", "quickedit")
+            find(field<View>("body"), "选择")!!.performClick()
+            assertTrue("Ordinary selection remains enabled after redraw", find(field<View>("body"), "选择")!!.isSelected)
+            invoke("openTool", "quickedit")
+            for (mode in listOf("translate", "ai")) {
+                invoke("openTool", mode)
+                val source = field<EditText>("translationTextView")
+                source.setText("ABCDE"); source.setSelection(1, 3)
+                for (tool in listOf("clipboard", "phrases", "emoji", "quickedit")) {
+                    invoke("openTool", tool)
+                    assertSame("Tools retain the real source editor", source, field<EditText>("translationTextView"))
+                    assertEquals(1, source.selectionStart); assertEquals(3, source.selectionEnd)
+                    assertTrue(source.isAttachedToWindow)
+                    invoke("openTool", tool)
+                    assertEquals("keys", field<String>("panel"))
+                    assertSame(source, field<EditText>("translationTextView"))
+                }
+                invoke("openTool", "clipboard")
+                OfflineKeyboardService::class.java.getDeclaredMethod("commitInputText", String::class.java)
+                    .apply { isAccessible = true }.invoke(service, "粘贴")
+                assertEquals("A粘贴DE", source.text.toString())
+                invoke("openTool", "quickedit")
+                source.setSelection(1)
+                source.measure(View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(200, View.MeasureSpec.EXACTLY))
+                source.layout(0, 0, 400, 200)
+                find(field<View>("body"), "选择")!!.performClick()
+                find(field<View>("body"), "向右移动")!!.performClick()
+                assertEquals(1, source.selectionStart); assertEquals(2, source.selectionEnd)
+                find(field<View>("body"), "全选")!!.performClick()
+                assertEquals(0, minOf(source.selectionStart, source.selectionEnd))
+                assertEquals(source.length(), maxOf(source.selectionStart, source.selectionEnd))
+                find(field<View>("header"), "返回键盘")!!.performClick()
+                assertEquals("keys", field<String>("panel"))
+                assertSame(source, field<EditText>("translationTextView"))
+                assertTrue("Inline tool actions never commit into host", connection.committed.isEmpty())
+                invoke("openTool", "quickedit")
+                invoke("clearAssistantSource")
+                assertEquals("", field<EditText>("translationTextView").text.toString())
+                assertNotSame("Clearing must refresh the preserved tool-mode source", source, field<EditText>("translationTextView"))
+                invoke("openTool", mode)
+            }
+        }
+    }
+
     fun testAssistantVoiceTranslationFollowsKeyboardAndSwitch() {
         val settings = SettingsStore(context)
         val oldMode = settings.voiceMode

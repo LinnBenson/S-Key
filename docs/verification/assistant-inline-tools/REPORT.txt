@@ -1,0 +1,7 @@
+2026-10-19 unpublished changes after 1.0.73
+
+Translation/AI preserve local source editor, selection and mode while opening clipboard, phrases, emoji and quick edit. Re-tap or Back returns to keys without ending assistant mode. Tool panels keep assistant height. Existing content/emoji insertion routes to local source. Quick edit context actions and balanced arrow/Shift events target the local editor; no external host text is queried or rewritten. Local InputConnection is cleared when source views are released.
+
+Selection button supports four-way 18dp-per-step swipes with selection on or off. Drag release never toggles. Cancel and extra pointer cancel the gesture. No retained timers or text buffers.
+
+Validation: debug build and 207 JVM tests passed; final 17 emulator tests passed including source identity/selection across all four tools, local insertion, selected right movement, select-all, Back, no host commits, ordinary quick edit state, prior AI voice regressions, selection gesture and native multi-line host tests. Privacy static audit passed. Debug installed preserving application data. Not published.

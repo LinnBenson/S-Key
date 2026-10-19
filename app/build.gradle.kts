@@ -8,8 +8,8 @@ android {
         applicationId = "io.secure.keyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 80
-        versionName = "1.0.73"
+        versionCode = 81
+        versionName = "1.0.74"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
     buildFeatures { compose = true }

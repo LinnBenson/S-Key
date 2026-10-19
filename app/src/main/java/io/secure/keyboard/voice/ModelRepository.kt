@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import java.io.File
 import java.security.MessageDigest
+import kotlin.concurrent.withLock
 
 /**
  * Imports only the audited Mandarin model. No archive parsing, network, or arbitrary native input.
@@ -28,10 +29,23 @@ class ModelRepository(private val context: Context) {
         verify(tokensFile, TOKENS_SIZE, TOKENS_SHA)
     }
 
+    /** Same lock as import: never delete the live staging directory. No user files are touched. */
+    fun cleanupInterruptedImports() {
+        // A slow document provider must not hold up keyboard initialization.
+        if (!IMPORT_LOCK.tryLock()) return
+        try {
+        context.noBackupFilesDir.listFiles()?.filter {
+            it.name.matches(Regex("mandarin-import-[0-9]+")) &&
+                !java.nio.file.Files.isSymbolicLink(it.toPath())
+        }?.forEach { check(it.deleteRecursively()) { "无法清理未完成的模型导入" } }
+        } finally { IMPORT_LOCK.unlock() }
+    }
+
     /** The user picks the extracted model folder with Android's Storage Access Framework. */
     fun importTree(tree: Uri) =
-        synchronized(IMPORT_LOCK) {
-            if (isInstalled() && runCatching { verifyInstalled() }.isSuccess) return@synchronized
+        IMPORT_LOCK.withLock {
+            cleanupInterruptedImports()
+            if (isInstalled() && runCatching { verifyInstalled() }.isSuccess) return@withLock
             val parent = DocumentsContract.getTreeDocumentId(tree)
             val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parent)
             val found = mutableMapOf<String, Uri>()
@@ -119,7 +133,7 @@ class ModelRepository(private val context: Context) {
     private fun ByteArray.hex() = joinToString("") { "%02x".format(it.toInt() and 255) }
 
     companion object {
-        private val IMPORT_LOCK = Any()
+        private val IMPORT_LOCK = java.util.concurrent.locks.ReentrantLock()
         const val MODEL_ID = "sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01"
         const val MODEL_SIZE = 26342340L
         const val TOKENS_SIZE = 13366L

@@ -220,6 +220,9 @@ class OfflineKeyboardService : InputMethodService() {
                         refreshCandidates()
                     }
                 }
+            else if (key == "toolbarPins") main.post {
+                if (active) { renderHeader(); if (panel == "more") renderBody() }
+            }
             else if (key == "fuzzyPairs" || key == "fuzzyPinyin" || key == "englishCompletion")
                 main.post { if (active) refreshCandidates() }
         }
@@ -261,6 +264,8 @@ class OfflineKeyboardService : InputMethodService() {
         getSharedPreferences("settings", MODE_PRIVATE)
             .registerOnSharedPreferenceChangeListener(preferenceListener)
         worker.execute {
+            runCatching { ModelRepository(this).cleanupInterruptedImports() }
+            runCatching { content.cleanupTemporaryFiles() }
             try {
                 engine.load()
                 if (destroyed) return@execute
@@ -724,8 +729,13 @@ class OfflineKeyboardService : InputMethodService() {
             toolbarGroup.addView(
                 icon(
                     if (panel == "keys" && !translation.enabled) "more" else "back",
-                    if (translation.enabled) "退出模式" else if (panel == "keys") "更多工具" else "返回键盘",
+                    if (translation.enabled && panel !in assistantTools) "退出模式" else if (panel == "keys") "更多工具" else "返回键盘",
                 ) {
+                    if (translation.enabled && panel in assistantTools) {
+                        cancelTransient(); clearComposition(); panel = "keys"
+                        renderHeader(); renderBody(true)
+                        return@icon
+                    }
                     if (translation.enabled) {
                         cancelTransient()
                         stopAiRequest()
@@ -767,15 +777,22 @@ class OfflineKeyboardService : InputMethodService() {
         }
     }
 
-    private fun renderBody() {
+    private val assistantTools = setOf("clipboard", "phrases", "emoji", "quickedit")
+
+    private fun renderBody() = renderBody(translation.enabled && panel in assistantTools)
+
+    private fun renderBody(preserveAssistant: Boolean) {
         if(assistantVoicePanel!=null) cancelAiCommandVoice()
-        releaseAssistantViews()
+        val keepAssistant = preserveAssistant && activeAssistantEditor()?.isAttachedToWindow == true
+        if (!keepAssistant) releaseAssistantViews()
         applyLiveLayout()
         letterKeyViews.clear()
         shiftKeyView = null
         body.removeAllViews()
-        assistantArea.removeAllViews()
-        if (translation.enabled && panel == "keys") renderTranslationBar(assistantArea)
+        if (!keepAssistant) {
+            assistantArea.removeAllViews()
+            if (translation.enabled && (panel == "keys" || panel in assistantTools)) renderTranslationBar(assistantArea)
+        }
         when (panel) {
             "keys" -> renderKeyboardBody()
             "more" -> renderMore()
@@ -1541,7 +1558,7 @@ class OfflineKeyboardService : InputMethodService() {
         if (aiMode) {
             stopAiRequest(); resetAiConversation(); clearAiConversation(); aiEditingInstruction=false; aiSelectionTarget.revoke()
         }
-        translation.edit(""); clearComposition(); renderBody(); refreshCandidates()
+        translation.edit(""); clearComposition(); renderBody(false); refreshCandidates()
     }
 
     private fun insertAssistantResult() {
@@ -1552,7 +1569,30 @@ class OfflineKeyboardService : InputMethodService() {
         }
     }
 
+    private var assistantEditConnection: android.view.inputmethod.InputConnection? = null
+
+    private fun quickEditConnection(): android.view.inputmethod.InputConnection? {
+        if (!translation.enabled) return currentInputConnection
+        val editor = activeAssistantEditor() ?: return null
+        return assistantEditConnection ?: object : android.view.inputmethod.BaseInputConnection(editor, true) {
+            override fun sendKeyEvent(event: KeyEvent): Boolean = when (event.action) {
+                KeyEvent.ACTION_DOWN -> editor.onKeyDown(event.keyCode, event)
+                KeyEvent.ACTION_UP -> editor.onKeyUp(event.keyCode, event)
+                else -> false
+            }
+        }.also { assistantEditConnection = it }
+    }
+
+    private fun quickEditAction(action: Int) {
+        if (translation.enabled) activeAssistantEditor()?.let { editor ->
+            editor.requestFocus()
+            editor.onTextContextMenuItem(action)
+        } else currentInputConnection?.performContextMenuAction(action)
+    }
+
     private fun releaseAssistantViews() {
+        if (assistantEditConnection != null) quickEditSelection.reset()
+        assistantEditConnection = null
         sourceCursor=(translationTextView as? EditText)?.selectionStart ?: sourceCursor
         syncingAssistantEditor=true
         aiCustomTab=null
@@ -1581,9 +1621,9 @@ class OfflineKeyboardService : InputMethodService() {
         aiTaskRunnable?.let { translationWorker.remove(it) }; aiTaskRunnable = null
     }
 
-    private fun bindSourcePaste(card: View, text: TextView) {
+    private fun bindSourcePaste(heading: View, title: View, text: TextView) {
         val listener = View.OnLongClickListener {
-            if (active && !secret && translation.enabled && translationTextView === text && text.isAttachedToWindow) {
+            if (active && !secret && translation.enabled && translationTextView === text && text.isAttachedToWindow && !translation.busy) {
                 val value = runCatching { clips.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text }.getOrNull()
                 if (value != null && pasteSourceText(value)) {
                     toast("已粘贴")
@@ -1592,7 +1632,9 @@ class OfflineKeyboardService : InputMethodService() {
             }
             true
         }
-        bindCardLongPress(card, listener)
+        heading.setOnLongClickListener(listener)
+        title.setOnLongClickListener(listener)
+        title.contentDescription = "长按粘贴剪贴板并生成结果"
     }
 
     private fun bindCardLongPress(view: View, listener: View.OnLongClickListener) {
@@ -1643,7 +1685,7 @@ class OfflineKeyboardService : InputMethodService() {
         stopAiRequest(); clearComposition()
         translation.edit(translation.text + value.subSequence(0, end))
         aiEditingInstruction = false
-        if (aiMode) renderBody() else updateTranslationPreview()
+        if (aiMode) renderBody(false) else updateTranslationPreview()
         refreshCandidates()
         return true
     }
@@ -1755,7 +1797,7 @@ class OfflineKeyboardService : InputMethodService() {
         io.secure.keyboard.ai.AiWriting.tasks.forEach { (id,name) ->
             tasks.addView(compact(if(id=="custom") aiCustomPresetName.ifBlank { name } else name,aiTask==id) {
                 stopAiRequest(); clearComposition(); if(aiTask!=id) resetAiConversation(); aiTask=id; aiEditingInstruction=false; translation.invalidate()
-                getSharedPreferences("settings",MODE_PRIVATE).edit().putString("aiTask",id).apply(); renderBody(); fillDefaultCustomAiPreset()
+                getSharedPreferences("settings",MODE_PRIVATE).edit().putString("aiTask",id).apply(); renderBody(false); fillDefaultCustomAiPreset()
             }.also { if(id=="custom") aiCustomTab=it },LinearLayout.LayoutParams(dp(58),-1,1f).apply { rightMargin=dp(5) })
         }
         val options=LinearLayout(this).apply {
@@ -1767,12 +1809,12 @@ class OfflineKeyboardService : InputMethodService() {
             PopupMenu(this,toneButton).apply {
                 if(aiTask=="translate") translationLanguages.filter { it.key!="auto" }.forEach { (id,name) ->
                     menu.add(name).setOnMenuItemClickListener {
-                        stopAiRequest(); if(translation.target!=id) resetAiConversation(); translation.target=id; settings.translationTarget=id; translation.invalidate(); renderBody(); true
+                        stopAiRequest(); if(translation.target!=id) resetAiConversation(); translation.target=id; settings.translationTarget=id; translation.invalidate(); renderBody(false); true
                     }
                 } else io.secure.keyboard.ai.AiWriting.tones.forEach { tone ->
                     menu.add(tone).setOnMenuItemClickListener {
                         stopAiRequest(); if(aiTone!=tone) resetAiConversation(); aiTone=tone; translation.invalidate()
-                        getSharedPreferences("settings",MODE_PRIVATE).edit().putString("aiTone",tone).apply(); renderBody(); true
+                        getSharedPreferences("settings",MODE_PRIVATE).edit().putString("aiTone",tone).apply(); renderBody(false); true
                     }
                 }
                 show()
@@ -1787,7 +1829,7 @@ class OfflineKeyboardService : InputMethodService() {
         aiInstructionView=null
         if(aiTask=="custom") {
             aiInstructionView=compact("",aiEditingInstruction) {
-                clearComposition(); aiEditingInstruction=!aiEditingInstruction; renderBody()
+                clearComposition(); aiEditingInstruction=!aiEditingInstruction; renderBody(false)
             }
             aiInstructionView?.contentDescription="自定义指令，点击后用键盘输入"
             val instructionRow = LinearLayout(this).apply { background = shape(keyBg, 10) }
@@ -1824,8 +1866,7 @@ class OfflineKeyboardService : InputMethodService() {
             else card.addView(ScrollView(this).apply { isFillViewport=true; isVerticalScrollBarEnabled=false; isHorizontalScrollBarEnabled=false; addView(text) },LinearLayout.LayoutParams(-1,0,1f))
             if(source) {
                 translationTextView=text
-                card.setOnLongClickListener { val value=clips.primaryClip?.getItemAt(0)?.text
-                    if(value!=null) { text.requestFocus(); commitInputText(value.toString()); toast("已粘贴") }; true }
+                bindSourcePaste(heading, titleView, text)
                 text.setOnTouchListener { _, event -> if(event.actionMasked==MotionEvent.ACTION_DOWN) {
                     if(aiEditingInstruction) { cancelAiCommandVoice(); clearComposition() }
                     aiEditingInstruction=false
@@ -1909,7 +1950,7 @@ class OfflineKeyboardService : InputMethodService() {
                                 aiCustomPresetName = preset.name
                                 settings.lastCustomAiPresetId = preset.id
                                 aiCustom = preset.prompt; aiEditingInstruction = false
-                                translation.invalidate(); renderBody()
+                                translation.invalidate(); renderBody(false)
                             }.apply {
                                 gravity = Gravity.CENTER
                                 background = shape(if (selected) accent else special, 10)
@@ -1932,7 +1973,7 @@ class OfflineKeyboardService : InputMethodService() {
         PopupMenu(this,anchor).apply {
             (listOf(aiModel)+aiModels).filter { it.isNotBlank() }.distinct().forEach { id ->
                 menu.add(id).setOnMenuItemClickListener {
-                    stopAiRequest(); if(aiModel!=id) resetAiConversation(); aiModel=id; translation.invalidate(); renderBody()
+                    stopAiRequest(); if(aiModel!=id) resetAiConversation(); aiModel=id; translation.invalidate(); renderBody(false)
                     worker.execute {
                         runCatching {
                             val store=io.secure.keyboard.data.ApiConfigurationStore(this@OfflineKeyboardService)
@@ -2325,8 +2366,7 @@ class OfflineKeyboardService : InputMethodService() {
             else card.addView(ScrollView(this).apply { isFillViewport=true; isVerticalScrollBarEnabled=false; isHorizontalScrollBarEnabled=false; addView(text) },LinearLayout.LayoutParams(-1,0,1f))
             if (source) {
                 translationTextView=text; text.contentDescription="翻译原文"
-                card.setOnLongClickListener { val value=clips.primaryClip?.getItemAt(0)?.text
-                    if(value!=null) { text.requestFocus(); commitInputText(value.toString()); toast("已粘贴") }; true }
+                bindSourcePaste(heading, titleView, text)
             } else { translationResultView=text; bindResultCopy(card, text) }
             return card
         }
@@ -2975,6 +3015,12 @@ class OfflineKeyboardService : InputMethodService() {
     private fun openTool(tool: String) {
         assistantBackspaceTapAt = 0L
         if(tool=="voice" && translation.enabled) { toggleAiCommandVoice(); return }
+        if (translation.enabled && tool in assistantTools) {
+            cancelTransient(); clearComposition()
+            panel = if (panel == tool) "keys" else tool
+            renderHeader(); renderBody(true)
+            return
+        }
         if (tool == "ai") {
             if (secret) { toast("密码输入框不支持 AI 助手"); return }
             val opening = !aiMode || !translation.enabled
@@ -3077,7 +3123,8 @@ class OfflineKeyboardService : InputMethodService() {
             }
         scroll.addView(grid)
         body.addView(scroll)
-        tools.forEach { (id, name) ->
+        val pinnedTools = settings.toolbarPins.toSet()
+        tools.filterKeys { it !in pinnedTools }.forEach { (id, name) ->
             val cell =
                 LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
@@ -3106,7 +3153,7 @@ class OfflineKeyboardService : InputMethodService() {
     }
 
     private fun renderQuickEdit() {
-        quickEditSelection.validate(currentInputConnection)
+        quickEditSelection.validate(quickEditConnection())
         val grid =
             LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -3116,18 +3163,18 @@ class OfflineKeyboardService : InputMethodService() {
         val labels = listOf("全选", "向上移动", "剪切", "向左移动", "选择", "向右移动", "复制", "向下移动", "粘贴")
         val actions =
             listOf<() -> Unit>(
-                { currentInputConnection?.performContextMenuAction(android.R.id.selectAll) },
+                { quickEditAction(android.R.id.selectAll) },
                 { quickEditArrow(KeyEvent.KEYCODE_DPAD_UP) },
-                { currentInputConnection?.performContextMenuAction(android.R.id.cut) },
+                { quickEditAction(android.R.id.cut) },
                 { quickEditArrow(KeyEvent.KEYCODE_DPAD_LEFT) },
                 {
-                    quickEditSelection.toggle(currentInputConnection)
+                    quickEditSelection.toggle(quickEditConnection())
                     renderBody()
                 },
                 { quickEditArrow(KeyEvent.KEYCODE_DPAD_RIGHT) },
-                { currentInputConnection?.performContextMenuAction(android.R.id.copy) },
+                { quickEditAction(android.R.id.copy) },
                 { quickEditArrow(KeyEvent.KEYCODE_DPAD_DOWN) },
-                { currentInputConnection?.performContextMenuAction(android.R.id.paste) },
+                { quickEditAction(android.R.id.paste) },
             )
         for (r in 0..2) {
             val row = LinearLayout(this)
@@ -3150,8 +3197,17 @@ class OfflineKeyboardService : InputMethodService() {
                             contentDescription = "选择"
                             if (Build.VERSION.SDK_INT >= 30)
                                 stateDescription = if (isSelected) "已开启，再点退出" else "已关闭"
-                            isEnabled = currentInputConnection != null
+                            isEnabled = quickEditConnection() != null
                             if (!isEnabled) alpha = .4f
+                            val feedback = pressFeedback()
+                            val swipe = io.secure.keyboard.ui.SelectionKeySwipe(dp(18).toFloat()) { direction ->
+                                if (isAttachedToWindow && panel == "quickedit") quickEditArrow(direction)
+                            }
+                            setOnClickListener { feedback.click(); actions[i]() }
+                            setOnTouchListener { view, event ->
+                                feedback.onTouch(event)
+                                swipe.onTouch(view, event)
+                            }
                         }
                     }
                     else
@@ -3170,7 +3226,7 @@ class OfflineKeyboardService : InputMethodService() {
 
     private fun quickEditArrow(key: Int) {
         val wasSelecting = quickEditSelection.enabled
-        quickEditSelection.move(currentInputConnection, key)
+        quickEditSelection.move(quickEditConnection(), key)
         if (wasSelecting != quickEditSelection.enabled) renderBody()
     }
 
@@ -3559,7 +3615,7 @@ class OfflineKeyboardService : InputMethodService() {
 
     /** A temporary panel allowance, never written to the user's layout profile. */
     private fun translationExtraHeightPx(): Int =
-        if (translation.enabled && panel == "keys")
+        if (translation.enabled && (panel == "keys" || panel in assistantTools))
             minOf(dp(if (aiMode) 198 else 138), (floatingScreenHeightPx() - baseKeyboardHeightPx()).coerceAtLeast(0))
         else 0
 

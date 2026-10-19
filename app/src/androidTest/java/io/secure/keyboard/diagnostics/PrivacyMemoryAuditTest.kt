@@ -24,6 +24,8 @@ class PrivacyMemoryAuditTest : InstrumentationTestCase() {
         try {
             fixture.open()
             val store = fixture.field<ContentStore>("content")
+            // Exclude the emulator’s existing OS clipboard from this synthetic count.
+            store.clearClipboard()
             repeat(12) {
                 store.addClipboard("audit-clipboard-$it")
                 store.addPhrase("audit-phrase-$it")
@@ -74,6 +76,38 @@ class PrivacyMemoryAuditTest : InstrumentationTestCase() {
         }
     }
 
+    fun testSixtyAssistantToolCyclesReleaseEditorsAndNeverPersistDraft() {
+        val fixture = LifetimeServiceFixture(instrumentation)
+        val probe = LifetimeMemoryProbe(instrumentation.targetContext, "assistant-tools-audit")
+        try {
+            fixture.open()
+            val open = fixture.service.javaClass.getDeclaredMethod("openTool", String::class.java).apply { isAccessible = true }
+            val commit = fixture.service.javaClass.getDeclaredMethod("commitInputText", String::class.java).apply { isAccessible = true }
+            repeat(60) { cycle ->
+                instrumentation.checkedMain {
+                    fixture.replaceHost()
+                    open.invoke(fixture.service, if (cycle % 2 == 0) "ai" else "translate")
+                    commit.invoke(fixture.service, "SKEY_PRIVATE_ASSISTANT_AUDIT_20261019")
+                    for (tool in listOf("clipboard", "phrases", "emoji", "quickedit")) open.invoke(fixture.service, tool)
+                    fixture.service.onFinishInputView(false)
+                    fixture.service.onFinishInput()
+                    assertNull(fixture.field<Any?>("translationTextView"))
+                    assertNull(fixture.field<Any?>("assistantEditConnection"))
+                    assertNull(fixture.field<Any?>("assistantVoicePanel"))
+                    assertTrue(fixture.field<List<*>>("aiResults").isEmpty())
+                }
+                fixture.drain(fixture.field<ExecutorService>("worker"))
+                if (cycle in listOf(0, 9, 29, 59)) {
+                    probe.cycle = cycle + 1
+                    probe.sample("finished_assistant_tool_cycle")
+                }
+            }
+            val sentinel = "SKEY_PRIVATE_ASSISTANT_AUDIT_20261019"
+            assertFalse(fixture.sandbox.root.walkTopDown().filter { it.isFile }.any { it.readText().contains(sentinel) })
+            assertFalse(fixture.sandbox.getSharedPreferences("settings", 0).all.values.any { it.toString().contains(sentinel) })
+        } finally { probe.stop(); fixture.close() }
+    }
+
     fun testTwelveNativeRecognizerSilenceCyclesWithoutMicrophone() {
         val context = instrumentation.targetContext
         val installed = io.secure.keyboard.voice.ModelRepository(context)
@@ -118,8 +152,23 @@ class PrivacyMemoryAuditTest : InstrumentationTestCase() {
     }
 
     /** Exports numeric diagnostic evidence only, never user text, snapshots or heap contents. */
+    fun testStorageMetadataOnly() {
+        val context = instrumentation.targetContext
+        val values = JSONObject()
+        for ((name, directory) in listOf("files" to context.filesDir, "cache" to context.cacheDir,
+            "noBackup" to context.noBackupFilesDir, "preferences" to File(context.applicationInfo.dataDir, "shared_prefs"))) {
+            val files = directory.walkTopDown().filter { it.isFile }.toList()
+            values.put(name + "Bytes", files.sumOf { it.length() })
+            values.put(name + "Files", files.size)
+        }
+        values.put("abandonedModelImports", context.noBackupFilesDir.listFiles()?.count {
+            it.name.matches(Regex("mandarin-import-[0-9]+")) } ?: 0)
+        values.put("contentTemporaryFile", File(context.noBackupFilesDir, "content/content.tmp").exists())
+        instrumentation.sendStatus(0, Bundle().apply { putString("storage_metadata", values.toString()) })
+    }
+
     fun testReportNumericDiagnostics() {
-        val names = listOf("privacy-panel-audit", "settings", "service-ownership", "dictionary", "native-silence-audit")
+        val names = listOf("privacy-panel-audit", "assistant-tools-audit", "settings", "service-ownership", "dictionary", "native-silence-audit")
         for (name in names) {
             val file = File(instrumentation.targetContext.filesDir, "lifetime-$name.jsonl")
             if (!file.isFile) continue
