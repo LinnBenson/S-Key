@@ -38,7 +38,8 @@ internal object AiWriting {
     private fun validResponseId(value: String) = value.matches(Regex("[A-Za-z0-9_-]{1,256}"))
 
     fun payload(model: String, text: String, instruction: String, custom: Boolean = false,
-                previousResponseId: String? = null): JSONObject {
+                previousResponseId: String? = null, reasoningEffort: String = "low"): JSONObject {
+        require(io.secure.keyboard.data.AiReasoning.valid(reasoningEffort)) { "推理强度无效" }
         require(model.isNotBlank()) { "请先选择 Grok 模型" }
         require(text.isNotBlank() && text.length <= 20000) { "请输入 1–20000 字符的输入内容" }
         require(previousResponseId == null || validResponseId(previousResponseId)) { "会话标识无效，请重新生成" }
@@ -51,6 +52,7 @@ internal object AiWriting {
         }
         input.put(JSONObject().put("role","user").put("content",text))
         return JSONObject().put("model",model).put("stream",true).put("store",true)
+            .put("reasoning", JSONObject().put("effort", reasoningEffort))
             .put("input",input)
             .apply { if (previousResponseId != null) put("previous_response_id",previousResponseId) }
     }
@@ -69,11 +71,11 @@ internal object AiWriting {
             val current = connection
             if (current != null) Thread({ runCatching { current.disconnect() } }, "ai-request-cancel").apply { isDaemon=true }.start()
         }
-        fun execute(config: ApiConfiguration, text: String, instruction: String, onPartial: (String) -> Unit = {}, custom: Boolean = false, previousResponseId: String? = null): String {
+        fun execute(config: ApiConfiguration, text: String, instruction: String, onPartial: (String) -> Unit = {}, custom: Boolean = false, previousResponseId: String? = null, reasoningEffort: String = "low"): String {
             val c = config.validated()
             require(c.grokKey.isNotBlank()) { "请先在接口 API 配置中保存 Grok 密钥" }
             check(!canceled.get()) { "已停止生成" }
-            val bytes = payload(c.grokModel, text, instruction, custom, previousResponseId).toString().toByteArray(Charsets.UTF_8)
+            val bytes = payload(c.grokModel, text, instruction, custom, previousResponseId, reasoningEffort).toString().toByteArray(Charsets.UTF_8)
             val conn = connect(URL(c.grokUrl + "/responses"))
             connection = conn
             try {
@@ -121,7 +123,6 @@ internal object AiWriting {
             val event = StringBuilder()
             var total = 0
             var finished = false
-            var lastUpdate = 0L
             val started = System.nanoTime()
             var previousCr = false
             fun dispatch() {
@@ -139,11 +140,10 @@ internal object AiWriting {
                         val delta = json.opt("delta") as? String ?: error("流式响应格式错误，请检查接口")
                         check(output.length + delta.length <= 20000) { "AI 响应过大，请缩短原文" }
                         output.append(delta)
-                        val now = System.nanoTime()
-                        if (now - lastUpdate >= 40_000_000L) {
-                            check(!canceled.get()) { "已停止生成" }
-                            onPartial(output.toString()); lastUpdate = now
-                        }
+                        check(!canceled.get()) { "已停止生成" }
+                        // UI delivery coalesces updates on a timer, including the final delta
+                        // while the network waits for another event or response.completed.
+                        onPartial(output.toString())
                     }
                     "response.completed" -> {
                         val response = json.optJSONObject("response") ?: error("响应缺少完成信息")

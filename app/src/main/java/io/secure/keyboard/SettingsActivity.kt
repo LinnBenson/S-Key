@@ -219,7 +219,7 @@ open class SettingsActivity : ComponentActivity() {
                                     IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy && index < model.aiPresets.lastIndex,
                                         onClick = { model.task { model.content.moveAiPreset(preset.id, 1) } }) { UiIcon("arrow_down", "下移 ${preset.name}") }
                                     IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy, onClick = {
-                                        model.edit = ContentEdit("custom_ai", preset.id, TextFieldValue(preset.name), TextFieldValue(preset.prompt))
+                                        model.edit = ContentEdit("custom_ai", preset.id, TextFieldValue(preset.name), TextFieldValue(preset.prompt), preset.reasoningEffort)
                                     }) { UiIcon("edit", "编辑 ${preset.name}") }
                                     IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy, onClick = {
                                         ask("删除自定义 AI「${preset.name}」？") { model.task { model.content.deleteAiPreset(preset.id) } }
@@ -317,8 +317,8 @@ open class SettingsActivity : ComponentActivity() {
         }
         Group("使用设置") {
             Nav("自定义 AI", "${model.aiPresets.size} 个 · 提示词与排序", "ai") { openPage("custom_ai") }
-            Toggle("AI 生成后自动上屏", model.settings.aiAutoApply, "关闭时先预览；开启时自动插入或替换仍有效的选中文字") { model.settings.aiAutoApply = it }
-            Toggle("语音自动翻译", model.settings.voiceAutoTranslate, "英文键盘下将 AI 语音译为英文；关闭后直接上屏识别原文") { model.settings.voiceAutoTranslate = it }
+            Toggle("AI 生成后自动上屏", model.settings.aiAutoApply, "关闭时先预览；开启时自动插入或替换仍有效的选中文字", icon = "enter") { model.settings.aiAutoApply = it }
+            Toggle("语音自动翻译", model.settings.voiceAutoTranslate, "英文键盘下将 AI 语音译为英文；关闭后直接上屏识别原文", icon = "translate") { model.settings.voiceAutoTranslate = it }
         }
         Group("Google 翻译 API") {
             field("接口地址（完整翻译端点）", draft.googleUrl) { model.apiDraft = draft.copy(googleUrl = it) }
@@ -594,6 +594,22 @@ open class SettingsActivity : ComponentActivity() {
                     model.edit = edit.copy(second = it)
                 }
                 Spacer(Modifier.height(8.dp))
+                Text("推理强度", fontSize = 14.sp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    io.secure.keyboard.data.AiReasoning.options.forEach { (value, label) ->
+                        val selected = edit.reasoningEffort == value
+                        Box(Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(10.dp))
+                            .background(if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface.copy(alpha = .06f))
+                            .clickable(enabled = !model.busy, role = androidx.compose.ui.semantics.Role.RadioButton) {
+                                model.edit = edit.copy(reasoningEffort = value)
+                            }, contentAlignment = Alignment.Center) {
+                            Text(label, color = if (selected) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+                Text("强度越高通常等待越久；可用档位取决于所选模型。", fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceSecondary)
+                Spacer(Modifier.height(8.dp))
                 val canSave = !model.busy && edit.first.text.isNotBlank() && edit.second.text.isNotBlank()
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     for (save in listOf(false, true)) {
@@ -713,8 +729,10 @@ open class SettingsActivity : ComponentActivity() {
         BasicComponent(title = title, summary = summary, leftAction = { Box(Modifier.padding(end = 16.dp)) { UiIcon(icon, null) } },
             rightActions = { UiIcon("forward", null) }, onClick = action)
     }
-    @Composable private fun Toggle(title: String, checked: Boolean, summary: String? = null, change: (Boolean) -> Unit) {
-        BasicComponent(title = title, summary = summary, onClick = { change(!checked) },
+    @Composable private fun Toggle(title: String, checked: Boolean, summary: String? = null, icon: String? = null, change: (Boolean) -> Unit) {
+        BasicComponent(title = title, summary = summary,
+            leftAction = { if (icon != null) Box(Modifier.padding(end = 16.dp)) { UiIcon(icon, null) } },
+            onClick = { change(!checked) },
             rightActions = { Switch(checked = checked, onCheckedChange = change) })
     }
     @Composable private fun Choice(title: String, checked: Boolean, action: () -> Unit) {

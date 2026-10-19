@@ -65,9 +65,22 @@ class CustomAiSettingsTest : InstrumentationTestCase() {
             assertEquals(2, store.aiPresets().size)
             screenshot("custom-ai-management.png")
             val first = store.aiPresets().first()
-            instrumentation.checkedMain { model.edit = ContentEdit("custom_ai", first.id, TextFieldValue("正式邮件"), TextFieldValue("改为正式语气")); model.saveEdit() }
+            instrumentation.checkedMain { model.edit = ContentEdit("custom_ai", first.id, TextFieldValue("正式邮件"), TextFieldValue("改为正式语气"), "high") }
+            screenshot("custom-ai-reasoning-editor.png")
+            instrumentation.checkedMain { model.saveEdit() }
             await { !model.busy && model.edit == null }
             assertEquals("改为正式语气", store.aiPresets().first().prompt)
+            assertEquals("high", ContentStore(isolated).aiPresets().first().reasoningEffort)
+            val backup = java.io.ByteArrayOutputStream().also { store.writeBackup(it) }.toByteArray()
+            store.restoreBackup(backup.inputStream())
+            assertEquals("high", store.aiPresets().first().reasoningEffort)
+            val legacy = org.json.JSONObject(String(backup, Charsets.UTF_8))
+            val rows = legacy.getJSONObject("data").getJSONArray("aiPresets")
+            for (i in 0 until rows.length()) rows.getJSONObject(i).remove("reasoningEffort")
+            store.restoreBackup(legacy.toString().byteInputStream())
+            assertTrue(store.aiPresets().all { it.reasoningEffort == "low" })
+            try { store.saveAiPreset(first.id, first.name, first.prompt, "invalid"); fail("Invalid effort") }
+            catch (_: IllegalArgumentException) { }
             instrumentation.checkedMain { model.task { store.moveAiPreset(first.id, 1) } }
             await { !model.busy }
             assertEquals("正式邮件", model.aiPresets.last().name)

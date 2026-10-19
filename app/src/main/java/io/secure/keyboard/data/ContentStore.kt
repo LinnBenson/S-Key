@@ -18,7 +18,7 @@ import org.json.JSONObject
 class ContentStore(context: Context) {
     data class ClipboardItem(val id: String, val text: String, val pinned: Boolean = false)
 
-    data class AiPreset(val id: String, val name: String, val prompt: String)
+    data class AiPreset(val id: String, val name: String, val prompt: String, val reasoningEffort: String = "low")
 
     data class Phrase(val id: String, val text: String, val pinned: Boolean = false)
 
@@ -543,7 +543,9 @@ class ContentStore(context: Context) {
                         val name = string("name"); val prompt = string("prompt")
                         require(name.isNotBlank() && name.length <= 40 && prompt.isNotBlank() && prompt.length <= 2000)
                         require(names.add(name.lowercase(java.util.Locale.ROOT)))
-                        item.put("name", name).put("prompt", prompt)
+                        val effort = if (row.has("reasoningEffort")) string("reasoningEffort") else "low"
+                        require(AiReasoning.valid(effort))
+                        item.put("name", name).put("prompt", prompt).put("reasoningEffort", effort)
                         characters += name.length.toLong() + prompt.length
                     }
                     else -> {
@@ -574,25 +576,26 @@ class ContentStore(context: Context) {
     fun customAiEpoch(): Long = aiPresetEpoch.get()
 
     fun aiPresets(): List<AiPreset> = objects("aiPresets").map {
-        AiPreset(it.getString("id"), it.getString("name"), it.getString("prompt"))
+        AiPreset(it.getString("id"), it.getString("name"), it.getString("prompt"), it.optString("reasoningEffort", "low").takeIf(AiReasoning::valid) ?: "low")
     }
 
-    fun saveAiPreset(id: String?, name: String, prompt: String) = mutate("aiPresets") { rows ->
+    fun saveAiPreset(id: String?, name: String, prompt: String, reasoningEffort: String = "low") = mutate("aiPresets") { rows ->
         val title = name.trim(); val instruction = prompt.trim()
+        require(AiReasoning.valid(reasoningEffort)) { "请选择有效推理强度" }
         require(title.isNotBlank() && title.length <= 40) { "名称需为 1–40 个字符" }
         require(instruction.isNotBlank() && instruction.length <= 2000) { "提示词需为 1–2000 个字符" }
         require(rows.none { it.getString("id") != id && it.getString("name").equals(title, ignoreCase = true) }) { "已有同名自定义 AI，请换个名称" }
         if (id == null) {
             require(rows.size < 100) { "最多保存 100 个自定义 AI" }
-            rows.add(JSONObject().put("id", UUID.randomUUID().toString()).put("name", title).put("prompt", instruction))
+            rows.add(JSONObject().put("id", UUID.randomUUID().toString()).put("name", title).put("prompt", instruction).put("reasoningEffort", reasoningEffort))
         } else {
             val row = rows.find { it.getString("id") == id }
             require(row != null) { "此自定义 AI 已删除，请重新添加" }
-            if(row.getString("prompt")!=instruction) {
+            if(row.getString("prompt")!=instruction || row.optString("reasoningEffort", "low")!=reasoningEffort) {
                 val store=AiConversationStore(app)
                 if(store.load()?.type=="custom:$id") store.clear()
             }
-            row.put("name", title).put("prompt", instruction)
+            row.put("name", title).put("prompt", instruction).put("reasoningEffort", reasoningEffort)
         }
     }
 

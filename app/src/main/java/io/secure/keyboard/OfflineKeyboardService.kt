@@ -106,9 +106,16 @@ class OfflineKeyboardService : InputMethodService() {
     private val translation = io.secure.keyboard.translation.TranslationSession { stopTranslationRequest() }
     private var translationCall: io.secure.keyboard.translation.GoogleTranslation.Call? = null
     private var translationTask: Runnable? = null
-    private val translationWorker = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L,
-        java.util.concurrent.TimeUnit.MILLISECONDS, java.util.concurrent.ArrayBlockingQueue<Runnable>(1),
-        java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy())
+    // Independent bounded lanes: canceled socket teardown cannot block the next request.
+    private val translationWorker = requestExecutor(2)
+    private val aiWorker = requestExecutor(2)
+    private val modelCatalogWorker = requestExecutor(1)
+
+    private fun requestExecutor(threads: Int) = java.util.concurrent.ThreadPoolExecutor(
+        threads, threads, 15L, java.util.concurrent.TimeUnit.SECONDS,
+        java.util.concurrent.ArrayBlockingQueue<Runnable>(1),
+        java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy()
+    ).apply { allowCoreThreadTimeOut(true) }
     private var translationTextView: TextView? = null
     private var translationResultView: TextView? = null
     private var translationAction: TextView? = null
@@ -126,6 +133,7 @@ class OfflineKeyboardService : InputMethodService() {
     private var aiTask = "polish"
     private var aiTone = "自然"
     private var aiCustom = ""
+    private var aiCustomReasoning = "low"
     private var aiCustomPresetId: String? = null
     private var aiCustomPresetName = ""
     private var aiCustomTab: TextView? = null
@@ -387,6 +395,8 @@ class OfflineKeyboardService : InputMethodService() {
         stopAiRequest()
         translation.close()
         translationWorker.shutdownNow()
+        aiWorker.shutdownNow()
+        modelCatalogWorker.shutdownNow()
         destroyed = true
         active = false
         clipboardWrites.close()
@@ -742,7 +752,7 @@ class OfflineKeyboardService : InputMethodService() {
                         clearComposition()
                         if (aiMode) resetAiConversation()
                         clearAiConversation(); aiMode = false
-                        aiCustom = ""
+                        aiCustom = ""; aiCustomReasoning = "low"
                         aiCustomPresetName = ""
                         aiEditingInstruction = false
                         aiSelectionTarget.revoke()
@@ -856,7 +866,7 @@ class OfflineKeyboardService : InputMethodService() {
         contentQueries.clear()
         val releasePanel = panel != "keys" || translation.enabled
         stopAiRequest()
-        clearAiConversation(); aiMode = false; aiCustom = ""; aiCustomPresetName = ""; aiEditingInstruction = false; aiSelectionTarget.revoke()
+        clearAiConversation(); aiMode = false; aiCustom = ""; aiCustomReasoning = "low"; aiCustomPresetName = ""; aiEditingInstruction = false; aiSelectionTarget.revoke()
         translation.close()
         releaseAssistantViews()
         if (::assistantArea.isInitialized) assistantArea.removeAllViews()
@@ -1618,7 +1628,7 @@ class OfflineKeyboardService : InputMethodService() {
         aiPreviewDelivery?.close(); aiPreviewDelivery = null
         cancelAiCommandVoice()
         aiCall?.cancel(); aiCall = null
-        aiTaskRunnable?.let { translationWorker.remove(it) }; aiTaskRunnable = null
+        aiTaskRunnable?.let { aiWorker.remove(it) }; aiTaskRunnable = null
     }
 
     private fun bindSourcePaste(heading: View, title: View, text: TextView) {
@@ -1897,6 +1907,7 @@ class OfflineKeyboardService : InputMethodService() {
                 aiCustomPresetName = first.name
                 settings.lastCustomAiPresetId = first.id
                 aiCustom = first.prompt
+                aiCustomReasoning = first.reasoningEffort
                 restoreAiConversation()
                 translation.invalidate()
                 updateAiPreview()
@@ -1945,11 +1956,11 @@ class OfflineKeyboardService : InputMethodService() {
                             row.addView(button(preset.name) {
                                 window.dismiss()
                                 stopAiRequest(); clearComposition()
-                                if(aiCustomPresetId!=preset.id || aiCustom!=preset.prompt) resetAiConversation()
+                                if(aiCustomPresetId!=preset.id || aiCustom!=preset.prompt || aiCustomReasoning!=preset.reasoningEffort) resetAiConversation()
                                 aiCustomPresetId = preset.id
                                 aiCustomPresetName = preset.name
                                 settings.lastCustomAiPresetId = preset.id
-                                aiCustom = preset.prompt; aiEditingInstruction = false
+                                aiCustom = preset.prompt; aiCustomReasoning = preset.reasoningEffort; aiEditingInstruction = false
                                 translation.invalidate(); renderBody(false)
                             }.apply {
                                 gravity = Gravity.CENTER
@@ -1986,7 +1997,7 @@ class OfflineKeyboardService : InputMethodService() {
             menu.add("获取可用模型").setOnMenuItemClickListener {
                 val editor=voiceEditorGeneration
                 toast("正在获取模型…")
-                translationWorker.execute {
+                modelCatalogWorker.execute {
                     val result=runCatching {
                         io.secure.keyboard.data.GrokModelCatalog.fetch(io.secure.keyboard.data.ApiConfigurationStore(this@OfflineKeyboardService).load())
                     }
@@ -2011,7 +2022,7 @@ class OfflineKeyboardService : InputMethodService() {
     private fun aiScope(config: io.secure.keyboard.data.ApiConfiguration): String =
         io.secure.keyboard.ai.AiConversation.scope(io.secure.keyboard.ai.AiWriting.contextKey(config),
             aiType(),
-            io.secure.keyboard.ai.AiWriting.instruction(aiTask,aiTone,translationLanguages[translation.target] ?: "英语",aiCustom))
+            io.secure.keyboard.ai.AiWriting.instruction(aiTask,aiTone,translationLanguages[translation.target] ?: "英语",aiCustom) + "\u0000reasoning:" + if(aiTask=="custom") aiCustomReasoning else "low")
 
     private fun resetAiConversation() {
         aiConversation=null
@@ -2047,6 +2058,7 @@ class OfflineKeyboardService : InputMethodService() {
         val parent=aiConversation
         val previousResponseId=parent?.id
         val customRequest=aiTask=="custom"
+        val reasoningEffort=if(customRequest) aiCustomReasoning else "low"
         val autoApplySelectionEpoch=aiSelectionEpoch
         val draftEpoch=aiDraftEpoch
         val text=translation.text
@@ -2054,7 +2066,7 @@ class OfflineKeyboardService : InputMethodService() {
         val token=translation.begin(); val editor=voiceEditorGeneration
         val connection=currentInputConnection
         stopAiRequest(); val call=aiCallFactory(); aiCall=call; updateAiPreview()
-        val preview = io.secure.keyboard.ai.LatestPreview({ main.post(it) }, { main.removeCallbacks(it) }) { partial ->
+        val preview = io.secure.keyboard.ai.LatestPreview({ main.postDelayed(it, 40L) }, { main.removeCallbacks(it) }) { partial ->
             if (!destroyed && active && aiMode && !secret && editor==voiceEditorGeneration &&
                 connection===currentInputConnection && aiCall===call) {
                 translation.partial(token, partial); updateAiPreview()
@@ -2064,7 +2076,7 @@ class OfflineKeyboardService : InputMethodService() {
         val task = Runnable {
             var failed=false
             var expired=false
-            val result=try { call.execute(config,text,if(previousResponseId==null) instruction else "", preview::offer, custom = customRequest, previousResponseId = previousResponseId) }
+            val result=try { call.execute(config,text,if(previousResponseId==null) instruction else "", preview::offer, custom = customRequest, previousResponseId = previousResponseId, reasoningEffort = reasoningEffort) }
                 catch(_:io.secure.keyboard.ai.AiWriting.ConversationExpired) { failed=true; expired=true; "会话已失效，请再次发送以开始新对话" }
                 catch(e:IllegalArgumentException) { failed=true; e.message ?: "配置错误" }
                 catch(e:IllegalStateException) { failed=true; e.message ?: "生成失败" }
@@ -2105,7 +2117,7 @@ class OfflineKeyboardService : InputMethodService() {
             }
         }
         aiTaskRunnable = task
-        translationWorker.execute(task)
+        aiWorker.execute(task)
     }
 
     /** UI history is ephemeral; the encrypted continuation survives ordinary exits. */
@@ -3025,7 +3037,7 @@ class OfflineKeyboardService : InputMethodService() {
             if (secret) { toast("密码输入框不支持 AI 助手"); return }
             val opening = !aiMode || !translation.enabled
             cancelTransient(); clearComposition(); stopAiRequest(); translation.close(); aiSelectionTarget.revoke()
-            clearAiConversation(); aiMode = opening; aiEditingInstruction = false; aiCustom = ""
+            clearAiConversation(); aiMode = opening; aiEditingInstruction = false; aiCustom = ""; aiCustomReasoning = "low"
             aiCustomPresetName = ""
             if (opening) {
                 translation.enabled = true

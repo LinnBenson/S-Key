@@ -33,6 +33,15 @@ class AiWritingTest : AndroidTestCase() {
         assertEquals("result", AiWriting.Call().readStream(input.reader()))
         assertEquals("result", AiWriting.Call().readStream(("data: " + complete("result")).reader()))
     }
+    fun testEveryDeltaReachesPreviewBeforeCompletion() {
+        val partials = mutableListOf<String>()
+        val input = "data: ${delta("A")}\n\ndata: ${delta("B")}\n\n"
+        // A paused/incomplete stream must already have offered the trailing delta.
+        try { AiWriting.Call().readStream(input.reader()) { partials.add(it) }; fail("Incomplete") }
+        catch (_: IllegalStateException) { }
+        assertEquals(listOf("A", "AB"), partials)
+    }
+
     fun testStreamTruncationAndUnsupportedFinishFailClosed() {
         for (input in listOf("data: ${delta("partial")}\n\n",
             "data: ${delta("partial")}\n\ndata: [DONE]\n\n",
@@ -70,6 +79,7 @@ class AiWritingTest : AndroidTestCase() {
     fun testPayloadAndInstructions() {
         val body=AiWriting.payload("chosen-model","original text",AiWriting.instruction("tone","礼貌","英语",""))
         assertEquals("chosen-model",body.getString("model"))
+        assertEquals("low", body.getJSONObject("reasoning").getString("effort"))
         assertTrue(body.getBoolean("stream")); assertTrue(body.getBoolean("store"))
         assertFalse(body.has("previous_response_id")); assertFalse(body.has("messages"))
         assertTrue(body.getJSONArray("input").getJSONObject(0).getString("content").contains("礼貌"))
@@ -85,6 +95,17 @@ class AiWritingTest : AndroidTestCase() {
         assertFalse(followup.toString().contains("my exact prompt"))
         assertEquals(AiWriting.instruction("translate","粗鲁","英语",""),AiWriting.instruction("translate","礼貌","英语",""))
     }
+    fun testCustomReasoningAppliesToInitialAndContinuationWithoutSharedPrompt() {
+        for (effort in listOf("low", "medium", "high", "xhigh")) {
+            for (parent in listOf(null, "resp_parent")) {
+                val payload = AiWriting.payload("model", "source", "exact custom", true, parent, effort)
+                assertEquals(effort, payload.getJSONObject("reasoning").getString("effort"))
+                assertEquals(if(parent == null) 2 else 1, payload.getJSONArray("input").length())
+                if(parent == null) assertEquals("exact custom", payload.getJSONArray("input").getJSONObject(0).getString("content"))
+            }
+        }
+    }
+
     fun testFollowupContainsOnlyNewRequirementAndChosenResponseId() {
         val body=AiWriting.payload("model","再短一点","写邮件",previousResponseId="resp_selected")
         assertEquals("resp_selected",body.getString("previous_response_id"))

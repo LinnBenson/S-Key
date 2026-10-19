@@ -47,7 +47,7 @@ internal object ContentBackupReader {
             val key = reader.nextName(); require(key in keys && seen.add(key))
             val rows = JSONArray(); val maxRows = if (key == "aiPresets") 100 else 10_000
             val allowed = when (key) {
-                "aiPresets" -> setOf("id", "name", "prompt")
+                "aiPresets" -> setOf("id", "name", "prompt", "reasoningEffort")
                 "phrases" -> setOf("id", "text", "pinned")
                 else -> setOf("id", "word", "reading")
             }
@@ -63,11 +63,11 @@ internal object ContentBackupReader {
                     } else {
                         require(reader.peek() == JsonToken.STRING)
                         val value = reader.nextString()
-                        val max = when (field) { "id" -> 128; "name" -> 40; "prompt" -> 2000; "text" -> 1_000_000; else -> 4_000_000 }
+                        val max = when (field) { "id" -> 128; "name" -> 40; "prompt" -> 2000; "reasoningEffort" -> 6; "text" -> 1_000_000; else -> 4_000_000 }
                         require(value.length <= max); row.put(field, value)
                     }
                 }
-                reader.endObject(); require(fields.containsAll(allowed - "pinned")); rows.put(row)
+                reader.endObject(); require(fields.containsAll(allowed - setOf("pinned", "reasoningEffort"))); rows.put(row)
             }
             reader.endArray(); result.put(key, rows)
         }

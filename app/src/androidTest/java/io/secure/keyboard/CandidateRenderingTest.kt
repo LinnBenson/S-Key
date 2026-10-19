@@ -236,14 +236,14 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     fun testClosingAssistantRemovesQueuedSensitiveRequests() {
-        val executor = field<java.util.concurrent.ThreadPoolExecutor>("translationWorker")
-        val started = java.util.concurrent.CountDownLatch(1)
-        val release = java.util.concurrent.CountDownLatch(1)
-        executor.execute { started.countDown(); release.await(5, java.util.concurrent.TimeUnit.SECONDS) }
-        assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS))
-        try {
-            onMainChecked {
-                for (tool in listOf("ai", "translate")) {
+        for (tool in listOf("ai", "translate")) {
+            val executor = field<java.util.concurrent.ThreadPoolExecutor>(if(tool == "ai") "aiWorker" else "translationWorker")
+            val started = CountDownLatch(2)
+            val release = CountDownLatch(1)
+            repeat(2) { executor.execute { started.countDown(); try { release.await(5, TimeUnit.SECONDS) } catch (_: InterruptedException) { Thread.currentThread().interrupt() } } }
+            assertTrue(started.await(2, TimeUnit.SECONDS))
+            try {
+                onMainChecked {
                     invoke("openTool", tool)
                     val task = Runnable { throw AssertionError("Closed request must never run") }
                     setField(if (tool == "ai") "aiTaskRunnable" else "translationTask", task)
@@ -251,6 +251,27 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                     field<ViewGroup>("toolbarGroup").getChildAt(0).performClick()
                     assertTrue("Closed draft retained in worker queue", executor.queue.isEmpty())
                 }
+            } finally { release.countDown() }
+        }
+    }
+
+    fun testNewAiRequestDoesNotWaitForOldSocketOrOtherTools() {
+        val release = CountDownLatch(1)
+        val started = CountDownLatch(3)
+        try {
+            for (name in listOf("aiWorker", "translationWorker", "modelCatalogWorker")) {
+                field<java.util.concurrent.ThreadPoolExecutor>(name).execute {
+                    started.countDown(); try { release.await(5, TimeUnit.SECONDS) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+                }
+            }
+            assertTrue(started.await(2, TimeUnit.SECONDS))
+            val next = CountDownLatch(1)
+            field<java.util.concurrent.ThreadPoolExecutor>("aiWorker").execute { next.countDown() }
+            assertTrue("Latest AI request waited behind unrelated/old request", next.await(2, TimeUnit.SECONDS))
+            for (name in listOf("aiWorker", "translationWorker", "modelCatalogWorker")) {
+                val executor = field<java.util.concurrent.ThreadPoolExecutor>(name)
+                assertTrue(executor.maximumPoolSize <= 2)
+                assertTrue(executor.allowsCoreThreadTimeOut())
             }
         } finally { release.countDown() }
     }
