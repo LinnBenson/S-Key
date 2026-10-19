@@ -61,9 +61,10 @@ class AiVoiceSessionTest : AndroidTestCase() {
         val conn = Connection().apply { response = """{"data":{"translations":[{"translatedText":"Hello"}]}}""" }
         val session = AiVoiceSession(context, ApiConfiguration(voiceKey="synthetic-key", googleKey="synthetic-google"), listener, true) { conn }
         try {
-            assertEquals("Hello", output(session, "你好"))
+            assertEquals("Hello", output(session, "這是語音輸入"))
             val body = conn.sent.toString("UTF-8")
             assertTrue(body.contains("\"target\":\"en\""))
+            assertEquals("这是语音输入", org.json.JSONObject(body).getString("q"))
             assertFalse(body.contains("\"source\""))
             assertTrue(conn.disconnected)
         } finally { session.release() }
@@ -72,6 +73,16 @@ class AiVoiceSessionTest : AndroidTestCase() {
     fun testChineseOutputDoesNotTranslate() {
         val session = AiVoiceSession(context, ApiConfiguration(), listener) { error("Unexpected network") }
         try { assertEquals("你好", output(session, "你好")) } finally { session.release() }
+    }
+
+    fun testTraditionalChineseNormalizesLocallyWithoutTranslation() {
+        val session = AiVoiceSession(context, ApiConfiguration(), listener) { error("Unexpected network") }
+        try {
+            assertEquals("这是语音输入，软件与后台。Hello 123 😀", output(session, "這是語音輸入，軟件與後臺。Hello 123 😀"))
+            assertEquals("头发干燥", output(session, "頭髮乾燥"))
+            assertEquals("Hello, English 123! 😀", output(session, "Hello, English 123! 😀"))
+            assertEquals("这是简体中文", output(session, "这是简体中文"))
+        } finally { session.release() }
     }
 
     fun testCanceledEnglishOutputDoesNotStartTranslation() {

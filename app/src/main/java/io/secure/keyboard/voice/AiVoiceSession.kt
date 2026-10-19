@@ -100,12 +100,14 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
     }
     private fun prepareOutput(id: Long, transcript: String): String {
         check(current(id)) { "已取消" }
-        if (!translateToEnglish) return transcript
+        val normalized = VoiceChineseNormalizer.simplify(context, transcript)
+        check(current(id)) { "已取消" }
+        if (!translateToEnglish) return normalized
         val call = io.secure.keyboard.translation.GoogleTranslation.Call(connect)
         translationCall = call
         try {
             check(current(id)) { "已取消" }
-            val result = call.execute(config, transcript, "auto", "en")
+            val result = call.execute(config, normalized, "auto", "en")
             check(current(id)) { "已取消" }
             return result
         } finally { translationCall = null }
