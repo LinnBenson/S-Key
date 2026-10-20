@@ -33,27 +33,42 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
     @Volatile private var recorder: AudioRecord? = null
     @Volatile private var connection: HttpsURLConnection? = null
     @Volatile private var translationCall: io.secure.keyboard.translation.GoogleTranslation.Call? = null
+    private val levels = LatestVoiceLevel({ main.postDelayed(it, 50L) }, { main.removeCallbacks(it) }) { id, level ->
+        if (current(id) && recording) listener.onLevel(level)
+    }
     private var busy = false
     private var timer: Runnable? = null
     fun begin() {
         if(released || busy) return
+        if (!captureSlots.tryAcquire()) {
+            listener.onError("先前的语音请求仍在结束，请稍后重试")
+            return
+        }
         busy = true; recording = true
         val id = generation.incrementAndGet()
         listener.onState(OfflineVoiceSession.State.LOADING)
-        worker.execute { capture(id) }
+        try {
+            worker.execute { try { capture(id) } finally { captureSlots.release() } }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            captureSlots.release(); busy=false; recording=false
+            if (current(id)) listener.onError("语音任务未启动，请重试")
+        }
     }
     fun stop() {
+        levels.clear()
         gate.stop { recording = false; runCatching { recorder?.stop() } }
         timer?.let(main::removeCallbacks); timer=null
     }
     fun cancel() {
         generation.incrementAndGet(); stop(); translationCall?.cancel()
-        connection?.let { c -> Thread({ runCatching { c.disconnect() } }, "voice-disconnect").apply { isDaemon=true }.start() }
+        val canceledConnection = connection; connection = null
+        canceledConnection?.let { c -> Thread({ runCatching { c.disconnect() } }, "voice-disconnect").apply { isDaemon=true }.start() }
     }
-    fun release() { if(released) return; cancel(); released=true; worker.shutdown() }
+    fun release() { if(released) return; cancel(); released=true; levels.close(); worker.shutdown() }
     private fun current(id:Long) = !released && generation.get()==id
     private fun emit(id:Long, action:()->Unit) { main.post { if(current(id)) action() } }
     private fun capture(id:Long) {
+        if (!current(id)) { main.post { busy=false }; return }
         val pcm = ByteArray(16000*2*60)
         var count=0
         var mic:AudioRecord?=null
@@ -73,12 +88,16 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
                 if(recording) timer=Runnable { if(current(id)) stop() }.also { main.postDelayed(it,60000) }
             }
             val deadline=SystemClock.elapsedRealtime()+60000
+            val progress = AudioReadProgress(SystemClock.elapsedRealtime())
             while(current(id) && recording && count<pcm.size && SystemClock.elapsedRealtime()<deadline) {
-                val n=input.read(pcm,count,minOf(3200,pcm.size-count))
+                val n=input.read(pcm,count,minOf(3200,pcm.size-count),AudioRecord.READ_NON_BLOCKING)
                 if(n<0) { if(!recording || !current(id)) break; error("录音中断，请重试") }
+                if (!current(id) || (n == 0 && !recording)) break
+                check(progress.accept(n, SystemClock.elapsedRealtime())) { "麦克风未返回录音数据，请关闭语音后重试" }
+                if (n == 0) { Thread.sleep(10); continue }
                 if(n>0) {
                     val level=VoiceLevel.measure(pcm,count,n)
-                    emit(id) { if(recording) listener.onLevel(level) }
+                    levels.offer(id, level)
                     count+=n
                 }
             }
@@ -158,6 +177,8 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         } finally { connection=null;conn.disconnect() }
     }
     companion object {
+        // A canceled socket may outlive its UI. Bound all sessions together, not each instance.
+        private val captureSlots = java.util.concurrent.Semaphore(2)
         internal fun wavHeader(bytes:Int):ByteArray {
             require(bytes in 0..1920000 && bytes%2==0)
             return ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {

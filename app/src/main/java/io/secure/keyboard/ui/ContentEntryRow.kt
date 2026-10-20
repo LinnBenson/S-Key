@@ -26,14 +26,17 @@ class ContentEntryRow(
     onInsert: (String) -> Unit,
     onPin: (Boolean) -> Unit,
     onDelete: () -> Unit,
+    onOpenLink: (() -> Unit)? = null,
     private val feedback: () -> KeyboardPressFeedback = { KeyboardPressFeedback() },
 ) : LinearLayout(context) {
     private var fullText = text
     private var insertAction = onInsert
     private var pinCallback = onPin
     private var deleteCallback = onDelete
+    private var openLinkCallback = onOpenLink
     private var isPinned = pinned
     val textView: TextView
+    val openLinkAction: View
     val pinAction: View
     val deleteAction: View
 
@@ -70,6 +73,12 @@ class ContentEntryRow(
             setOnClickListener { press.click(); insertAction(fullText) }
         }
         addView(textView, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
+        openLinkAction = ActionTarget(context, "open_link", "在浏览器中打开链接", actionColor).apply {
+            visibility = if (openLinkCallback != null) View.VISIBLE else View.GONE
+            val press = installFeedback(this)
+            setOnClickListener { press.click(); openLinkCallback?.invoke() }
+        }
+        addView(openLinkAction, LayoutParams(dp(48), dp(48)))
         pinAction = ActionTarget(
             context,
             if (pinned) "unpin" else "pin",
@@ -90,7 +99,9 @@ class ContentEntryRow(
 
     /** List recycling replaces callbacks as well as labels; no former entry stays captured. */
     fun bind(text: String, pinned: Boolean, onInsert: (String) -> Unit,
-             onPin: (Boolean) -> Unit, onDelete: () -> Unit) {
+             onPin: (Boolean) -> Unit, onDelete: () -> Unit, onOpenLink: (() -> Unit)? = null) {
+        openLinkCallback = onOpenLink
+        openLinkAction.visibility = if (onOpenLink != null) View.VISIBLE else View.GONE
         fullText = text
         textView.text = text
         insertAction = onInsert

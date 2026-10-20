@@ -18,6 +18,7 @@ object KeyboardIcons {
         "clear" -> R.drawable.ic_miuix_close
         "show" -> R.drawable.ic_miuix_show
         "edit" -> R.drawable.ic_miuix_edit
+        "open_link" -> R.drawable.ic_keyboard_link
         "pin" -> R.drawable.ic_miuix_pin
         "unpin" -> R.drawable.ic_miuix_unpin
         "delete" -> R.drawable.ic_miuix_delete

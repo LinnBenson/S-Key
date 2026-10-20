@@ -39,3 +39,5 @@ No networking, learning, input-history recording, or new runtime storage is adde
 
 This local-source notice does not relicense the baseline or upstream supplements.
 The original upstream licensing notices and private-testing restriction remain.
+
+2026-10-20: User explicitly requested 携程 rwtk as an additional full-code priority entry. The maintained source now contains 12 rows.

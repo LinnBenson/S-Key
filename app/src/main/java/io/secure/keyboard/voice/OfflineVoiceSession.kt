@@ -56,6 +56,9 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
     @Volatile private var released = false
     @Volatile private var activeRecorder: AudioRecord? = null
     // Main-thread-only, bounded restart request while the prior worker releases its native state.
+    private val levels = LatestVoiceLevel({ main.postDelayed(it, 50L) }, { main.removeCallbacks(it) }) { id, level ->
+        if (!released && generation.get() == id && recording) listener.onLevel(level)
+    }
     private var pendingBegin = false
     private var limitStop: Runnable? = null
 
@@ -90,6 +93,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
     }
 
     fun stop() {
+        levels.clear()
         // A held gesture can be released while begin() waits for an older canceled worker.
         // That queued begin belongs to the lifted finger and must never start afterward.
         val stoppedPendingBegin = pendingBegin
@@ -121,6 +125,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
         if (released) return
         cancel()
         released = true
+        levels.close()
         worker.shutdown() // Running worker always releases native stream, recorder and recognizer.
     }
 
@@ -206,16 +211,20 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                     }
                 }
             }
+            val progress = AudioReadProgress(SystemClock.elapsedRealtime())
             var samples = 0
             var previous = ""
             var segmentId = 0L
             while (recording && generation.get() == id && samples < 16000 * 60 &&
                 SystemClock.elapsedRealtime() < deadline) {
-                val count = mic.read(pcm, 0, pcm.size, AudioRecord.READ_BLOCKING)
+                val count = mic.read(pcm, 0, pcm.size, AudioRecord.READ_NON_BLOCKING)
                 if (count <= 0 && !recording) break
-                check(count > 0) { "麦克风读取失败" }
+                check(count >= 0) { "麦克风读取失败" }
+                if (generation.get() != id) return
+                check(progress.accept(count, SystemClock.elapsedRealtime())) { "麦克风未返回录音数据，请关闭语音后重试" }
+                if (count == 0) { Thread.sleep(10); continue }
                 val level = VoiceLevel.measure(pcm, 0, count)
-                emit(id) { if (recording) listener.onLevel(level) }
+                levels.offer(id, level)
                 samples += count
                 val chunk = FloatArray(count) { pcm[it] / 32768f }
                 floats = chunk
@@ -238,6 +247,9 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                     previous = ""
                     emit(id) { listener.onPreview("", false) }
                 }
+                // Native decoding time is not a microphone stall. Preserve final positive reads
+                // after stop(), then let the existing final flush finish the utterance.
+                progress.accept(count, SystemClock.elapsedRealtime())
             }
             microphoneGate.stop {
                 recording = false

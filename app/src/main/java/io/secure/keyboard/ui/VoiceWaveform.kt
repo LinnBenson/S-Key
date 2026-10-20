@@ -9,12 +9,19 @@ import android.view.View
 class VoiceWaveform(context: Context, color: Int) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
     private val levels = FloatArray(17)
+    private val expireLevel = Runnable { reset() }
     fun setLevel(level: Float) {
+        removeCallbacks(expireLevel)
+        postDelayed(expireLevel, 500)
         for (i in 0 until levels.lastIndex) levels[i] = levels[i + 1]
         levels[levels.lastIndex] = level.coerceIn(0f, 1f)
         invalidate()
     }
-    fun reset() { levels.fill(0f); invalidate() }
+    fun reset() { removeCallbacks(expireLevel); levels.fill(0f); invalidate() }
+    override fun onDetachedFromWindow() {
+        reset()
+        super.onDetachedFromWindow()
+    }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val density = resources.displayMetrics.density

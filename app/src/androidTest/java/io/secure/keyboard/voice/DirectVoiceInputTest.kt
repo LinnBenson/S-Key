@@ -288,7 +288,8 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
                 assertEquals(Gravity.CENTER, preview.gravity)
                 assertEquals(View.TEXT_ALIGNMENT_CENTER, preview.textAlignment)
                 assertTrue(scroll.isFillViewport)
-                assertEquals(scroll.height, preview.height)
+                assertTrue("Preview fills the viewport and can grow to scroll multiline text",
+                    preview.height >= scroll.height)
                 val textLayout = requireNotNull(preview.layout)
                 for (line in 0 until textLayout.lineCount) {
                     assertTrue("Every preview line stays horizontally centered",
@@ -315,11 +316,11 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
                     image.recycle()
                 }
             }
-            assertEquals("...", preview.text.toString())
+            assertEquals("", preview.text.toString())
             listener.onState(OfflineVoiceSession.State.LISTENING)
             listener.onPreview("", false)
             layoutPreview()
-            assertEquals("...", preview.text.toString())
+            assertEquals("", preview.text.toString())
             assertEquals("正在聆听", status.text.toString())
             savePreviewRender("voice-centered-placeholder-render.png")
             val recognized = "第一行识别文字\n第二行\n最后一行"

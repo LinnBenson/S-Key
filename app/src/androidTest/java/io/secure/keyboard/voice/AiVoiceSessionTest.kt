@@ -147,6 +147,51 @@ class AiVoiceSessionTest : AndroidTestCase() {
             assertFalse(context.getSharedPreferences("api_configuration",0).all.toString().contains("synthetic-voice-secret"))
         } finally { settings.voiceMode=oldMode;store.save(old) }
     }
+    fun testRapidRestartCannotAccumulateBlockedCaptureWorkers() {
+        val release = java.util.concurrent.CountDownLatch(1)
+        val entered = java.util.concurrent.CountDownLatch(2)
+        val sessions = (0..1).map { AiVoiceSession(context, ApiConfiguration(), listener) }
+        val workers = sessions.map { session ->
+            AiVoiceSession::class.java.getDeclaredField("worker").apply { isAccessible=true }
+                .get(session) as java.util.concurrent.ExecutorService
+        }
+        var rejected = 0
+        val probeListener = object : OfflineVoiceSession.Listener {
+            override fun onState(state: OfflineVoiceSession.State) { fail("No extra session may start") }
+            override fun onPreview(text: String, isFinal: Boolean) {}
+            override fun onError(message: String) { rejected++ }
+        }
+        fun onMain(action: () -> Unit) {
+            val done = java.util.concurrent.CountDownLatch(1)
+            val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try { action() } catch (t: Throwable) { failure.set(t) } finally { done.countDown() }
+            }
+            assertTrue(done.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            failure.get()?.let { throw it }
+        }
+        try {
+            workers.forEach { worker -> worker.execute { entered.countDown(); release.await(10, java.util.concurrent.TimeUnit.SECONDS) } }
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            onMain {
+                sessions.forEach { it.begin() }
+                repeat(100) {
+                    val probe = AiVoiceSession(context, ApiConfiguration(), probeListener)
+                    try { probe.begin() } finally { probe.release() }
+                }
+                assertEquals(100, rejected)
+                sessions.forEach { it.release() }
+            }
+        } finally {
+            onMain { sessions.forEach { it.release() } }
+            release.countDown()
+            workers.forEach { assertTrue(it.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)) }
+        }
+        val slots = AiVoiceSession::class.java.getDeclaredField("captureSlots").apply { isAccessible=true }
+            .get(null) as java.util.concurrent.Semaphore
+        assertEquals("Canceled queued work returns both slots", 2, slots.availablePermits())
+    }
+
     fun testWavHeaderHasBoundedPcmLayout() {
         val data=AiVoiceSession.wavHeader(3200)
         val b=java.nio.ByteBuffer.wrap(data).order(java.nio.ByteOrder.LITTLE_ENDIAN)

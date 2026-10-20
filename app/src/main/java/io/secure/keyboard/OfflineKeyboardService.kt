@@ -3323,11 +3323,26 @@ class OfflineKeyboardService : InputMethodService() {
                 if (isClipboard) content.clipboardForDisplay()
                 else content.phrasesForDisplay().map { ContentStore.ClipboardItem(it.id, it.text, it.pinned) }
             }
+            val webLinks = if (isClipboard) entries.associate {
+                it.id to io.secure.keyboard.data.ClipboardWebLink.parse(it.text)
+            } else emptyMap()
             main.post {
                 if (!current()) return@post
                 column.removeAllViews()
+                if (!isClipboard) {
+                    column.addView(button("＋ 添加常用语") {
+                        if (current()) startActivity(
+                            Intent(this, SettingsActivity::class.java)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                .putExtra("page", "phrases")
+                                .putExtra("add_phrase", true)
+                        )
+                    }, LinearLayout.LayoutParams(-1, dp(48)).apply {
+                        setMargins(dp(10), dp(4), dp(10), dp(8))
+                    })
+                }
                 if (entries.isEmpty()) {
-                    column.addView(label(if (isClipboard) "复制的文字会保存在这里" else "在设置中添加常用语", 14f, muted))
+                    if (isClipboard) column.addView(label("复制的文字会保存在这里", 14f, muted))
                     return@post
                 }
                 var changing = false
@@ -3356,6 +3371,24 @@ class OfflineKeyboardService : InputMethodService() {
                     override fun getItemId(position: Int) = position.toLong()
                     override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                         val entry = entries[position]
+                        val webLink = webLinks[entry.id]
+                        val openLink: (() -> Unit)? = webLink?.let { url -> {
+                            if (current() && !changing) {
+                                try {
+                                    val browse = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                        .addCategory(Intent.CATEGORY_BROWSABLE)
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    val browser = packageManager.resolveActivity(
+                                        Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://example.com"))
+                                            .addCategory(Intent.CATEGORY_BROWSABLE),
+                                        android.content.pm.PackageManager.MATCH_DEFAULT_ONLY,
+                                    )?.takeIf { it.match > 0 }?.activityInfo?.packageName
+                                    if (browser != null && browser != "android") browse.setPackage(browser)
+                                    startActivity(browse)
+                                } catch (_: ActivityNotFoundException) { toast("未找到可用的浏览器") }
+                                catch (_: SecurityException) { toast("无法打开浏览器") }
+                            }
+                        } }
                         val insert: (String) -> Unit = { if (current() && !changing) { commit(it) } }
                         val pin: (Boolean) -> Unit = { pinned -> changeContent {
                             if (isClipboard) content.setClipboardPinned(entry.id, pinned)
@@ -3366,14 +3399,14 @@ class OfflineKeyboardService : InputMethodService() {
                             else content.deletePhrase(entry.id)
                         } }
                         return (convertView as? ContentEntryRow)?.apply {
-                            bind(entry.text, entry.pinned, insert, pin, delete)
+                            bind(entry.text, entry.pinned, insert, pin, delete, openLink)
                         } ?: ContentEntryRow(
                             this@OfflineKeyboardService, entry.text, entry.pinned,
                             textColor = fg, surfaceColor = keyBg, actionColor = toolbarColor,
                             pinnedColor = accent,
                             deleteColor = if (dark) 0xFFFF7B83.toInt() else 0xFFC94A54.toInt(),
                             categoryLabel = if (isClipboard) "剪贴板记录" else "常用语",
-                            onInsert = insert, onPin = pin, onDelete = delete,
+                            onInsert = insert, onPin = pin, onDelete = delete, onOpenLink = openLink,
                             feedback = { pressFeedback() },
                         ).apply { layoutParams = AbsListView.LayoutParams(-1, dp(52)) }
                     }

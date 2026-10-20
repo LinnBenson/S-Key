@@ -118,6 +118,26 @@ class ContentEntryRowTest : InstrumentationTestCase() {
         }
     }
 
+    fun testLinkActionMatchesOtherIconsAndRecyclingClearsDestination() {
+        instrumentation.runOnMainSync {
+            val events = mutableListOf<String>()
+            val row = createRow("text", false, {}, {}, {})
+            row.bind("first link", false, {}, {}, {}, { events.add("first") })
+            attachAndMeasure(row, 320)
+            assertEquals(View.VISIBLE, row.openLinkAction.visibility)
+            assertEquals(row.pinAction.width, row.openLinkAction.width)
+            assertEquals(row.pinAction.height, row.openLinkAction.height)
+            assertTrue(row.openLinkAction.right <= row.pinAction.left)
+            row.openLinkAction.performClick()
+            row.bind("second link", false, {}, {}, {}, { events.add("second") })
+            row.openLinkAction.performClick()
+            row.bind("plain text", false, {}, {}, {})
+            assertEquals(View.GONE, row.openLinkAction.visibility)
+            row.openLinkAction.performClick()
+            assertEquals(listOf("first", "second"), events)
+        }
+    }
+
     private fun createRow(
         text: String,
         pinned: Boolean,

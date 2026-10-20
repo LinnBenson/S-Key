@@ -1,7 +1,7 @@
 """Semantically specific keyboard icons missing from Miuix's catalog."""
 from pathlib import Path
 import xml.etree.ElementTree as ET
-MAPPING = dict(ai='auto_awesome',arrow_up='arrow_upward', arrow_down='arrow_downward', arrow_left='arrow_back', arrow_right='arrow_forward', drag_handle='drag_handle', quickedit='edit_note', globe='language', enter='keyboard_return', shift='shift', caps='keyboard_capslock', backspace='backspace', clipboard='content_paste', emoji='mood', resize='resize_diagonal', layout='open_in_full', split='split_keyboard', dictionary='menu_book', english_dictionary='dictionary', floating='floating_enter', floating_enter='floating_enter', floating_exit='floating_exit', keyboard='keyboard')
+MAPPING = dict(open_link='link',ai='auto_awesome',arrow_up='arrow_upward', arrow_down='arrow_downward', arrow_left='arrow_back', arrow_right='arrow_forward', drag_handle='drag_handle', quickedit='edit_note', globe='language', enter='keyboard_return', shift='shift', caps='keyboard_capslock', backspace='backspace', clipboard='content_paste', emoji='mood', resize='resize_diagonal', layout='open_in_full', split='split_keyboard', dictionary='menu_book', english_dictionary='dictionary', floating='floating_enter', floating_enter='floating_enter', floating_exit='floating_exit', keyboard='keyboard')
 ANDROID='http://schemas.android.com/apk/res/android'
 def attrs(**kw): return {f'{{{ANDROID}}}{k}':str(v) for k,v in kw.items()}
 def generate(root):

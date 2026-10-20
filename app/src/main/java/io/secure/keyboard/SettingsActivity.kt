@@ -85,11 +85,20 @@ open class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         incomingPage = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: initialPage
+        if (savedInstanceState == null) consumePhraseShortcut(intent)
         setContent { ApplicationUi() }
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent); setIntent(intent)
         incomingPage = intent.getStringExtra("page") ?: initialPage
+        consumePhraseShortcut(intent)
+    }
+    private fun consumePhraseShortcut(intent: Intent) {
+        if (intent.getBooleanExtra("add_phrase", false)) {
+            intent.removeExtra("add_phrase")
+            incomingPage = "phrases"
+            model.edit = ContentEdit("phrases")
+        }
     }
     override fun onStart() { super.onStart(); ModelImportTransfer.attach(voiceObserver) }
     override fun onStop() { ModelImportTransfer.detach(voiceObserver); super.onStop() }

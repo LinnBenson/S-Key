@@ -93,7 +93,7 @@ class CompactWubiTableTest {
         FileChannel.open(asset.toPath(), StandardOpenOption.READ).use { channel ->
             val table = CompactWubiTable(channel.map(FileChannel.MapMode.READ_ONLY, 0, channel.size()))
             val engine = DictionaryEngine(table, "...\n".reader())
-            assertEquals(441799, engine.wubiEntryCount)
+            assertEquals(441800, engine.wubiEntryCount)
             assertEquals(472, table.exactCandidateCount("khkh"))
             assertEquals(40, engine.candidates("khkh", false).size)
             val all = engine.candidates("khkh", false, allExactWubi = true)
@@ -109,7 +109,7 @@ class CompactWubiTableTest {
         val requested = listOf("微信" to "tmwy", "安卓" to "pvhj", "北川" to "uxkt",
             "美团" to "uglt", "抖音" to "ruuj", "支付宝" to "fwpg",
             "滴滴" to "iuiu", "微博" to "tmfg",
-            "嗯嗯" to "klkl", "哦哦" to "ktkt", "好吧" to "vbkc")
+            "嗯嗯" to "klkl", "哦哦" to "ktkt", "好吧" to "vbkc", "携程" to "rwtk")
         val asset = File("src/main/assets/dictionaries/compact-wubi.skwb")
         FileChannel.open(asset.toPath(), StandardOpenOption.READ).use { channel ->
             val table = CompactWubiTable(channel.map(FileChannel.MapMode.READ_ONLY, 0, channel.size()))

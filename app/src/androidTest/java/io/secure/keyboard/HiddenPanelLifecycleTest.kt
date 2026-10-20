@@ -414,6 +414,8 @@ class HiddenPanelLifecycleTest : InstrumentationTestCase() {
             field<SettingsStore>("settings").apply {
                 vibration = true
                 vibrationStrength = 10
+                // Keep the tested tool in the More panel regardless of default toolbar pins.
+                toolbarPins = emptyList()
             }
             set("root", recording)
             set("chinese", false)
