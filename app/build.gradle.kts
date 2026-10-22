@@ -8,8 +8,8 @@ android {
         applicationId = "io.secure.keyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 84
-        versionName = "1.0.77"
+        versionCode = 85
+        versionName = "1.0.78"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
     buildFeatures { compose = true }
@@ -37,7 +37,7 @@ val buildDictionaryCatalog by tasks.registering(Exec::class) {
     commandLine("python3", "scripts/build_dictionary_catalog.py")
     inputs.files(rootProject.file("scripts/build_dictionary_catalog.py"), rootProject.file("scripts/build_compact_wubi.py"))
     inputs.dir(rootProject.file("third_party/wubi_supplements"))
-    inputs.files(file("src/main/assets/dictionaries/wubi86.dict.yaml"), file("src/main/assets/dictionaries/pinyin_simp.dict.yaml"), file("src/main/assets/dictionaries/english_frequency.tsv"), file("src/main/assets/dictionaries/english_extended.tsv"))
+    inputs.files(file("src/main/assets/dictionaries/wubi86.dict.yaml"), file("src/main/assets/dictionaries/pinyin_simp.dict.yaml"), file("src/main/assets/dictionaries/pinyin_initials.dict.yaml"), file("src/main/assets/dictionaries/english_frequency.tsv"), file("src/main/assets/dictionaries/english_extended.tsv"))
     outputs.dir(layout.buildDirectory.dir("generated/dictionaryCatalog"))
 }
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/dictionaryCatalog"))

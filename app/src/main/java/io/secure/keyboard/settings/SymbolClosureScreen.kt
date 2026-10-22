@@ -30,7 +30,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
     val colors = MiuixTheme.colorScheme
     Column(modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-            item { Text("点击中英文符号页上的输入符号时，追加闭合符号，再按字符数回移光标。0 表示停在末尾。点击规则可修改或删除，保存后即时生效。",fontSize=14.sp,color=colors.onSurfaceSecondary) }
+            item { Text("输入左侧符号时自动补全右侧符号。光标回移 0 位表示停在末尾。",fontSize=14.sp,color=colors.onSurfaceSecondary) }
             item { Card { Column(Modifier.padding(16.dp)) {
                 Row(Modifier.fillMaxWidth().padding(vertical=8.dp)) {
                     listOf("输入符号","闭合符号","光标回移位").forEach { Text(it,modifier=Modifier.weight(1f),fontSize=13.sp,color=colors.onSurfaceSecondary) }

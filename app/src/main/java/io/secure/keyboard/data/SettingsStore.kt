@@ -258,6 +258,10 @@ class SettingsStore(context: Context) {
             prefs.edit().putBoolean("swipeDelete", value).apply()
         }
 
+    var chineseInputMode: io.secure.keyboard.engine.ChineseInputMode
+        get() = io.secure.keyboard.engine.ChineseInputMode.fromId(prefs.getString("chineseInputMode", "mixed"))
+        set(value) { prefs.edit().putString("chineseInputMode", value.id).apply() }
+
     var fourCodeAutoCommit: Boolean
         get() = prefs.getBoolean("fourCodeAutoCommit", false)
         set(value) {
@@ -394,7 +398,7 @@ class SettingsStore(context: Context) {
         // Keep the complete tool catalog independent of which tools are pinned by default.
         val availablePins = listOf(
             "ai", "translate", "clipboard", "phrases", "voice", "quickedit", "emoji", "layout",
-            "floating", "split", "theme", "script", "dictionary", "english_dictionary", "settings",
+            "floating", "split", "theme", "script", "input_mode", "dictionary", "english_dictionary", "settings",
         )
     }
 }

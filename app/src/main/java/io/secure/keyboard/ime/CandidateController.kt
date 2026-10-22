@@ -18,6 +18,7 @@ import io.secure.keyboard.*
 /** Candidate queries and stale-result checks. */
 internal object CandidateController {
     internal fun KeyboardSession.clearCandidatesImpl() {
+        pinyinCandidates = emptyList()
         candidateTexts = emptyList()
         candidateQuery = ""
         candidateGeneration = -1
@@ -70,16 +71,21 @@ internal object CandidateController {
         val seq = ++generation
         val zh = chinese
         val kind = if (zh) DictionaryKind.CHINESE else DictionaryKind.ENGLISH
+        val mode = settings.chineseInputMode
+        val selectedPinyin = pinyinComposition.text
+        val localContext = pinyinContext + selectedPinyin
         val localCode = code
         val connection = currentInputConnection
         val localEditor = activeAssistantEditor()
         val localPrefix = localEditor?.let { assistantEnglishPrefix(it) }
+        val assistantContext = localEditor?.let { it.text.toString().take(it.selectionStart.coerceAtLeast(0)).takeLast(16) }
+            ?: if (translation.enabled) translation.text.takeLast(16) else null
         // Keep the previous row visible while its replacement is computed. Its generation is now
         // stale, so neither a tap nor Space can commit it. Privacy changes are the exception.
         if (candidateDictionaryKind?.let { candidateDictionaryRevision != content.dictionaryRevision(it) } == true)
             clearCandidates()
         if (
-            (translation.enabled && !zh && localEditor==null) || (zh && localCode.isEmpty()) || !loaded || secret || (!zh && !settings.englishCompletion)
+            (translation.enabled && !zh && localEditor==null) || (zh && localCode.isEmpty() && (mode != io.secure.keyboard.engine.ChineseInputMode.PINYIN || localContext.isEmpty())) || !loaded || secret || (!zh && !settings.englishCompletion)
         ) {
             candidateQueries.clear()
             clearCandidates()
@@ -102,9 +108,16 @@ internal object CandidateController {
             val user = readContent(emptyList<ContentStore.DictionaryEntry>()) {
                 content.dictionary(kind)
             }
+            var decoded = emptyList<io.secure.keyboard.engine.PinyinDecoder.Option>()
             val results =
-                if (zh) {
-                    val base = engine.candidates(query, fuzzy, 40, fuzzyPairs)
+                if (zh && mode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) {
+                    val surrounding = if (assistantContext != null) assistantContext else try {
+                        connection?.getTextBeforeCursor(16, 0)?.toString().orEmpty()
+                    } catch (_: RuntimeException) { "" }
+                    decoded = engine.decodePinyin(query, surrounding + selectedPinyin, user.map { it.reading to it.word }, fuzzy, fuzzyPairs) { destroyed || seq != generation }
+                    decoded.map { it.text }
+                } else if (zh) {
+                    val base = engine.candidates(query, fuzzy, 40, fuzzyPairs, mode)
                     val baseline =
                         base.filter { it.source == Source.WUBI }.map { it.text } +
                             base.filter { it.source != Source.WUBI }.map { it.text }
@@ -121,9 +134,9 @@ internal object CandidateController {
             if (destroyed || seq != generation) return@query
             main.post {
                 if (
-                    seq == generation && active && chinese == zh &&
+                    seq == generation && active && chinese == zh && settings.chineseInputMode == mode &&
                         currentInputConnection === connection &&
-                        (zh || localEditor===activeAssistantEditor())
+                        localEditor===activeAssistantEditor()
                 ) {
                     if (
                         secret || (!zh && !settings.englishCompletion) ||
@@ -136,6 +149,7 @@ internal object CandidateController {
                         return@post
                     }
                     candidateRuntimeRevision = runtimeRevision
+                    pinyinCandidates = decoded
                     candidateTexts = results
                     candidateQuery = query
                     candidateGeneration = seq

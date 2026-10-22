@@ -16,7 +16,9 @@ def build():
     CREATE INDEX entry_library ON entries(library,id);
     CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
     INSERT INTO metadata VALUES('dirty','0');
-    INSERT INTO metadata VALUES('catalog_version','4');
+    INSERT INTO metadata VALUES('catalog_version','5');
+    INSERT INTO metadata VALUES('initials_added','1');
+    INSERT INTO metadata VALUES('initials_version','2');
     ''')
     manifest=json.loads((ROOT/'third_party/wubi_supplements/source-manifest.json').read_text())
     load_sources(ROOT/'app/src/main/assets/dictionaries/wubi86.dict.yaml',ROOT/'third_party/wubi_supplements',manifest)
@@ -46,6 +48,11 @@ def build():
         if not line or line.startswith('#'): continue
         word,weight=line.split('\t')
         db.execute('INSERT INTO entries(library,text,code,weight) VALUES(10,?,?,?)',(word,word,int(weight)))
+    db.execute('INSERT INTO libraries VALUES(11,?,?,0,?)',('拼音单字母词库','pinyin','Rime / AOSP; Apache-2.0; derived single characters'))
+    for line in (ROOT/'app/src/main/assets/dictionaries/pinyin_initials.dict.yaml').read_text().split('...\n',1)[1].splitlines():
+        if not line or line.startswith('#'): continue
+        word,code,weight=line.split('\t')
+        db.execute('INSERT INTO entries(library,text,code,weight) VALUES(11,?,?,?)',(word,code,int(weight)))
     db.execute("ALTER TABLE libraries ADD COLUMN filename TEXT NOT NULL DEFAULT ''")
     db.execute("ALTER TABLE libraries ADD COLUMN source_path TEXT NOT NULL DEFAULT ''")
     sources=DEST.parent.parent/'dictionary-sources'; sources.mkdir(parents=True,exist_ok=True)
@@ -53,7 +60,7 @@ def build():
         original=(ROOT/'app/src/main/assets/dictionaries' if i==1 else ROOT/'third_party/wubi_supplements')/spec['filename']
         shutil.copyfile(original,sources/spec['filename'])
         db.execute('UPDATE libraries SET filename=? WHERE id=?',(spec['filename'],i))
-    for i,name in [(8,'pinyin_simp.dict.yaml'),(9,'english_frequency.tsv'),(10,'english_extended.tsv')]:
+    for i,name in [(8,'pinyin_simp.dict.yaml'),(9,'english_frequency.tsv'),(10,'english_extended.tsv'),(11,'pinyin_initials.dict.yaml')]:
         shutil.copyfile(ROOT/'app/src/main/assets/dictionaries'/name,sources/name)
         db.execute('UPDATE libraries SET filename=? WHERE id=?',(name,i))
     db.commit(); db.execute('VACUUM'); db.close()
@@ -65,8 +72,10 @@ def compile_runtime():
     import re
     path=DEST.with_name('runtime.db'); path.unlink(missing_ok=True)
     source=sqlite3.connect(DEST); db=sqlite3.connect(path)
+    db.execute('PRAGMA user_version=2')
     db.execute('CREATE TABLE words(kind TEXT NOT NULL,text TEXT NOT NULL,code TEXT NOT NULL,weight INTEGER NOT NULL,ordinal INTEGER NOT NULL,priority INTEGER NOT NULL,compact TEXT NOT NULL,fuzzy TEXT NOT NULL,syllable TEXT NOT NULL,UNIQUE(kind,text,code))')
-    for ordinal,(kind,text,code,weight,priority) in enumerate(source.execute('SELECT l.kind,e.text,e.code,e.weight,l.priority FROM entries e JOIN libraries l ON l.id=e.library ORDER BY l.id,e.id')):
+    for ordinal,(kind,text,code,weight,priority,filename) in enumerate(source.execute('SELECT l.kind,e.text,e.code,e.weight,l.priority,l.filename FROM entries e JOIN libraries l ON l.id=e.library ORDER BY l.id,e.id')):
+        if kind=='pinyin' and filename=='pinyin_initials.dict.yaml': kind='pinyin_initial'
         compact=code.replace(' ',''); fuzzy=''
         if kind=='pinyin':
             fuzzy=compact.replace('zh','z').replace('ch','c').replace('sh','s')
@@ -74,9 +83,12 @@ def compile_runtime():
         priority=ordinal if priority else 9223372036854775807
         syllable=code if kind=='pinyin' and ' ' not in code and len(text)==1 else ''
         db.execute('INSERT OR IGNORE INTO words VALUES(?,?,?,?,?,?,?,?,?)',(kind,text,code,weight,ordinal,priority,compact,fuzzy,syllable))
+        if kind=='pinyin' and filename=='pinyin_simp.dict.yaml': db.execute('INSERT OR IGNORE INTO words VALUES(?,?,?,?,?,?,?,?,?)',('mixed_pinyin',text,code,weight,ordinal,priority,compact,fuzzy,syllable))
         if priority!=9223372036854775807: db.execute('UPDATE words SET priority=min(priority,?) WHERE kind=? AND text=? AND code=?',(priority,kind,text,code))
     db.execute('CREATE INDEX exact_words ON words(kind,compact,priority,weight DESC,ordinal)')
     db.execute("CREATE INDEX fuzzy_words ON words(kind,fuzzy,weight DESC,ordinal) WHERE kind='pinyin'")
     db.execute("CREATE INDEX syllable_words ON words(kind,syllable,weight DESC,ordinal) WHERE kind='pinyin'")
+    db.execute("CREATE INDEX mixed_fuzzy_words ON words(kind,fuzzy,weight DESC,ordinal) WHERE kind='mixed_pinyin'")
+    db.execute("CREATE INDEX mixed_syllable_words ON words(kind,syllable,weight DESC,ordinal) WHERE kind='mixed_pinyin'")
     db.commit(); db.execute('VACUUM'); db.close(); source.close(); print(path)
 if __name__=='__main__': compile_runtime()

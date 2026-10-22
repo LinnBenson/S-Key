@@ -25,6 +25,13 @@ class ApiConfigurationTest : InstrumentationTestCase() {
             else prefs.edit().putString("encrypted", original).commit()
         }
     }
+    fun testAllApiKeysRejectBothLineBreakForms() {
+        for (bad in listOf("a\nb", "a\rb")) {
+            for (config in listOf(ApiConfiguration(googleKey=bad), ApiConfiguration(grokKey=bad), ApiConfiguration(voiceKey=bad))) {
+                try { config.validated(); fail("Newline accepted") } catch (_: IllegalArgumentException) {}
+            }
+        }
+    }
     fun testEndpointValidationRejectsUnsafeUrls() {
         for (url in listOf("http://api.x.ai/v1", "https://user:secret@api.x.ai/v1", "https://api.x.ai/v1?key=secret", "not-a-url")) {
             try { ApiConfiguration(grokUrl = url).validated(); fail("URL accepted") }

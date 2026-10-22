@@ -38,6 +38,10 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     fun sendDefaultEditorAction(fromEnterKey: Boolean) = host.sendDefaultEditorAction(fromEnterKey)
     fun sendDownUpKeyEvents(key: Int) = host.sendDownUpKeyEvents(key)
     internal val inputState = InputState()
+    internal val pinyinComposition = io.secure.keyboard.engine.PinyinComposition()
+    internal var pinyinCandidates = emptyList<io.secure.keyboard.engine.PinyinDecoder.Option>()
+    internal var pinyinContext = ""
+
     internal val currentInputConnection get() = host.currentInputConnection
     internal val currentInputEditorInfo get() = host.currentInputEditorInfo
     internal val window get() = host.window
@@ -250,6 +254,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var selectedKeyBg = 0
     internal var selectedKeyText = 0
     internal var enterText = 0
+    private val refreshLetterSymbols = Runnable { if (active && !symbols) renderBody() }
     internal val preferenceListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key?.startsWith("themeTokens_") == true || key == "theme")
@@ -264,6 +269,11 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             else if (key?.startsWith("symbol_keyboard_") == true) main.post {
                 if (active && symbols) renderBody()
             }
+            else if (key?.startsWith("letter_symbols_") == true) {
+                // Restoring one language may remove 26 overrides in the same preference edit.
+                main.removeCallbacks(refreshLetterSymbols)
+                main.post(refreshLetterSymbols)
+            }
             else if (key == "clipboard_clear_revision") main.post {
                 quickPasteState.clear()
                 if (active) renderHeader()
@@ -271,6 +281,10 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             else if (key == "quickPaste") main.post {
                 if (!settings.quickPaste) quickPasteState.clear()
                 if (active) renderHeader()
+            }
+            else if (key == "chineseInputMode") main.post {
+                clearPending(); pinyinContext = ""
+                if (active) { renderBody(); refreshCandidates() }
             }
             else if (key == "toolbarPins" || key == "traditionalOutput") main.post {
                 if (active) { renderHeader(); if (panel == "more") renderBody() }
@@ -286,6 +300,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         ClipboardManager.OnPrimaryClipChangedListener { captureClipboard(true) }
     internal val tools =
         linkedMapOf(
+            "input_mode" to "输入模式",
             "script" to "简繁转换",
             "ai" to "AI 助手",
             "translate" to "翻译",
@@ -472,7 +487,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             voiceGuard?.selectionChanged(oldSelStart, oldSelEnd, newSelStart, newSelEnd) == false) {
             stopVoiceForEditorChange()
         }
-        if (active && !chinese && !secret) refreshCandidates()
+        if (active && !secret && (!chinese || (moved && settings.chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN))) refreshCandidates()
     }
 
     fun cancelTransient() = with(KeyboardViewController) { cancelTransientImpl() }

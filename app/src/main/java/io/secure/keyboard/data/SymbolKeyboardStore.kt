@@ -30,6 +30,6 @@ internal class SymbolKeyboardStore(context: Context) {
     }
     fun restore(chinese:Boolean,second:Boolean) { prefs.edit().remove(key(chinese,second)).apply() }
     private fun validate(symbol:String) {
-        require(symbol.codePointCount(0,symbol.length)==1 && symbol.isNotBlank() && symbol.none { it.isISOControl() }) { "请输入一个符号，不能留空或换行" }
+        require(symbol.codePointCount(0,symbol.length)==1 && symbol.isNotBlank() && symbol.none { it.isISOControl() } && symbol.codePointAt(0) !in 0xD800..0xDFFF) { "请输入一个符号，不能留空或换行" }
     }
 }

@@ -6,6 +6,18 @@ import android.test.AndroidTestCase
 
 @Suppress("DEPRECATION")
 class ClipboardCapturePolicyTest : AndroidTestCase() {
+    fun testDeletedMatchIsExactAndPreservesOtherClipboardKinds() {
+        val deleted = setOf("same\ntext")
+        assertTrue(ClipboardCapturePolicy.matchesDeleted(ClipData.newPlainText("", "same\ntext"), deleted))
+        assertFalse(ClipboardCapturePolicy.matchesDeleted(ClipData.newPlainText("", "same text"), deleted))
+        assertFalse(ClipboardCapturePolicy.matchesDeleted(ClipData.newPlainText("", "new copy"), deleted))
+        val multiple = ClipData.newPlainText("", "same\ntext")
+        multiple.addItem(ClipData.Item("other"))
+        assertFalse(ClipboardCapturePolicy.matchesDeleted(multiple, deleted))
+        val uri = ClipData.newRawUri("", android.net.Uri.parse("content://test/item"))
+        assertFalse(ClipboardCapturePolicy.matchesDeleted(uri, deleted))
+    }
+
     fun testSensitiveCopyIsRejectedEvenWithoutPasswordEditor() {
         val clip = ClipData.newPlainText("fixture", "test-secret")
         clip.description.extras = PersistableBundle().apply {

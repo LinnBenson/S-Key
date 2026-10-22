@@ -18,7 +18,7 @@ class CatalogTest(unittest.TestCase):
     def test_catalog_sources_and_counts(self):
         with sqlite3.connect(GENERATED/'catalog.db') as db:
             self.assertEqual('ok',db.execute('pragma integrity_check').fetchone()[0])
-            self.assertEqual([136916,12,1522,481,316743,141,32633,65125,25000,108051],
+            self.assertEqual([136916,12,1522,481,316743,141,32633,65125,25000,108051,16855],
                 [row[0] for row in db.execute('select count(*) from entries group by library order by library')])
     def test_english_extension_coverage_and_common_ranking(self):
         core={line.split('\t')[0]:int(line.split('\t')[1]) for line in (ASSETS/'english_frequency.tsv').read_text().splitlines() if line and not line.startswith('#')}
@@ -56,6 +56,19 @@ class CatalogTest(unittest.TestCase):
                     offset,full=struct.unpack_from('>II',data,refs_start+(first+j)*8)
                     group.append((text(offset)[0],decode(full)))
                 self.assertEqual(group,prefixes[decode(code)],decode(code))
+    def test_mixed_scope_and_initials(self):
+        with sqlite3.connect(GENERATED/'runtime.db') as db:
+            self.assertEqual(65125,db.execute("select count(*) from words where kind='mixed_pinyin'").fetchone()[0])
+            self.assertEqual(16855,db.execute("select count(*) from words where kind='pinyin_initial'").fetchone()[0])
+            expected={}
+            for line in (ASSETS/'pinyin_simp.dict.yaml').read_text().split('...\n',1)[1].splitlines():
+                if not line or line.startswith('#'): continue
+                parts=line.split('\t')
+                if len(parts)<2 or len(parts[0])!=1 or not parts[1].isascii() or not parts[1].isalpha(): continue
+                key=(parts[0],parts[1][0]); expected[key]=max(expected.get(key,0),int(parts[2]) if len(parts)>2 else 0)
+            self.assertEqual(expected,{(word,code):weight for word,code,weight in db.execute("select text,code,weight from words where kind='pinyin_initial'")})
+            self.assertEqual(['你','那','呢','能','年'],[r[0] for r in db.execute("select text from words where kind='pinyin_initial' and code='n' order by weight desc,ordinal limit 5")])
+            self.assertEqual([],db.execute("select text from words where kind='mixed_pinyin' and code='b'").fetchall())
     def test_runtime_only_readable_rows(self):
         with sqlite3.connect(GENERATED/'runtime.db') as db:
             self.assertEqual('ok',db.execute('pragma integrity_check').fetchone()[0])

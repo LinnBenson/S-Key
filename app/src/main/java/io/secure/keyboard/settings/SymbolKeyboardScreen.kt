@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.secure.keyboard.data.SymbolKeyboardStore
+import io.secure.keyboard.data.LetterSymbolStore
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -23,7 +24,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
     val context=LocalContext.current
     val store=remember(context) { SymbolKeyboardStore(context) }
     var chinese by rememberSaveable { mutableStateOf(true) }
-    var second by rememberSaveable { mutableStateOf(false) }
+    var page by rememberSaveable { mutableIntStateOf(0) }
+    val second = page == 1
+    val letters = page == 2
+    val letterStore = remember(context) { LetterSymbolStore(context) }
+    val alphabet = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
     var revision by remember { mutableIntStateOf(0) }
     var rowIndex by rememberSaveable { mutableIntStateOf(-1) }
     var columnIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -31,7 +36,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
     var error by rememberSaveable { mutableStateOf("") }
     var restore by rememberSaveable { mutableStateOf(false) }
     val colors=MiuixTheme.colorScheme
-    val rows=remember(chinese,second,revision) { store.rows(chinese,second) }
+    val rows=remember(chinese,page,revision) { if(letters) alphabet.map { row -> row.map { letterStore.symbols(chinese,it) } } else store.rows(chinese,second) }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
         Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
             listOf(true to "中文键盘",false to "英文键盘").forEach { (value,title) ->
@@ -40,25 +45,30 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
             }
         }
         Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
-            listOf(false to "第一页",true to "第二页").forEach { (value,title) ->
-                TextButton(text=title,onClick={second=value},modifier=Modifier.weight(1f),
-                    colors=if(second==value) ButtonDefaults.textButtonColorsPrimary() else ButtonDefaults.textButtonColors())
+            listOf(0 to "第一页",1 to "第二页",2 to "字母长按").forEach { (value,title) ->
+                TextButton(text=title,onClick={page=value},modifier=Modifier.weight(1f),
+                    colors=if(page==value) ButtonDefaults.textButtonColorsPrimary() else ButtonDefaults.textButtonColors())
             }
         }
-        Text("点击下方符号键即可修改，保存后即时生效。四个页面独立保存。",fontSize=14.sp,color=colors.onSurfaceSecondary)
+        Text("点击按键修改，保存后生效。",fontSize=14.sp,color=colors.onSurfaceSecondary)
         Card {
             Column(Modifier.background(colors.secondaryContainer.copy(alpha=.35f)).padding(10.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                @Composable fun RowScope.key(label:String,weight:Float=1f,editable:Boolean=false,onClick:()->Unit={}) {
+                @Composable fun RowScope.key(label:String,weight:Float=1f,editable:Boolean=false,hint:String?=null,onClick:()->Unit={}) {
                     Box(Modifier.weight(weight).height(52.dp).background(
                         if(editable) colors.surface else colors.secondaryContainer,RoundedCornerShape(7.dp))
                         .then(if(editable) Modifier.clickable(onClick=onClick) else Modifier),contentAlignment=Alignment.Center) {
                         Text(label,fontSize=if(editable) 19.sp else 12.sp,color=if(editable) colors.onSurface else colors.onSurfaceSecondary)
+                        if(hint != null) Text(hint, fontSize=9.sp, maxLines=1,
+                            overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            color=colors.onSurfaceSecondary, modifier=Modifier.align(Alignment.TopEnd).padding(3.dp))
                     }
                 }
                 rows.forEachIndexed { r,row ->
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(3.dp)) {
-                        if(r==2) key("=\\<",1.3f)
-                        row.forEachIndexed { c,symbol -> key(symbol,editable=true) { rowIndex=r;columnIndex=c;draft=symbol;error="" } }
+                        if(r==2) key(if(letters) "⇧" else "=\\<",1.3f)
+                        if(letters && r==1) Spacer(Modifier.weight(.45f))
+                        row.forEachIndexed { c,symbol -> key(if(letters) alphabet[r][c].toString() else symbol,editable=true,hint=if(letters) symbol else null) { rowIndex=r;columnIndex=c;draft=symbol;error="" } }
+                        if(letters && r==1) Spacer(Modifier.weight(.45f))
                         if(r==2) key("⌫",1.3f)
                     }
                 }
@@ -68,29 +78,29 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
                 }
             }
         }
-        Text("灰色功能键仅作位置参考。每个符号键填写一个字符；自动闭合规则按修改后的符号匹配。",fontSize=13.sp,color=colors.onSurfaceSecondary)
+        Text(if(letters) "可填写多个符号，长按后滑动选择；留空可取消。需开启“长按输入符号”。" else "每个按键可设置一个字符。灰色功能键不可修改。",fontSize=13.sp,color=colors.onSurfaceSecondary)
         TextButton(text="恢复当前页默认符号",onClick={restore=true},modifier=Modifier.fillMaxWidth())
     }
-    if(rowIndex>=0) Dialog(onDismissRequest={},properties=DialogProperties(dismissOnBackPress=false,dismissOnClickOutside=false)) {
-        Card { Column(Modifier.padding(20.dp).imePadding().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(14.dp)) {
+    if(rowIndex>=0) Dialog(onDismissRequest={},properties=DialogProperties(dismissOnBackPress=false,dismissOnClickOutside=false,usePlatformDefaultWidth=false)) {
+        Card(settingsDialogModifier()) { Column(Modifier.padding(20.dp).imePadding().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(14.dp)) {
             Text("修改符号",fontSize=20.sp)
-            Text("${if(chinese) "中文" else "英文"} · 第 ${if(second) 2 else 1} 页 · 第 ${rowIndex+1} 行第 ${columnIndex+1} 键",fontSize=13.sp,color=colors.onSurfaceSecondary)
-            TextField(value=draft,onValueChange={if(it.length<=8) draft=it},label="符号（一个字符）")
+            Text("${if(chinese) "中文" else "英文"} · ${if(letters) "字母 ${alphabet[rowIndex][columnIndex]} 长按" else "第 ${if(second) 2 else 1} 页 · 第 ${rowIndex+1} 行第 ${columnIndex+1} 键"}",fontSize=13.sp,color=colors.onSurfaceSecondary)
+            TextField(value=draft,onValueChange={if(it.length<=32) draft=it},label=if(letters) "长按符号（最多 8 个字符，可留空）" else "符号（一个字符）")
             if(error.isNotEmpty()) Text(error,fontSize=13.sp)
             Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                 TextButton(text="取消",onClick={rowIndex=-1},modifier=Modifier.weight(1f))
-                Button(onClick={try {store.save(chinese,second,rowIndex,columnIndex,draft);revision++;rowIndex=-1} catch(e:Exception){error=e.message ?: "符号无效"}},
+                Button(onClick={try {if(letters) letterStore.save(chinese,alphabet[rowIndex][columnIndex],draft) else store.save(chinese,second,rowIndex,columnIndex,draft);revision++;rowIndex=-1} catch(e:Exception){error=e.message ?: "符号无效"}},
                     colors=ButtonDefaults.buttonColorsPrimary(),modifier=Modifier.weight(1f)) { Text("保存",color=colors.onPrimary) }
             }
         } }
     }
     if(restore) Dialog(onDismissRequest={restore=false}) {
         Card { Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
-            Text("恢复${if(chinese) "中文" else "英文"}第 ${if(second) 2 else 1} 页？",fontSize=20.sp)
-            Text("此页修改将被默认符号替换。其他页面不受影响。",fontSize=14.sp)
+            Text("恢复${if(chinese) "中文" else "英文"}${if(letters) "字母长按符号" else "第 ${if(second) 2 else 1} 页"}？",fontSize=20.sp)
+            Text("当前页的修改将被覆盖。",fontSize=14.sp)
             Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                 TextButton(text="取消",onClick={restore=false},modifier=Modifier.weight(1f))
-                Button(onClick={store.restore(chinese,second);revision++;restore=false},colors=ButtonDefaults.buttonColorsPrimary(),modifier=Modifier.weight(1f)) {Text("恢复",color=colors.onPrimary)}
+                Button(onClick={if(letters) letterStore.restore(chinese) else store.restore(chinese,second);revision++;restore=false},colors=ButtonDefaults.buttonColorsPrimary(),modifier=Modifier.weight(1f)) {Text("恢复",color=colors.onPrimary)}
             }
         } }
     }

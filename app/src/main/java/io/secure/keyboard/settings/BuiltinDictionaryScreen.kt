@@ -39,7 +39,7 @@ import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 internal class BuiltinDictionaryModel(app: Application): AndroidViewModel(app) {
-    val repository=DictionaryRepository(app)
+    val repository by lazy { DictionaryRepository(app) }
     var libraries by mutableStateOf<List<DictionaryRepository.Library>>(emptyList())
     var selected by mutableStateOf<DictionaryRepository.Library?>(null)
     var page by mutableStateOf<DictionarySource.Page?>(null)
@@ -165,7 +165,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                         if(model.busy) CircularProgressIndicator(modifier=Modifier.size(24.dp)) else DictionaryIcon(if(model.dirty) "edit" else "check",tint=colors.primary)
                         Column(Modifier.weight(1f)) {
                             Text(model.status,fontSize=16.sp,fontWeight=FontWeight.Medium)
-                            Text("编辑原始文件，统一编译后生效",fontSize=13.sp,color=colors.onSurfaceSecondary,modifier=Modifier.padding(top=4.dp))
+                            Text("修改后需编译才能生效",fontSize=13.sp,color=colors.onSurfaceSecondary,modifier=Modifier.padding(top=4.dp))
                         }
                     } }
                 }
@@ -182,6 +182,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                                     Column(Modifier.weight(1f)) {
                                         Text(file.filename,fontSize=15.sp,fontWeight=FontWeight.Medium,maxLines=2,overflow=TextOverflow.Ellipsis)
                                         Text(if(file.sourcePath.isEmpty()) file.name else "已保存的源文件",fontSize=12.sp,color=colors.onSurfaceSecondary,modifier=Modifier.padding(top=5.dp))
+                                        if(file.kind=="pinyin") Text(if(file.filename=="pinyin_simp.dict.yaml") "混输与纯拼音共用" else "仅纯拼音使用",fontSize=12.sp,color=colors.onSurfaceSecondary)
                                     }
                                     DictionaryIcon("forward",tint=colors.onSurfaceSecondary)
                                 }
@@ -194,7 +195,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                     Card { BasicComponent(title="恢复默认文件",summary="恢复随应用提供的原始词库",leftAction={Box(Modifier.padding(end=14.dp)){DictionaryIcon("undo")}},onClick={
                         if(!model.busy) model.confirmation="恢复默认会替换所有词库源文件，包括自行添加的文件。编译后生效。" to { model.run("已恢复默认文件，请编译后生效") { model.repository.restoreDefaults() } }
                     }) }
-                    Text("中文和英文自定义词库仍即时生效，不受这里的编译影响。",modifier=Modifier.padding(horizontal=10.dp,vertical=14.dp),fontSize=12.sp,color=colors.onSurfaceSecondary)
+                    Text("自定义词库无需编译。",modifier=Modifier.padding(horizontal=10.dp,vertical=14.dp),fontSize=12.sp,color=colors.onSurfaceSecondary)
                 }
             }
             Card(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=10.dp)) {
@@ -263,7 +264,6 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
     }
     if(model.showAdd) modal({model.showAdd=false}) {
         Text("添加词库文件",fontSize=20.sp,fontWeight=FontWeight.SemiBold)
-        Text("选择类型，再新建或导入原始文件。",fontSize=14.sp,color=colors.onSurfaceSecondary)
         Row(Modifier.fillMaxWidth()) { listOf("wubi","pinyin","english").forEach { kind ->
             TextButton(text=(if(model.kind==kind) "✓ " else "")+kindLabel(kind),modifier=Modifier.weight(1f),onClick={model.kind=kind;model.filename=if(kind=="english") "custom_english.tsv" else "custom_$kind.dict.yaml"})
         } }
@@ -272,7 +272,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
         Button(colors=ButtonDefaults.buttonColorsPrimary(),onClick={
             val filename=model.filename;val kind=model.kind
             val content=if(filename.endsWith(".yaml") || filename.endsWith(".yml")) "# 自定义词库\n---\nname: custom\nversion: \"1\"\nsort: by_weight\n...\n" else "# ${if(kind=="english") "单词\\t词频" else "文字\\t编码\\t词频"}\n"
-            model.showAdd=false;model.run("文件已创建，打开后即可编辑") { model.repository.addFile(filename,kind,content.byteInputStream()) }
+            model.showAdd=false;model.run("文件已创建，打开后即可编辑") { model.repository.addFile(filename,kind,content.byteInputStream(),allowEmptyTemplate=true) }
         },modifier=Modifier.fillMaxWidth()) { Text("新建文件",color=colors.onPrimary) }
     }
     if(model.showMenu && lib!=null) modal({model.showMenu=false}) {

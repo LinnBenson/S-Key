@@ -188,22 +188,22 @@ open class SettingsActivity : ComponentActivity() {
                                 "voice" -> VoiceSettings()
                                 "api" -> ApiSettings()
                                 "custom_ai" -> Group("我的自定义 AI") {
-                                    Info("为提示词取名，在键盘的自定义模式中按名称选择。上下箭头决定选择列表的顺序。")
+                                    Info("保存常用指令，在 AI 助手中按名称选择。")
                                     Action("添加自定义 AI", !model.busy) { model.edit = ContentEdit("custom_ai") }
-                                    if (model.aiPresets.isEmpty()) Info("还没有自定义 AI，例如：邮件润色、简短回复。")
+                                    if (model.aiPresets.isEmpty()) Info("暂无自定义 AI")
                                 }
                                 "cleanup", "recovery" -> Group("本机内容") {
-                                    Info("备份中文词库、英文词库、常用语和自定义 AI 到一个文件。文件包含这些内容的明文，请自行妥善保存；不包含剪贴板、密钥或会话 ID。")
+                                    Info("备份包含自定义词库、常用语和自定义 AI，不含剪贴板和密钥。备份文件未加密，请妥善保存。")
                                     Action("备份数据", !model.busy) {
                                         launch { backupPicker.launch("S-Key-backup-${java.time.LocalDate.now()}.json") }
                                     }
                                     Action("还原数据", !model.busy) {
-                                        ask("还原会替换中文词库、英文词库、常用语和自定义 AI，保留其他数据与设置。请选择 S Key 备份文件。") {
+                                        ask("还原将替换自定义词库、常用语和自定义 AI。其他数据与设置不变。") {
                                             launch { restorePicker.launch(arrayOf("application/json", "application/octet-stream", "text/*")) }
                                         }
                                     }
-                                    Info("清理不会删除主题、布局或输入偏好，也不会修改 Android 系统剪贴板。")
-                                    Nav("清空全部用户内容", "剪贴板、常用语、词库、最近表情和 自定义 AI", "delete") {
+                                    Info("清理后保留主题、布局和输入设置。")
+                                    Nav("清空全部用户内容", "剪贴板、常用语、自定义词库、最近表情和自定义 AI", "delete") {
                                         ask("确定清空全部用户内容？此操作无法撤销。") { model.task { model.content.clearAll() } }
                                     }
                                 }
@@ -288,23 +288,23 @@ open class SettingsActivity : ComponentActivity() {
             Nav(if (enabledIme) "输入法已启用" else "启用输入法", "在 Android 设置中管理", "settings") {
                 launch { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
             }
-            Nav(if (selectedIme) "当前正在使用 S Key" else "切换到 S Key", icon = "globe") {
+            Nav(if (selectedIme) "正在使用 S Key" else "切换到 S Key", icon = "globe") {
                 getSystemService(InputMethodManager::class.java).showInputMethodPicker()
             }
             var trial by remember { mutableStateOf("") }
-            TextField(value = trial, onValueChange = { trial = it }, label = "试试您的 S Key 输入法 ...", modifier = Modifier.fillMaxWidth().padding(16.dp))
+            TextField(value = trial, onValueChange = { trial = it }, label = "在这里试打…", modifier = Modifier.fillMaxWidth().padding(16.dp))
         }
         Spacer(Modifier.height(16.dp))
         Group("开始定制") {
             Nav("偏好设置", "输入、键盘、主题与本机内容", "settings") { openPage("home") }
-            Nav("输入方式", "原版混输偏好与英文补全", "input") { openPage("input") }
-            Nav("主题工作室", "黑白默认主题与自定义配色", "theme") { openPage("behavior") }
+            Nav("输入方式", "五笔、混输、拼音与英文补全", "input") { openPage("input") }
+            Nav("主题工作室", "深浅主题与自定义配色", "theme") { openPage("behavior") }
         }
     }
     @Composable private fun Home() {
         model.revision
         Group("输入与外观") {
-            Nav("输入方式", "原版混输偏好与英文补全", "input") { openPage("input") }
+            Nav("输入方式", "五笔、混输、拼音与英文补全", "input") { openPage("input") }
             Nav("键盘操作", "声音、触感、长按、工具栏", "keyboard") { openPage("keyboard") }
             Nav("主题与外观", "自定义配色、黑白切换、跟随系统", "theme") { openPage("behavior") }
             Nav("布局配置", "横竖屏、折叠屏、悬浮与分离", "layout") { openPage("layout") }
@@ -312,9 +312,9 @@ open class SettingsActivity : ComponentActivity() {
         Spacer(Modifier.height(16.dp))
         Group("内置设置") {
             Nav("内置词库", "五笔、拼音、英文 · 编辑与编译", "dictionary") { openPage("builtin_dictionaries") }
-            Nav("内置 AI 提示词", "各类助手提示词与自定义 AI 统一提示词", "ai") { openPage("builtin_ai_prompts") }
+            Nav("内置 AI 提示词", "助手指令与自定义 AI 通用指令", "ai") { openPage("builtin_ai_prompts") }
             Nav("符号自动闭合", "输入符号、闭合符号与光标回移", "keyboard") { openPage("symbol_closure") }
-            Nav("符号键盘", "中文、英文 · 可视化修改两页符号", "keyboard") { openPage("symbol_keyboard") }
+            Nav("符号键盘", "中英文符号页与字母长按", "keyboard") { openPage("symbol_keyboard") }
         }
         Spacer(Modifier.height(16.dp))
         Group("本机内容") {
@@ -331,7 +331,7 @@ open class SettingsActivity : ComponentActivity() {
             Nav("Android 输入法设置", icon = "settings") { launch { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) } }
             Nav("内容清理", "保留主题与设置", "delete") { openPage("cleanup") }
             Nav("开源许可", "Miuix、图标、词库与语音组件", "dictionary") { openPage("licenses") }
-            Info("普通输入离线处理，不学习输入历史。翻译、AI 生成、AI 语音和获取模型列表时使用网络。剪贴板、常用语、自定义词库、最近表情和自定义 AI 提示词仅保存在本机；只保存手动添加的名称和提示词，不记录原文或 AI 结果。")
+            Info("普通输入离线处理，不记录输入历史。剪贴板、词库和常用语保存在本机。翻译、AI 和模型列表功能需要联网，发送范围见 AI 设置。")
         }
     }
     @Composable private fun ApiSettings() {
@@ -351,11 +351,11 @@ open class SettingsActivity : ComponentActivity() {
         }
         Group("使用设置") {
             Nav("自定义 AI", "${model.aiPresets.size} 个 · 提示词与排序", "ai") { openPage("custom_ai") }
-            Toggle("AI 生成后自动上屏", model.settings.aiAutoApply, "关闭时先预览；开启时自动插入或替换仍有效的选中文字", icon = "enter") { model.settings.aiAutoApply = it }
-            Toggle("语音自动翻译", model.settings.voiceAutoTranslate, "英文键盘下将 AI 语音译为英文；关闭后直接上屏识别原文", icon = "translate") { model.settings.voiceAutoTranslate = it }
+            Toggle("AI 生成后自动上屏", model.settings.aiAutoApply, "开启后直接插入结果；有选中文字时替换选中内容", icon = "enter") { model.settings.aiAutoApply = it }
+            Toggle("语音自动翻译", model.settings.voiceAutoTranslate, "在英文键盘下，将 AI 语音识别结果译为英文", icon = "translate") { model.settings.voiceAutoTranslate = it }
         }
         Group("Google 翻译 API") {
-            field("接口地址（完整翻译端点）", draft.googleUrl) { model.apiDraft = draft.copy(googleUrl = it) }
+            field("翻译接口地址", draft.googleUrl) { model.apiDraft = draft.copy(googleUrl = it) }
             field("Google API Key", draft.googleKey, true) { model.apiDraft = draft.copy(googleKey = it) }
             Choice("默认 NMT 模型", draft.googleModel == "nmt") { model.apiDraft = draft.copy(googleModel = "nmt") }
             field("模型 ID / 完整模型资源名", draft.googleModel) { model.apiDraft = draft.copy(googleModel = it) }
@@ -367,8 +367,8 @@ open class SettingsActivity : ComponentActivity() {
             field("模型 ID", draft.grokModel) { model.apiDraft = draft.copy(grokModel = it) }
             Action("获取可用模型", !model.busy) { model.fetchApiModels() }
             model.apiModels.forEach { id -> Choice(id, draft.grokModel == id) { model.apiDraft = draft.copy(grokModel = id) } }
-            Info("使用当前填写的地址和密钥获取模型。也可手动输入模型 ID，修改后点击保存。文字生成需要支持 Responses API。")
-            Info("原文框通过响应 ID 续聊，本机会话加密保存，最近一次成功后 12 小时内有效。普通退出清空结果历史但保留会话；清空原文或切换类型会重置会话。xAI 保存输入与回答 30 天，本机重置不会删除云端记录。自定义服务的留存规则以服务商为准。")
+            Info("可获取模型列表，也可填写模型 ID。接口需支持 Responses API。")
+            Info("会话可续聊 12 小时；清空原文或切换类型会重新开始。xAI 保留输入与回答 30 天，本机重置不会删除云端记录。其他服务的保存期限以服务商为准。")
         }
         Group("AI 语音 API") {
             field("语音识别端点（完整 HTTPS 地址）", draft.voiceUrl) { model.apiDraft = draft.copy(voiceUrl = it) }
@@ -377,7 +377,7 @@ open class SettingsActivity : ComponentActivity() {
             Action("使用 Grok 地址与密钥") {
                 model.apiDraft = draft.copy(voiceUrl = draft.grokUrl.trimEnd('/') + "/stt", voiceKey = draft.grokKey)
             }
-            Info("使用语音转文字接口，不能使用文字聊天模型。默认适配 xAI /stt；兼容服务需支持 WAV multipart 上传和 text 响应。结束收音后上传录音，不在本机保存音频。")
+            Info("请填写语音识别模型。默认使用 xAI /stt；其他接口需支持 WAV multipart 上传并返回 text。")
         }
         Group("保存配置") {
             Toggle("显示密钥", showKeys) { showKeys = it }
@@ -389,18 +389,24 @@ open class SettingsActivity : ComponentActivity() {
             Action("清除已保存的 API 配置", !model.busy) {
                 model.task(success = { model.apiDraft = ApiConfiguration(); model.apiModels = emptyList(); model.message = "API 配置已清除" }) { model.apiStore.clear() }
             }
-            Info("密钥仅在本机加密保存。获取模型只发送接口鉴权信息，不发送输入内容。键盘“更多 → 翻译”使用 Google 配置，只有点击翻译才发送原文；键盘“更多 → AI 助手”使用 Grok 配置，点击生成才发送原文和指令。选择 AI 语音后，结束收音时上传录音进行识别。")
+            Info("密钥在本机加密保存。点击翻译或生成时才发送原文和指令；获取模型列表不发送输入内容。AI 语音在收音结束后上传录音，音频不保存在本机。")
         }
     }
 
     @Composable private fun InputSettings() {
         model.revision
         val s = model.settings
+        Group("输入选项") {
+            io.secure.keyboard.engine.ChineseInputMode.entries.forEach { mode ->
+                Choice(mode.label, s.chineseInputMode == mode) { s.chineseInputMode = mode }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
         Group("中文输入偏好") {
             Toggle("简繁转换", s.traditionalOutput, if (s.traditionalOutput) "繁体输出 · 上屏时转换" else "简体输出 · 默认") { s.traditionalOutput = it }
-            Toggle("自动插入空格", s.autoChineseSpacing, "在中文与字母、数字之间插入空格，如：中 aa 文") { s.autoChineseSpacing = it }
+            Toggle("自动插入空格", s.autoChineseSpacing, "在中文与字母、数字之间加空格") { s.autoChineseSpacing = it }
             Toggle("五笔四码自动上屏", s.fourCodeAutoCommit) { s.fourCodeAutoCommit = it }
-            Toggle("模糊拼音", s.fuzzyPinyin, "用于原版混输中的拼音候选") { s.fuzzyPinyin = it }
+            Toggle("模糊拼音", s.fuzzyPinyin, "适用于混输和拼音模式") { s.fuzzyPinyin = it }
             if (s.fuzzyPinyin) SettingsStore.fuzzyPairIds.forEach { pair ->
                 Toggle(pair.replace("_", " ↔ "), pair in s.fuzzyPairs) {
                     s.fuzzyPairs = if (it) s.fuzzyPairs + pair else s.fuzzyPairs - pair
@@ -413,7 +419,7 @@ open class SettingsActivity : ComponentActivity() {
     @Composable private fun EnglishSettings() {
         model.revision
         Group("英文输入偏好") {
-            Toggle("英文当前词补全", model.settings.englishCompletion) { model.settings.englishCompletion = it }
+            Toggle("英文单词补全", model.settings.englishCompletion) { model.settings.englishCompletion = it }
         }
     }
     @Composable private fun KeyboardSettings() {
@@ -423,20 +429,19 @@ open class SettingsActivity : ComponentActivity() {
             Toggle("按键声音", s.keySound) { s.keySound = it }
             Toggle("按键振动", s.vibration) { s.vibration = it }
             Range("振动强度", s.vibrationStrength, 1, 100, "%") { s.vibrationStrength = it }
-            Info("声音和触感遵循系统设置，实际效果由设备决定。")
         }
         Spacer(Modifier.height(16.dp))
         Group("手势与长按") {
             Toggle("长按输入符号", s.longPressSymbols) { s.longPressSymbols = it }
             Range("长按延迟", s.longPressDelay, 150, 1500, "ms", 10) { s.longPressDelay = it }
             Toggle("滑动退格删除", s.swipeDelete) { s.swipeDelete = it }
-            Info("空格左右滑动移动光标，长按空格离线听写。")
+            Info("左右滑动空格移动光标，长按空格开始听写。")
             Nav("定制工具栏", "固定工具与排列顺序", "more") { openPage("toolbar") }
         }
         Spacer(Modifier.height(16.dp))
         Group("剪贴板设置") {
             Toggle("快捷粘贴", s.quickPaste) { s.quickPaste = it }
-            Info("新复制的内容仅在下次打开键盘时显示一次，点击即可粘贴。键盘打开期间复制的内容留待下次显示。")
+            Info("新复制的内容在下次打开键盘时显示一次，点击粘贴。")
         }
     }
     @Composable private fun Appearance() {
@@ -448,9 +453,9 @@ open class SettingsActivity : ComponentActivity() {
             }
             Choice("白色主题", s.theme == "light") { s.manualDark = false; s.theme = "light" }
             Choice("黑色主题", s.theme == "dark") { s.manualDark = true; s.theme = "dark" }
-            Nav("自定义白色主题", "以默认黑白配色为基础，独立保存15项颜色", "theme") { openPage("theme_light") }
-            Nav("自定义黑色主题", "以默认黑白配色为基础，独立保存15项颜色", "theme") { openPage("theme_dark") }
-            Info("默认使用原有黑白配色。选择黑色或白色会关闭跟随系统；两套颜色可分别自定义，键盘和设置同步应用。恢复默认只重置所选主题。")
+            Nav("自定义白色主题", "调整键盘与设置页配色", "theme") { openPage("theme_light") }
+            Nav("自定义黑色主题", "调整键盘与设置页配色", "theme") { openPage("theme_dark") }
+            Info("深浅两套配色分别保存，恢复默认只影响当前主题。")
         }
         Spacer(Modifier.height(16.dp))
         Group("文字与提示") {
@@ -516,7 +521,7 @@ open class SettingsActivity : ComponentActivity() {
         Group("主题预览") {
             SKeyTheme(tokens, dark) {
                 KeyboardThemePreview(tokens, s.toolbarPins, s.symbolHints)
-                Info("完整26键配色预览；可切换工具栏/候选栏，点击大写键查看选中配色。")
+                Info("点击切换候选栏或大写状态，预览对应颜色。")
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -605,8 +610,8 @@ open class SettingsActivity : ComponentActivity() {
                 Range("历史条数上限", model.settings.clipboardLimit, 1, 1000, "条") { value ->
                     model.settings.clipboardLimit = value
                 }
-                Info("新复制内容按上限淘汰旧记录；置顶内容优先保留。敏感标记内容不采集。")
-                Action("清空剪贴板历史") { ask("清空剪贴板历史？系统剪贴板不受影响。") { model.task { model.content.clearClipboard() } } }
+                Info("新超出上限时删除旧记录，优先保留置顶内容。不保存标记为敏感的内容。")
+                Action("清空剪贴板历史") { ask("清空剪贴板历史？如果系统剪贴板内容也在历史中，将一并清空。") { model.task { model.content.clearClipboard() } } }
                 if (model.clipboard.isEmpty()) Info("还没有剪贴板记录")
             } else {
                 Action(if (route == "phrases") "添加常用语" else "添加词条", !model.busy) { model.edit = ContentEdit(route) }
@@ -623,8 +628,6 @@ open class SettingsActivity : ComponentActivity() {
             else if (edit.id == null) "添加内容" else "编辑内容"
         if (customAi) {
             Modal(title, { if (!model.busy) model.edit = null }) {
-                Text("给常用指令取个名字，在键盘中一键使用", fontSize = 13.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceSecondary)
                 Spacer(Modifier.height(8.dp))
                 AiEditorField("名称", "例如：邮件润色", edit.first, 40, false) {
                     model.edit = edit.copy(first = it)
@@ -647,7 +650,7 @@ open class SettingsActivity : ComponentActivity() {
                         }
                     }
                 }
-                Text("强度越高通常等待越久；可用档位取决于所选模型。", fontSize = 12.sp,
+                Text("较高强度可能需要更长时间，部分模型不支持。", fontSize = 12.sp,
                     color = MiuixTheme.colorScheme.onSurfaceSecondary)
                 Spacer(Modifier.height(8.dp))
                 val canSave = !model.busy && edit.first.text.isNotBlank() && edit.second.text.isNotBlank()
@@ -710,11 +713,11 @@ open class SettingsActivity : ComponentActivity() {
         Group("识别方式") {
             Choice("离线语音", !ai) { model.settings.voiceMode = "offline" }
             Choice("AI 语音", ai) { model.settings.voiceMode = "ai" }
-            Info(if(ai) "录音交给 AI 识别，无需下载本地模型。需要联网，结束收音后会上传录音。" else "本地识别普通话，录音和转写均不上传。")
+            Info(if(ai) "录音上传至 AI 识别，需要联网。" else "本地识别普通话，录音和转写均不上传。")
         }
         if(ai) {
             Group("AI 语音") {
-                Info("点击工具栏语音开始，点击“识别语音”后上传识别，成功上屏后清空预览并继续聆听，点击取消结束。也可长按空格说话、松手识别；长按模式不会自动继续。单次录音最多 60 秒。")
+                Info("点击“识别语音”上传录音，上屏后继续收音，点击取消结束。也可长按空格说话，松手识别。单次最长 60 秒。")
                 Nav("AI 设置", "配置语音端点、密钥与模型", "settings") { openPage("api") }
                 Action("允许麦克风权限", !microphone) { micPicker.launch(Manifest.permission.RECORD_AUDIO) }
             }
@@ -723,8 +726,8 @@ open class SettingsActivity : ComponentActivity() {
         val installed = remember(voiceState) { ModelRepository(applicationContext).isInstalled() }
         Group("离线普通话") {
             Info("模型：${if (installed) "已导入" else "未导入"} · 麦克风：${if (microphone) "已允许" else "未允许"}", true)
-            Info("不保存录音，不上传转写。工具栏点击语音，或长按空格开始；松开空格结束收音。")
-            Info("下载指定约25 MB模型，解压后选择包含 model.int8.onnx 和 tokens.txt 的文件夹。")
+            Info("点击工具栏语音，或长按空格开始听写。录音不保存，识别结果不上传。")
+            Info("下载约 25 MB 的模型并解压，导入含 model.int8.onnx 和 tokens.txt 的文件夹。")
             Action("浏览器下载模型") { launch { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ModelRepository.DOWNLOAD_URL))) } }
             Action("选择模型文件夹", voiceState !is ModelImportCoordinator.State.Running) { launch { modelPicker.launch(null) } }
             Action("允许麦克风权限", !microphone) { micPicker.launch(Manifest.permission.RECORD_AUDIO) }
@@ -843,8 +846,8 @@ open class SettingsActivity : ComponentActivity() {
         }
     }
     @Composable private fun UiIcon(kind: String, description: String?) {
-        if (kind == "script") {
-            Text(if (model.settings.traditionalOutput) "繁" else "简", modifier = Modifier.size(24.dp))
+        if (kind == "script" || kind == "input_mode") {
+            Text(if (kind == "input_mode") model.settings.chineseInputMode.glyph else if (model.settings.traditionalOutput) "繁" else "简", modifier = Modifier.size(24.dp))
             return
         }
         Icon(painter = painterResource(io.secure.keyboard.ui.KeyboardIcons.resource(kind)), contentDescription = description,
@@ -879,7 +882,7 @@ open class SettingsActivity : ComponentActivity() {
         else -> if (route.startsWith("profile_")) "${if (route.contains("outer")) "外屏" else "内屏"} · ${if (route.endsWith("landscape")) "横屏" else "竖屏"}" else "偏好设置"
     }
     private fun toolName(id: String) = when(id) {
-        "script" -> "简繁转换"; "floating" -> "悬浮键盘"; "split" -> "分离键盘"; "theme" -> "切换主题"
+        "input_mode" -> "输入模式"; "script" -> "简繁转换"; "floating" -> "悬浮键盘"; "split" -> "分离键盘"; "theme" -> "切换主题"
         "quickedit" -> "快捷编辑"; "more" -> "更多"; else -> pageTitle(id)
     }
     companion object {

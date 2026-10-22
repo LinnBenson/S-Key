@@ -51,7 +51,7 @@ internal class ToolbarEditor(
         val pins = store.toolbarPins
         val preview = ui.card(body)
         ui.text(preview, "你的工具栏", 18f, true)
-        ui.text(preview, "顺序与键盘一致 · 更改自动保存", 12f)
+        ui.text(preview, "自动保存", 12f)
         val strip = LinearLayout(activity).apply {
             gravity = Gravity.CENTER_VERTICAL
             background = ui.shape(SettingsPalette.functional, 18)
@@ -67,7 +67,7 @@ internal class ToolbarEditor(
         ui.text(preview, "「更多」与「收起」始终保留。", 12f)
         val selected = ui.card(body)
         ui.text(selected, "已添加 · ${pins.size} 项", 17f, true)
-        ui.text(selected, "长按右侧 ≡ 拖动排序，点按可选择位置。", 12f)
+        ui.text(selected, "长按 ≡ 拖动排序，点按选择位置。", 12f)
         if (pins.isEmpty()) ui.text(selected, "工具栏还没有快捷项，从下方添加。", 14f)
         pins.forEachIndexed { index, id ->
             val row = LinearLayout(activity).apply {
@@ -134,7 +134,7 @@ internal class ToolbarEditor(
         if (available.isNotEmpty()) {
             val choices = ui.card(body)
             ui.text(choices, "添加快捷工具", 17f, true)
-            ui.text(choices, "不固定的工具仍可从键盘「更多」中打开。", 12f)
+            ui.text(choices, "其他工具可在“更多”中找到。", 12f)
             available.forEach { id ->
                 val row = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; tag = "anchor:tool:$id" }
                 choices.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = ui.dp(8) })

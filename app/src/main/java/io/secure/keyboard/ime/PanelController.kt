@@ -19,6 +19,12 @@ import io.secure.keyboard.*
 /** Clipboard, phrases, emoji, tools and layout panels. */
 internal object PanelController {
     internal fun KeyboardSession.openToolImpl(tool: String) {
+        if (tool == "input_mode") {
+            val modes = io.secure.keyboard.engine.ChineseInputMode.entries
+            settings.chineseInputMode = modes[(settings.chineseInputMode.ordinal + 1) % modes.size]
+            toast(settings.chineseInputMode.label)
+            return
+        }
         if (tool == "script") {
             settings.traditionalOutput = !settings.traditionalOutput
             renderHeader()

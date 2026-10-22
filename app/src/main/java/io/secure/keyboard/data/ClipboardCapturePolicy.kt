@@ -4,6 +4,11 @@ import android.content.ClipData
 
 /** Inspect metadata and length before allocating or queueing a full text copy. */
 internal object ClipboardCapturePolicy {
+    fun matchesDeleted(clip: ClipData, removed: Set<String>): Boolean =
+        clip.itemCount == 1 && clip.getItemAt(0).let { item ->
+            item.uri == null && item.intent == null && item.text?.toString() in removed
+        }
+
     fun textForHistory(clip: ClipData): String? {
         if (clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true)
             return null

@@ -530,8 +530,8 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
             val resize = requireNotNull(find(row.rootView, "调整悬浮键盘大小")) as ToolIcon
             val density = service.resources.displayMetrics.density
             assertTrue(
-                "Resize hit target remains 48dp wide",
-                abs(resize.width - 48 * density) <= 1f,
+                "Resize hit target follows the symmetric handle row",
+                abs(resize.width - (resize.parent as View).width * 17f / 94f) <= 1f,
             )
             assertTrue(
                 "Resize hit target remains 32dp high",
@@ -565,12 +565,12 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
                     actual.width() <= old.width() * .8f && actual.height() <= old.height() * .8f,
                 )
                 assertTrue(
-                    "Resize arrow remains horizontally centered",
-                    abs(actual.exactCenterX() - resize.width / 2f) <= 1f,
+                    "Resize arrow keeps its right inset",
+                    abs(resize.width - actual.right - 10 * density) <= 2f,
                 )
                 assertTrue(
-                    "Resize arrow remains vertically centered",
-                    abs(actual.exactCenterY() - resize.height / 2f) <= 1f,
+                    "Resize arrow stays inside the hit target",
+                    actual.top >= 0 && actual.bottom <= resize.height,
                 )
             } finally {
                 actualPixels.recycle()

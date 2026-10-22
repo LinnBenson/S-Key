@@ -7,7 +7,7 @@ import android.content.SharedPreferences
 import android.test.AndroidTestCase
 import java.io.File
 
-/** Device tests use isolated files/preferences and never modify Android's clipboard. */
+/** Isolated files/preferences; the clipboard integration case restores the prior clip. */
 @Suppress("DEPRECATION")
 class ContentStoreTest : AndroidTestCase() {
     private lateinit var sandbox: IsolatedContext
@@ -27,6 +27,29 @@ class ContentStoreTest : AndroidTestCase() {
         sandbox.root.deleteRecursively()
         sandbox.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().clear().commit()
         super.tearDown()
+    }
+
+    fun testDeletionClearsOnlyMatchingSystemClip() {
+        val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val original = manager.primaryClip
+        try {
+            val value = "skey-delete-fixture-" + java.util.UUID.randomUUID()
+            manager.setPrimaryClip(android.content.ClipData.newPlainText("", value))
+            assertEquals(value, manager.primaryClip?.getItemAt(0)?.text?.toString())
+            store.addClipboard(value)
+            store.deleteClipboard(store.clipboard().single().id)
+            assertFalse(manager.hasPrimaryClip())
+            manager.setPrimaryClip(android.content.ClipData.newPlainText("", "newer-copy"))
+            store.addClipboard(value)
+            store.deleteClipboard(store.clipboard().single().id)
+            assertEquals("newer-copy", manager.primaryClip?.getItemAt(0)?.text?.toString())
+            store.addClipboard("newer-copy")
+            store.clearClipboard()
+            assertFalse(manager.hasPrimaryClip())
+        } finally {
+            if (original != null) manager.setPrimaryClip(original)
+            else if (android.os.Build.VERSION.SDK_INT >= 28) manager.clearPrimaryClip()
+        }
     }
 
     fun testClipboardCharacterBudgetPreservesPinsAndNewestCopy() {

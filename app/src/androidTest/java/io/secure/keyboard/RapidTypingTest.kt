@@ -715,6 +715,8 @@ class RapidTypingTest : InstrumentationTestCase() {
     }
 
     fun testDifferentKeyOverlapCannotRearmSpaceVoiceAfterOtherFingerLifts() {
+        // Isolate overlapping-touch voice cancellation from English candidate selection.
+        SettingsStore(context).englishCompletion = false
         reset(false)
         instrumentation.runOnMainSync {
             down(7, center(key("English")))
@@ -725,11 +727,13 @@ class RapidTypingTest : InstrumentationTestCase() {
         instrumentation.runOnMainSync {
             assertFalse(field<Boolean>("heldVoice"))
             up(7)
-            assertEquals("q ", editor.text.toString())
         }
+        awaitOrderedInput("q ", "")
     }
 
     fun testSpaceAsSecondFingerCannotStartVoiceAfterFirstKeyReleases() {
+        // Isolate overlapping-touch voice cancellation from English candidate selection.
+        SettingsStore(context).englishCompletion = false
         reset(false)
         instrumentation.runOnMainSync {
             down(22, center(key("q")))
@@ -740,8 +744,8 @@ class RapidTypingTest : InstrumentationTestCase() {
         instrumentation.runOnMainSync {
             assertFalse(field<Boolean>("heldVoice"))
             up(7)
-            assertEquals("q ", editor.text.toString())
         }
+        awaitOrderedInput("q ", "")
     }
 
     private fun waitPastHoldDeadline() {

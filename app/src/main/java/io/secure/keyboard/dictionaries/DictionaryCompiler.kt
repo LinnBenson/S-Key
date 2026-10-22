@@ -11,18 +11,20 @@ object DictionaryCompiler {
         val db=SQLiteDatabase.openOrCreateDatabase(output,null)
         try {
             db.rawQuery("PRAGMA journal_mode=DELETE",null).use { check(it.moveToFirst() && it.getString(0).equals("delete",ignoreCase=true)) }
+            db.execSQL("PRAGMA user_version=2")
             db.execSQL("CREATE TABLE words(kind TEXT NOT NULL,text TEXT NOT NULL,code TEXT NOT NULL,weight INTEGER NOT NULL,ordinal INTEGER NOT NULL,priority INTEGER NOT NULL,compact TEXT NOT NULL,fuzzy TEXT NOT NULL,syllable TEXT NOT NULL,UNIQUE(kind,text,code))")
             db.beginTransaction()
             try {
                 val insert=db.compileStatement("INSERT OR IGNORE INTO words VALUES(?,?,?,?,?,?,?,?,?)")
                 val promote=db.compileStatement("UPDATE words SET priority=min(priority,?) WHERE kind=? AND text=? AND code=?")
                 insert.use { ins -> promote.use { pro ->
-                    source.rawQuery("SELECT l.kind,e.text,e.code,e.weight,e.id,l.priority FROM entries e JOIN libraries l ON l.id=e.library ORDER BY l.id,e.id",null).use { c ->
+                    source.rawQuery("SELECT l.kind,e.text,e.code,e.weight,e.id,l.priority,l.filename FROM entries e JOIN libraries l ON l.id=e.library ORDER BY l.id,e.id",null).use { c ->
                         var ordinal=0L
                         while(c.moveToNext()) {
                             if (Thread.currentThread().isInterrupted) error("编译已中断")
-                            val kind=c.getString(0); val text=c.getString(1); val code=c.getString(2); val weight=c.getLong(3)
-                            validate(kind,text,code,weight)
+                            val sourceKind=c.getString(0); val filename=c.getString(6)
+                            val kind=if(sourceKind=="pinyin" && filename=="pinyin_initials.dict.yaml") "pinyin_initial" else sourceKind; val text=c.getString(1); val code=c.getString(2); val weight=c.getLong(3)
+                            validate(sourceKind,text,code,weight)
                             val priority=if(c.getInt(5)!=0) ordinal else Long.MAX_VALUE
                             val compact=code.replace(" ","")
                             ins.bindString(1,kind); ins.bindString(2,text); ins.bindString(3,code); ins.bindLong(4,weight)
@@ -30,6 +32,9 @@ object DictionaryCompiler {
                             ins.bindString(8,if(kind=="pinyin") DictionaryEngine.fuzzyInputKey(code) else "")
                             ins.bindString(9,if(kind=="pinyin" && !code.contains(' ') && text.codePointCount(0,text.length)==1) code else "")
                             ins.executeInsert()
+                            if (kind=="pinyin" && filename=="pinyin_simp.dict.yaml") {
+                                ins.bindString(1,"mixed_pinyin"); ins.executeInsert()
+                            }
                             if(priority!=Long.MAX_VALUE) { pro.bindLong(1,priority); pro.bindString(2,kind); pro.bindString(3,text); pro.bindString(4,code); pro.executeUpdateDelete() }
                             ordinal++
                             if(ordinal%10000L==0L) progress("正在编译 $ordinal 条")
@@ -43,6 +48,8 @@ object DictionaryCompiler {
             db.execSQL("CREATE INDEX exact_words ON words(kind,compact,priority,weight DESC,ordinal)")
             db.execSQL("CREATE INDEX fuzzy_words ON words(kind,fuzzy,weight DESC,ordinal) WHERE kind='pinyin'")
             db.execSQL("CREATE INDEX syllable_words ON words(kind,syllable,weight DESC,ordinal) WHERE kind='pinyin'")
+            db.execSQL("CREATE INDEX mixed_fuzzy_words ON words(kind,fuzzy,weight DESC,ordinal) WHERE kind='mixed_pinyin'")
+            db.execSQL("CREATE INDEX mixed_syllable_words ON words(kind,syllable,weight DESC,ordinal) WHERE kind='mixed_pinyin'")
             db.rawQuery("PRAGMA integrity_check",null).use { check(it.moveToFirst() && it.getString(0)=="ok") }
         } finally { db.close() }
     }
@@ -51,7 +58,7 @@ object DictionaryCompiler {
         require(weight >= 0) { "词频须为 非负 的整数" }
         require(when(kind) {
             "wubi" -> code.length in 1..4 && code.all { it in 'a'..'z' }
-            "pinyin" -> code.length in 1..64 && code.split(' ').all { part -> part.isNotEmpty() && part.all { it in 'a'..'z' } }
+            "pinyin" -> (code.length == 1 && code[0] in 'a'..'z') || code.length in 1..64 && code.split(' ').all { part -> part in PinyinSyllables.values }
             "english" -> text.length in 2..40 && text.all { it in 'a'..'z' } && code==text && weight>0
             else -> false
         }) { "编码格式不正确：五笔为 1–4 个小写字母；拼音用空格分隔音节；英文为 2–40 个小写字母且词频大于 0" }

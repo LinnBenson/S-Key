@@ -22,7 +22,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
     var revision by remember { mutableIntStateOf(0) }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var draft by rememberSaveable { mutableStateOf("") }
-    var message by rememberSaveable { mutableStateOf("保存后，下次生成使用新提示词；已有续聊会重新开始。") }
+    var message by rememberSaveable { mutableStateOf("修改后下次生成生效，并重新开始会话。") }
     val colors = MiuixTheme.colorScheme
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Text(message, color = colors.onSurfaceSecondary, fontSize = 14.sp) }
@@ -36,10 +36,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
                     definitions.forEach { prompt ->
                         val value = remember(revision, prompt.id) { store.read(prompt.id) }
                         BasicComponent(title = prompt.title, summary = when {
-                            prompt.id == "custom_common" && value.isBlank() -> "默认留空 · 仅使用用户填写的自定义指令"
-                            value == prompt.default -> "使用默认提示词 · 点击编辑"
+                            prompt.id == "custom_common" && value.isBlank() -> "留空 · 仅使用自定义指令"
+                            value == prompt.default -> "默认"
                             value.isBlank() -> "已设为空"
-                            else -> "已修改 · 点击编辑"
+                            else -> "已修改"
                         }, onClick = { draft = store.read(prompt.id); selected = prompt.id })
                     }
                 }
@@ -53,7 +53,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
                 Column(Modifier.padding(20.dp).imePadding().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text(definition.title, fontSize = 20.sp)
                     Text(when (id) {
-                        "custom_common" -> "留空时不附加任何内置提示词。填写后，将放在用户自定义指令之前；不继承普通 AI 通用提示词。"
+                        "custom_common" -> "留空时只使用自定义指令。填写的内容会加在指令前，不使用普通 AI 通用要求。"
                         "common" -> "用于润色、扩写、语气和翻译，不用于自定义 AI。"
                         "translate" -> "{target} 会替换为当前选择的目标语言。"
                         else -> "与普通 AI 通用提示词一起使用。"

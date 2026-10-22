@@ -62,7 +62,10 @@ class KeyboardUiTest : InstrumentationTestCase() {
                 if (current is MainActivity) {
                     // Rotation recreates MainActivity: never retain its old editor connection.
                     activity = current
-                    findEditor(current.window.decorView)?.let { editor = it }
+                    editor = findEditor(current.window.decorView) ?: EditText(current).also {
+                        it.inputType = android.text.InputType.TYPE_CLASS_TEXT
+                        current.setContentView(it)
+                    }
                 }
             }
 

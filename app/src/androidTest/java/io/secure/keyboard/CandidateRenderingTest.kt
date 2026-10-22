@@ -52,6 +52,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     private var originalSpacing = false
     private var originalCompletion = true
     private var originalChinese = true
+    private var originalMode = io.secure.keyboard.engine.ChineseInputMode.MIXED
     private var originalFourCode = false
     private var originalKeySound = false
     private var originalVibration = true
@@ -101,6 +102,8 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     override fun setUp() {
         super.setUp()
         val settings = SettingsStore(context)
+        originalMode = settings.chineseInputMode
+        settings.chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.MIXED
         originalToolbarPins = settings.toolbarPins
         originalSpacing = settings.autoChineseSpacing
         settings.autoChineseSpacing = false
@@ -138,6 +141,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             if (::harness.isInitialized) harness.close()
             if (::activity.isInitialized) activity.finish()
         }
+        SettingsStore(context).chineseInputMode = originalMode
         SettingsStore(context).toolbarPins = originalToolbarPins
         SettingsStore(context).autoChineseSpacing = originalSpacing
         SettingsStore(context).englishCompletion = originalCompletion
@@ -2411,6 +2415,103 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 assertEquals(1, host.haptics.effects.size)
             }
         }
+    }
+
+    fun testSingleLetterPinyinCandidatesAreNotMixedCandidates() {
+        onMainChecked { SettingsStore(context).chineseInputMode=io.secure.keyboard.engine.ChineseInputMode.PINYIN }
+        instrumentation.waitForIdleSync()
+        query(true,"n")
+        assertEquals("你",field<List<String>>("candidateTexts").first())
+        onMainChecked { invoke("space") }
+        assertEquals("你",connection.before)
+        query(true,"n")
+        assertTrue(field<List<String>>("candidateTexts").size>=381)
+        val tail=field<List<String>>("candidateTexts").last()
+        onMainChecked { assertEquals(true,invoke("choose",tail)) }
+        assertEquals(tail,connection.before)
+        onMainChecked { invoke("clearPending"); SettingsStore(context).chineseInputMode=io.secure.keyboard.engine.ChineseInputMode.MIXED }
+        instrumentation.waitForIdleSync()
+        query(true,"n")
+        assertFalse(field<List<String>>("candidateTexts").contains("你"))
+    }
+
+    fun testPinyinSegmentsSentenceAndFourCodeIsolation() {
+        onMainChecked {
+            SettingsStore(context).chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.PINYIN
+            SettingsStore(context).fourCodeAutoCommit = true
+        }
+        instrumentation.waitForIdleSync()
+        typePending("niha")
+        assertEquals("", connection.before)
+        assertEquals("niha",field<String>("code"))
+        onMainChecked { invoke("clearPending") }
+        val started=SystemClock.uptimeMillis()
+        typePending("nihaowoshizhongguoren")
+        assertTrue(field<List<String>>("candidateTexts").contains("你好我是中国人"))
+        onMainChecked { assertEquals(true,invoke("choose","你好")) }
+        awaitResults()
+        assertEquals("",connection.before)
+        assertEquals("woshizhongguoren",field<String>("code"))
+        assertEquals("你好",field<io.secure.keyboard.engine.PinyinComposition>("pinyinComposition").text)
+        onMainChecked { assertEquals(true,invoke("choose","我是中国人")) }
+        assertEquals("你好我是中国人",connection.before)
+        assertEquals("",field<String>("code"))
+        instrumentation.sendStatus(0,android.os.Bundle().apply { putString("pinyin_elapsed_ms",(SystemClock.uptimeMillis()-started).toString()) })
+    }
+
+    fun testPinyinCustomWordsSymbolsAndUndo() {
+        val store=ContentStore(context)
+        val word="拼音模式专用回归词"
+        val previous=store.dictionary().map { it.id }.toSet()
+        try {
+            store.addDictionary(word,"ceshi")
+            onMainChecked { SettingsStore(context).chineseInputMode=io.secure.keyboard.engine.ChineseInputMode.PINYIN }
+            instrumentation.waitForIdleSync()
+            typePending("ceshi")
+            assertEquals(word,field<List<String>>("candidateTexts").first())
+            onMainChecked { invoke("space") }
+            assertEquals(word,connection.before)
+            onMainChecked { invoke("clearPending"); connection.before="" }
+            typePending("nihaowo")
+            onMainChecked { assertEquals(true,invoke("choose","你好")) }
+            awaitResults()
+            onMainChecked { invoke("backspace") }
+            assertEquals("w",field<String>("code"))
+            onMainChecked { invoke("backspace") }
+            assertEquals("nihao",field<String>("code"))
+            assertEquals("",field<io.secure.keyboard.engine.PinyinComposition>("pinyinComposition").text)
+            onMainChecked {
+                invoke("clearPending")
+                setField("symbols",true); setField("symbolPage",false); invoke("renderBody")
+                assertTrue(field<Boolean>("chinese"))
+                invoke("type","。")
+            }
+            assertEquals("。",connection.before)
+        } finally {
+            store.dictionary().filter { it.id !in previous && it.word==word }.forEach { store.deleteDictionary(it.id) }
+        }
+    }
+
+    fun testPinyinContextPredictionAndModeToolbar() {
+        onMainChecked { SettingsStore(context).chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.PINYIN }
+        instrumentation.waitForIdleSync()
+        query(true,"zhong")
+        onMainChecked { assertEquals(true,invoke("choose","中")) }
+        awaitResults()
+        assertTrue(field<List<String>>("candidateTexts").any { it.startsWith("国") })
+        val prediction=field<List<String>>("candidateTexts").first()
+        onMainChecked { assertEquals(true,invoke("choose",prediction)) }
+        assertEquals("中"+prediction,connection.before)
+        onMainChecked { invoke("openTool","input_mode") }
+        instrumentation.waitForIdleSync()
+        assertEquals(io.secure.keyboard.engine.ChineseInputMode.WUBI,SettingsStore(context).chineseInputMode)
+        query(true,"ni")
+        assertFalse(field<List<String>>("candidateTexts").contains("你"))
+        onMainChecked { invoke("openTool","input_mode") }
+        instrumentation.waitForIdleSync()
+        assertEquals(io.secure.keyboard.engine.ChineseInputMode.MIXED,SettingsStore(context).chineseInputMode)
+        query(true,"ni")
+        assertTrue(field<List<String>>("candidateTexts").contains("你"))
     }
 
     fun testEnglishSpaceSelectsFirstCandidateAndKeepsSingleSpace() {

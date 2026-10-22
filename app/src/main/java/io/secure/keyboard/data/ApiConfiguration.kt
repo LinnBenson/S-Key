@@ -32,7 +32,7 @@ internal data class ApiConfiguration(
                 uri.userInfo == null && uri.query == null && uri.fragment == null) { "接口地址需为 HTTPS，不能包含密钥、查询参数或片段" }
             return value.trim().trimEnd('/')
         }
-        require(!googleKey.contains('\n') && !grokKey.contains('\n') && !grokKey.contains('\r')) { "密钥不能包含换行" }
+        require(!googleKey.contains('\n') && !googleKey.contains('\r') && !grokKey.contains('\n') && !grokKey.contains('\r')) { "密钥不能包含换行" }
         require(!voiceKey.contains('\n') && !voiceKey.contains('\r')) { "密钥不能包含换行" }
         return copy(voiceUrl = endpoint(voiceUrl), voiceKey = voiceKey.trim(), voiceModel = voiceModel.trim().ifEmpty { "grok-voice-transcribe-2.0" }, googleUrl = endpoint(googleUrl), grokUrl = endpoint(grokUrl),
             googleKey = googleKey.trim(), grokKey = grokKey.trim(), googleModel = googleModel.trim().ifEmpty { "nmt" }, grokModel = grokModel.trim())

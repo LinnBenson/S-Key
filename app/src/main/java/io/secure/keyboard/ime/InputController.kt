@@ -21,6 +21,7 @@ internal object InputController {
         queuedKeys.clear()
         queueSaturationNotified = false
         clearComposition()
+        pinyinContext = ""
     }
 
     /** Successful ordered commits clear the code without discarding later queued keystrokes. */
@@ -28,6 +29,7 @@ internal object InputController {
         generation++
         candidateQueries.clear()
         code = ""
+        pinyinComposition.clear()
         clearCandidates()
         if (candidatesExpanded) {
             candidatesExpanded = false
@@ -98,7 +100,26 @@ internal object InputController {
                 candidateConnection !== ic || value !in candidateTexts
         ) return false
         if (chinese) {
-            if (candidateQuery != code || code.isEmpty()) return false
+            if (candidateQuery != code) return false
+            if (settings.chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) {
+                val choice = pinyinCandidates.firstOrNull { it.text == value } ?: return false
+                feedback()
+                if (choice.consumed < code.length) {
+                    val remaining = code.drop(choice.consumed).trimStart('\'')
+                    val consumed = code.dropLast(remaining.length)
+                    pinyinComposition.select(value, consumed)
+                    code = remaining
+                    refreshCandidates()
+                    return true
+                }
+                val sentence = pinyinComposition.text + value
+                if (!commitInputText(sentence)) return false
+                pinyinContext = (pinyinContext + sentence).takeLast(16)
+                clearComposition()
+                refreshCandidates()
+                return true
+            }
+            if (code.isEmpty()) return false
             feedback()
             if (!commitInputText(value)) return false
             clearComposition()
@@ -257,6 +278,7 @@ internal object InputController {
     }
 
     internal fun KeyboardSession.commitImpl(value: String) {
+        pinyinContext = ""
         commitInputText(value)
         refreshCandidates()
     }
@@ -269,7 +291,7 @@ internal object InputController {
                 !shifted &&
                 !capsLocked &&
                 s.length == 1 &&
-                s[0] in 'a'..'z'
+                (s[0] in 'a'..'z' || (s == "'" && code.isNotEmpty() && settings.chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN))
         // Capture case/mode at release. A later Shift or symbol-page change must not reinterpret
         // a key that is waiting behind an earlier Chinese confirmation.
         if (shifted && !capsLocked) {
@@ -350,10 +372,10 @@ internal object InputController {
         if (asCode) {
             if(aiMode) aiDraftEpoch++
             if (translation.enabled && !aiMode) { translation.invalidate(); updateTranslationPreview() }
-            if (code.length >= 40) return
+            if (code.length + pinyinComposition.rawLength >= if (settings.chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) 128 else 40) return
             code += s.lowercase()
             refreshCandidates()
-            if (settings.fourCodeAutoCommit && code.length == 4 && loaded) {
+            if (settings.chineseInputMode != io.secure.keyboard.engine.ChineseInputMode.PINYIN && settings.fourCodeAutoCommit && code.length == 4 && loaded) {
                 engine.exactWubi(code, 1).firstOrNull()?.let {
                     // A detached or temporarily unavailable host may reject the edit.
                     // Retain composition and candidates so the user can retry explicitly.
@@ -385,6 +407,10 @@ internal object InputController {
             }
             val committed = choose(candidateTexts.first())
             if (!committed) toast("输入框暂时无法接收文字，请重试")
+            if (committed && code.isNotEmpty() && suffix != null) {
+                confirmChinese(suffix)
+                return false
+            }
             return committed
         }
         if (!loaded && dictionaryLoadFailed) {
@@ -412,7 +438,7 @@ internal object InputController {
         if (first == null) {
             toast("没有匹配候选，请修改编码或按回车输入编码")
         } else if (choose(first)) {
-            pending.suffix?.let { commit(it) }
+            pending.suffix?.let { if (code.isEmpty()) commit(it) else confirmChinese(it) }
         } else {
             toast("输入框暂时无法接收文字，请重试")
         }
@@ -453,6 +479,13 @@ internal object InputController {
 
     internal fun KeyboardSession.performBackspaceImpl(tap: Boolean) {
         dismissQuickPasteOnInput()
+        pinyinContext = ""
+        if (chinese && settings.chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN && (code.isNotEmpty() || pinyinComposition.text.isNotEmpty())) {
+            if (code.isNotEmpty()) code = code.dropLast(1)
+            if (code.isEmpty()) pinyinComposition.undo()?.let { code = it }
+            refreshCandidates()
+            return
+        }
         // Unconfirmed Chinese input belongs to the composition, not the editor's text.
         if (translation.enabled && chinese && code.isNotEmpty()) {
             assistantBackspaceTapAt = 0L
@@ -503,6 +536,7 @@ internal object InputController {
 
     /** Host cursor navigation preserves the editor's own Unicode/grapheme and selection rules. */
     internal fun KeyboardSession.moveCursorImpl(direction: Int) {
+        pinyinContext = ""; clearCandidates()
         if (translation.enabled && activeAssistantEditor()==null) return
         arrow(if (direction < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT)
     }
@@ -522,7 +556,7 @@ internal object InputController {
 
     internal fun KeyboardSession.applyEnterImpl() {
         if (chinese && code.isNotEmpty()) {
-            val rawCode = code
+            val rawCode = pinyinComposition.text + code
             if (!commitInputText(rawCode)) return
             clearComposition()
             renderHeader()

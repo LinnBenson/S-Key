@@ -139,7 +139,7 @@ internal object KeyboardViewController {
     internal fun KeyboardSession.iconImpl(name: String, description: String, action: () -> Unit) =
         ToolIcon(
             this,
-            if (name == "script") {
+            if (name == "input_mode") "mode_" + settings.chineseInputMode.id else if (name == "script") {
                 if (settings.traditionalOutput) "script_traditional" else "script"
             } else if (name == "floating") {
                 if (profile.floating) "floating_exit" else "floating_enter"
@@ -148,7 +148,7 @@ internal object KeyboardViewController {
         ).apply {
             KeyboardFeedback.disableAutomatic(this)
             isSelected = toolIsSelected(name)
-            contentDescription = if (name == "script") (if (settings.traditionalOutput) "繁体输出，点击切换简体" else "简体输出，点击切换繁体") else description
+            contentDescription = if (name == "input_mode") settings.chineseInputMode.label + "，点击切换输入模式" else if (name == "script") (if (settings.traditionalOutput) "繁体输出，点击切换简体" else "简体输出，点击切换繁体") else description
             isClickable = true
             isFocusable = true
             val feedback = installPressFeedback()
@@ -287,11 +287,11 @@ internal object KeyboardViewController {
     }
 
     internal fun KeyboardSession.showsCandidateModeImpl() = !secret && panel == "keys" &&
-        ((chinese && code.isNotEmpty()) || (!chinese && candidateTexts.isNotEmpty()))
+        ((chinese && (code.isNotEmpty() || candidateTexts.isNotEmpty())) || (!chinese && candidateTexts.isNotEmpty()))
 
     internal fun KeyboardSession.renderHeaderImpl() {
         if (!headerInitialized) return
-        val visibleCode = if (secret) "" else code
+        val visibleCode = if (secret) "" else pinyinComposition.text + code
         if (preedit.text.toString() != visibleCode) preedit.text = visibleCode
         val showCode = !secret && chinese && code.isNotEmpty()
         val codeVisibility = if (showCode) View.VISIBLE else View.GONE
@@ -320,7 +320,7 @@ internal object KeyboardViewController {
             active && !secret && settings.quickPaste && panel == "keys" && !translation.enabled
         }
         val pasteRevision = quickPasteState.revision
-        val signature = "$panel:${translation.enabled}:$aiMode:${settings.traditionalOutput}:${paste != null}:$pasteRevision" to settings.toolbarPins.toList()
+        val signature = "$panel:${translation.enabled}:$aiMode:${settings.traditionalOutput}:${settings.chineseInputMode.id}:${paste != null}:$pasteRevision" to settings.toolbarPins.toList()
         if (!hasCandidates && toolbarSignature != signature) {
             toolbarGroup.removeAllViews()
             toolbarGroup.addView(
@@ -478,6 +478,7 @@ internal object KeyboardViewController {
     internal fun KeyboardSession.renderKeysImpl() {
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(column, FrameLayout.LayoutParams(-1, -1))
+        val letterSymbols = io.secure.keyboard.data.LetterSymbolStore(this)
         val rows =
             if (symbols) io.secure.keyboard.data.SymbolKeyboardStore(this).rows(chinese, symbolPage)
             else listOf("qwertyuiop", "asdfghjkl", "zxcvbnm").map { row -> row.map { it.toString() } }
@@ -533,7 +534,7 @@ internal object KeyboardViewController {
                         line,
                         s,
                         1f,
-                        if (!symbols) alternate(ch.single()) else "",
+                        if (!symbols) letterSymbols.symbols(chinese, ch.single()) else "",
                         { type(if (!symbolRow && shifted) ch.uppercase() else ch.toString(),
                             fromSymbolPage = symbolRow) },
                     )
@@ -566,7 +567,7 @@ internal object KeyboardViewController {
             if (chinese) "。" else ",",
             { type(if (chinese) "，" else ".") },
         )
-        addKey(bottom, if (chinese) "五笔" else "English", 42f, "", { space() }, isSpace = true)
+        addKey(bottom, if (chinese) { if (settings.chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) "拼音" else "五笔" } else "English", 42f, "", { space() }, isSpace = true)
         addKey(
             bottom,
             "◎",
@@ -681,48 +682,7 @@ internal object KeyboardViewController {
     }
 
     internal fun KeyboardSession.alternateImpl(c: Char): String {
-        val idx = "qwertyuiop".indexOf(c)
-        if (idx >= 0) return (idx + 1).let { if (it == 10) "0" else "$it" }
-        val map =
-            if (chinese)
-                mapOf(
-                    'a' to "！",
-                    's' to "？",
-                    'd' to "、",
-                    'f' to "；",
-                    'g' to "：",
-                    'h' to "（",
-                    'j' to "）",
-                    'k' to "“”",
-                    'l' to "‘’",
-                    'z' to "～",
-                    'x' to "—",
-                    'c' to "…",
-                    'v' to "《》",
-                    'b' to "【】",
-                    'n' to "@",
-                    'm' to "&",
-                )
-            else
-                mapOf(
-                    'a' to "@",
-                    's' to "#",
-                    'd' to "$",
-                    'f' to "%",
-                    'g' to "&",
-                    'h' to "*",
-                    'j' to "(",
-                    'k' to ")",
-                    'l' to "'",
-                    'z' to "-",
-                    'x' to "_",
-                    'c' to "/",
-                    'v' to ":",
-                    'b' to ";",
-                    'n' to "!",
-                    'm' to "?",
-                )
-        return map[c] ?: ""
+        return io.secure.keyboard.data.LetterSymbolStore(this).symbols(chinese, c)
     }
 
     internal fun KeyboardSession.updateShiftKeyFacesImpl() {
@@ -841,7 +801,7 @@ internal object KeyboardViewController {
             container.addView(
                 if (combinedPunctuation) {
                     PunctuationKeyLabel(this).apply {
-                        this.text = alternatives.take(1)
+                        this.text = alternatives.codePoints().findFirst().orElse(0).let { String(Character.toChars(it)) }
                         inkCenterYFraction = 1f / 3f
                         textSize = 23f
                         setTextColor(ink)
@@ -850,7 +810,7 @@ internal object KeyboardViewController {
                         )
                     }
                 } else {
-                    label(alternatives.take(1), 9f, muted).apply {
+                    label(alternatives.codePoints().findFirst().orElse(0).let { String(Character.toChars(it)) }, 9f, muted).apply {
                         gravity = Gravity.TOP or Gravity.END
                         setPadding(0, dp(3), dp(5), 0)
                     }
@@ -908,7 +868,7 @@ internal object KeyboardViewController {
             } else if (alternatives.isNotEmpty() && settings.longPressSymbols) {
                 keyFeedback()
                 long = true
-                choices = alternatives.map { it.toString() }
+                choices = alternatives.codePoints().toArray().map { String(Character.toChars(it)) }
                 // Password fields keep alternate-key input, but never magnify its text.
                 // The hidden selector uses the same key anchor for the existing slide gesture.
                 if (!secret) {

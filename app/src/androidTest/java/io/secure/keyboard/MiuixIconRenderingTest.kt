@@ -60,7 +60,8 @@ class MiuixIconRenderingTest : InstrumentationTestCase() {
 
     fun testIconsAdaptToLiveCellResize() {
         val density = instrumentation.targetContext.resources.displayMetrics.density
-        for (kind in listOf("shift", "backspace", "globe", "enter", "floating_exit", "hide", "resize", "drag_handle")) {
+        // Shift intentionally uses the caps-lock union bounds to avoid jumping when toggled.
+        for (kind in listOf("caps", "backspace", "globe", "enter", "floating_exit", "hide", "resize", "drag_handle")) {
             instrumentation.runOnMainSync {
                 val icon = io.secure.keyboard.ui.ToolIcon(instrumentation.targetContext, kind)
                 // Reuse the view: resizing must update the matrix in both directions.

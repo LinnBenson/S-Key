@@ -30,7 +30,7 @@ class PinnedContentStoreTest : AndroidTestCase() {
 
     fun testPinUnpinAndDeletePersistByIdAcrossInstances() {
         store.addClipboard("same")
-        store.addClipboard("same")
+        store.addClipboard("other")
         store.addPhrase("same")
         store.addPhrase("same")
         val clipboard = store.clipboard()
@@ -86,20 +86,20 @@ class PinnedContentStoreTest : AndroidTestCase() {
         assertEquals(listOf(original[3].id, original[0].id, original[1].id, original[2].id), store.phrases().map { it.id })
     }
 
-    fun testClipboardCapacityEvictsOldestUnpinnedAndKeepsDuplicateCopies() {
+    fun testClipboardCapacityEvictsOldestUnpinnedAndKeepsNewestCopies() {
         settings.clipboardLimit = 3
         assertTrue(store.captureClipboard("same", 1000L, true))
         val pinnedId = store.clipboard().single().id
         store.setClipboardPinned(pinnedId, true)
-        assertTrue(store.captureClipboard("same", 1001L, true))
+        assertTrue(store.captureClipboard("second", 1001L, true))
         val secondId = store.clipboard().last().id
-        assertTrue(store.captureClipboard("same", 1002L, true))
+        assertTrue(store.captureClipboard("third", 1002L, true))
         val thirdId = store.clipboard().last().id
-        assertTrue(store.captureClipboard("same", 1003L, true))
+        assertTrue(store.captureClipboard("fourth", 1003L, true))
         val rows = store.clipboard()
         assertEquals(3, rows.size)
         assertEquals(3, rows.map { it.id }.distinct().size)
-        assertEquals(listOf("same", "same", "same"), rows.map { it.text })
+        assertEquals(listOf("same", "third", "fourth"), rows.map { it.text })
         assertEquals(listOf(pinnedId, thirdId), rows.take(2).map { it.id })
         assertFalse(rows.any { it.id == secondId })
         assertTrue(rows.first().pinned)
@@ -240,8 +240,8 @@ class PinnedContentStoreTest : AndroidTestCase() {
         assertEquals(1, store.clipboard().size)
         assertTrue(reopened.captureClipboard("same", 2001L, newCopyEvent = false))
         assertFalse(store.captureClipboard("same", 2001L, newCopyEvent = true))
-        assertEquals(2, store.clipboard().size)
-        assertEquals(2, store.clipboard().map { it.id }.distinct().size)
+        assertEquals(1, store.clipboard().size)
+        assertEquals(1, store.clipboard().map { it.id }.distinct().size)
     }
 
     fun testRapidIdenticalTextWithDistinctCopyTokensIsNotDebounced() {
@@ -250,8 +250,8 @@ class PinnedContentStoreTest : AndroidTestCase() {
             assertTrue(store.captureClipboard("identical text", 3000L + index, true))
             assertFalse(store.captureClipboard("identical text", 3000L + index, true))
         }
-        assertEquals(60, store.clipboard().size)
-        assertEquals(60, store.clipboard().map { it.id }.distinct().size)
+        assertEquals(1, store.clipboard().size)
+        assertEquals(1, store.clipboard().map { it.id }.distinct().size)
         assertTrue(store.clipboard().all { it.text == "identical text" })
     }
 

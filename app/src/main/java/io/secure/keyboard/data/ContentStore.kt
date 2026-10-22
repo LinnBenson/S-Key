@@ -1,5 +1,7 @@
 package io.secure.keyboard.data
 
+import android.content.ClipData
+import android.os.Build
 import android.content.ClipboardManager
 import android.content.Context
 import android.util.JsonWriter
@@ -340,15 +342,34 @@ class ContentStore(context: Context) {
     fun deleteClipboard(id: String) =
         synchronized(lock) {
             clipboardEpoch.incrementAndGet()
-            mutate("clipboard") { it.removeAll { row -> row.optString("id") == id } }
+            var removed: String? = null
+            mutate("clipboard") { list ->
+                removed = list.find { it.optString("id") == id }?.getString("text")
+                list.removeAll { row -> row.optString("id") == id }
+            }
+            removed?.let { clearSystemClipboardIfMatching(setOf(it)) }
         }
 
     fun clearClipboard() =
         synchronized(lock) {
             clipboardEpoch.incrementAndGet()
-            suppressCurrentClipboard()
+            val removed = clipboard().map { it.text }.toSet()
             removeCategory("clipboard")
+            suppressCurrentClipboard()
+            clearSystemClipboardIfMatching(removed)
         }
+
+    private fun clearSystemClipboardIfMatching(removed: Set<String>) {
+        val manager = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        // Never coerce URIs or intents into text, or erase unrelated multi-item content.
+        val clip = try { manager.primaryClip } catch (_: SecurityException) { null } ?: return
+        if (!ClipboardCapturePolicy.matchesDeleted(clip, removed)) return
+        suppressCurrentClipboard()
+        try {
+            if (Build.VERSION.SDK_INT >= 28) manager.clearPrimaryClip()
+            else manager.setPrimaryClip(ClipData.newPlainText("", ""))
+        } catch (_: SecurityException) { /* The OS can revoke clipboard access on focus loss. */ }
+    }
 
     private fun suppressCurrentClipboard() {
         val manager = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -657,6 +678,9 @@ class ContentStore(context: Context) {
     fun clearAll() =
         synchronized(lock) {
             clipboardEpoch.incrementAndGet()
+            // Explicit full erasure must also recover a corrupt content file.
+            val removedClips = try { clipboard().map { it.text }.toSet() }
+                catch (_: ContentReadException) { emptySet() }
             aiPresetEpoch.incrementAndGet()
             AiConversationStore(app).clear()
             settings.lastCustomAiPresetId = null
@@ -664,6 +688,7 @@ class ContentStore(context: Context) {
             invalidateDictionarySnapshots()
             suppressCurrentClipboard()
             filesIn(dir).forEach { deleteVerified(it) }
+            clearSystemClipboardIfMatching(removedClips)
             purgeCaches()
         }
 

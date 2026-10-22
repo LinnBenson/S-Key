@@ -47,7 +47,7 @@ object DictionarySource {
         val buffer=ByteArray(8192); var size=0L
         while(true) { val count=source.read(buffer); if(count<0) break; size+=count; require(size<=64*1024*1024) { "词库文件不能超过 64 MiB" }; out.write(buffer,0,count) }
     } }.also {
-        // Validate encoding/line bounds, but leave syntax validation to Compile.
+        // Encoding and bounded lines are checked before syntax validation and publication.
         reader(output.inputStream()).use { r -> while(r.rawLine()!=null) {} }
     }
     fun find(file: File,query: String,after: Int): Int? = reader(file.inputStream()).use { r ->
@@ -55,21 +55,52 @@ object DictionarySource {
         while(true) { val text=r.rawLine() ?: break; if(line>=after && text.contains(query,ignoreCase=true)) return@use line; line++ }
         null
     }
+    fun validate(file: File,kind: String,filename: String,allowEmpty: Boolean = false): Int {
+        var count = 0
+        try { parse(file,kind,filename) { _,_,_ -> count++; require(count<=1_000_000) { "词条不能超过 100 万" } } }
+        catch(e: java.nio.charset.CharacterCodingException) { throw IllegalArgumentException("$filename：文件不是有效 UTF-8 文本，请转换编码后导入", e) }
+        require(allowEmpty || count>0) { "$filename：没有有效词条，请添加词条后再保存或导入" }
+        return count
+    }
     fun parse(file: File,kind: String,filename: String,emit: (String,String,Long)->Unit) = reader(file.inputStream()).use { r ->
         val yaml=filename.endsWith(".yaml",true) || filename.endsWith(".yml",true)
+        require(kind in listOf("wubi","pinyin","english")) { "未知词库类型" }
         var started=!yaml; var lineNumber=0
+        val header=StringBuilder()
+        var stemColumn=false
         while(true) {
             val raw=r.rawLine() ?: break; lineNumber++
             val line=raw.trimEnd('\n','\r').removePrefix("\uFEFF")
-            if(!started) { if(line.trim()=="...") started=true; continue }
+            if(!started) {
+                require(header.length + line.length < 65536) { "$filename：词库头部过大或缺少 ... 标记" }
+                if(line.trim()=="...") {
+                    require(Regex("(?m)^name:\\s*[^\\s#]+").containsMatchIn(header)) { "$filename：YAML 头部缺少 name" }
+                    val lines = header.toString().lines()
+                    val columns = lines.indexOfFirst { it.trimStart().startsWith("columns:") }
+                    if (columns >= 0) {
+                        val declared = lines.drop(columns+1).takeWhile { it.isBlank() || it.trimStart().startsWith("-") }
+                            .filter { it.isNotBlank() }.map { it.trim().removePrefix("-").trim() }
+                        stemColumn = kind=="wubi" && declared == listOf("text","code","weight","stem")
+                        require(stemColumn || declared == listOf("text","code","weight") || declared == listOf("text","code")) { "$filename：仅支持 columns: text、code、weight 的顺序" }
+                    }
+                    started=true
+                } else {
+                    // Only the standard columns are supported. Never silently reinterpret a different order.
+                    header.appendLine(line)
+                    require(!line.trimStart().startsWith("import_tables:")) { "$filename：不支持 import_tables，请分别导入实际词库文件" }
+                }
+                continue
+            }
             if(line.isBlank() || line.startsWith('#')) continue
             try {
                 val parts=line.split('\t')
-                require(parts.size>=2) { "字段须以制表符分隔" }
+                require(if(kind=="english") parts.size==2 else parts.size in 2..(if(stemColumn) 4 else 3)) { "字段须以制表符分隔；中文为文字、编码、可选词频，英文为单词、词频" }
+                if(parts.size==4) require(parts[3].length in 1..4 && parts[3].all { it in 'a'..'z' }) { "stem 须为 1–4 个小写字母" }
                 val text=parts[0]; val code=if(kind=="english") text else parts[1]
                 val weightText=if(kind=="english") parts[1] else parts.getOrNull(2) ?: "0"
                 // Preserve the pinned Rime baseline's documented legacy fallback exactly.
                 val weight=weightText.toLongOrNull() ?: if(text=="χ" && code=="zzxx" && weightText=="450.5") 0L else error("词频必须为整数")
+                if(kind=="pinyin" && filename=="pinyin_initials.dict.yaml") require(code.length==1 && code[0] in 'a'..'z') { "单字母词库编码必须是一个小写字母" }
                 DictionaryCompiler.validate(kind,text,code,weight)
                 emit(text,code,weight)
             } catch(e: Exception) { throw IllegalArgumentException("$filename 第 $lineNumber 行：${e.message}",e) }

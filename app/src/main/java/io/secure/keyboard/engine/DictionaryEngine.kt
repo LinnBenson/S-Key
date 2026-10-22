@@ -20,6 +20,7 @@ class DictionaryEngine private constructor(
     private val compactWubi: WubiLookup?,
     private val indexedPinyin: PinyinLookup? = null,
     private val indexedEnglish: EnglishLookup? = null,
+    private val initials: (String)->List<Entry> = { emptyList() },
 ) {
     /** Text constructor retained for reference validation and small test fixtures. */
     constructor(wubi: Reader, pinyin: Reader, englishLexicon: EnglishLexicon? = null) :
@@ -31,8 +32,8 @@ class DictionaryEngine private constructor(
 
     data class Entry(val text: String, val code: String, val weight: Long)
 
-    constructor(wubi: WubiLookup, pinyin: PinyinLookup, english: EnglishLookup) :
-        this(null, java.io.StringReader("...\n"), null, wubi, pinyin, english)
+    constructor(wubi: WubiLookup, pinyin: PinyinLookup, english: EnglishLookup, initials: (String)->List<Entry> = { emptyList() }) :
+        this(null, java.io.StringReader("...\n"), null, wubi, pinyin, english, initials)
 
     private val wubiExact: Map<String, List<Entry>>
     private val pinyinExact: Map<String, List<Entry>>
@@ -85,6 +86,7 @@ class DictionaryEngine private constructor(
         limit: Int = 40,
         fuzzyPairs: Set<String> = DEFAULT_FUZZY_PAIRS,
         allExactWubi: Boolean = false,
+        mode: ChineseInputMode = ChineseInputMode.MIXED,
     ): List<Candidate> {
         if (limit <= 0) return emptyList()
         val raw = code.lowercase(Locale.ROOT).replace('ü', 'v')
@@ -95,7 +97,7 @@ class DictionaryEngine private constructor(
         // Full four-code matches remain reachable even when a bucket exceeds one UI page.
         // Only the explicit production option lifts the supplied limit; short prefixes retain
         // their existing bound, and automatic commit still requests one exact candidate.
-        val resultLimit = if (allExactWubi && key.length == 4) {
+        val resultLimit = if (mode != ChineseInputMode.PINYIN && allExactWubi && key.length == 4) {
             maxOf(limit, compactWubi?.exactCandidateCount(key) ?: wubiExact[key].orEmpty().size)
         } else limit
         val result = LinkedHashMap<String, Candidate>()
@@ -108,44 +110,77 @@ class DictionaryEngine private constructor(
                     result.putIfAbsent(it.text, Candidate(it.text, it.code, source))
             }
         }
-        if (compactWubi == null) add(wubiExact[key], Source.WUBI)
-        else compactWubi.exact(key, resultLimit).forEach { result.putIfAbsent(it.text, it) }
-        val segmented = raw.contains('\'') || raw.contains(' ')
-        val syllableCode = raw.split(' ', '\'').filter(String::isNotEmpty).joinToString(" ")
-        val exactPinyin = pinyinExact[key]?.filter { !segmented || it.code == syllableCode }
-        add(exactPinyin, Source.PINYIN)
-        if (fuzzyPinyin && fuzzyPairs.isNotEmpty()) {
-            // Preserve the existing pairs' matching rules. The optional r/l pair has a
-            // stricter, syllable-aware check below so it cannot turn a final er into el.
-            val selectedPairs = fuzzyPairs - "r_l"
-            val selectedKey = fuzzyInputKey(raw, selectedPairs)
-            val selectedSyllables =
-                if (segmented) syllableCode.split(' ').map { fuzzySyllable(it, selectedPairs) }
-                else emptyList()
-            add(
-                fuzzyExact[fuzzyInputKey(raw)]?.filter {
-                    (fuzzyInputKey(it.code, selectedPairs) == selectedKey &&
-                        (!segmented ||
-                            it.code.split(' ').map { part -> fuzzySyllable(part, selectedPairs) } ==
-                                selectedSyllables)) ||
-                        ("r_l" in fuzzyPairs && matchesRL(raw, it.code, selectedPairs))
-                },
-                Source.PINYIN,
-            )
+        if (mode != ChineseInputMode.PINYIN) {
+            if (compactWubi == null) add(wubiExact[key], Source.WUBI)
+            else compactWubi.exact(key, resultLimit).forEach { result.putIfAbsent(it.text, it) }
         }
-        // A dictionary phrase is preferred; otherwise segment into known words/syllables locally.
-        if (exactPinyin.isNullOrEmpty() && key.length >= 4) {
-            for (text in composePinyin(raw)) if (result.size < resultLimit) {
-                result.putIfAbsent(text, Candidate(text, raw, Source.PINYIN))
+        if (mode != ChineseInputMode.WUBI) {
+            val segmented = raw.contains('\'') || raw.contains(' ')
+            val syllableCode = raw.split(' ', '\'').filter(String::isNotEmpty).joinToString(" ")
+            val exactPinyin = pinyinExact[key]?.filter { !segmented || it.code == syllableCode }
+            add(exactPinyin, Source.PINYIN)
+            if (fuzzyPinyin && fuzzyPairs.isNotEmpty()) {
+                // Preserve the existing pairs' matching rules. The optional r/l pair has a
+                // stricter, syllable-aware check below so it cannot turn a final er into el.
+                val selectedPairs = fuzzyPairs - "r_l"
+                val selectedKey = fuzzyInputKey(raw, selectedPairs)
+                val selectedSyllables =
+                    if (segmented) syllableCode.split(' ').map { fuzzySyllable(it, selectedPairs) }
+                    else emptyList()
+                add(
+                    fuzzyExact[fuzzyInputKey(raw)]?.filter {
+                        (fuzzyInputKey(it.code, selectedPairs) == selectedKey &&
+                            (!segmented ||
+                                it.code.split(' ').map { part -> fuzzySyllable(part, selectedPairs) } ==
+                                    selectedSyllables)) ||
+                            ("r_l" in fuzzyPairs && matchesRL(raw, it.code, selectedPairs))
+                    },
+                    Source.PINYIN,
+                )
+            }
+            // A dictionary phrase is preferred; otherwise segment into known words/syllables locally.
+            if (exactPinyin.isNullOrEmpty() && key.length >= 4) {
+                for (text in composePinyin(raw)) if (result.size < resultLimit) {
+                    result.putIfAbsent(text, Candidate(text, raw, Source.PINYIN))
+                }
             }
         }
-        if (compactWubi == null) add(wubiPrefixes[key], Source.WUBI)
-        else if (result.size < resultLimit) {
-            compactWubi.prefix(key, resultLimit).forEach {
-                if (result.size < resultLimit) result.putIfAbsent(it.text, it)
+        if (mode != ChineseInputMode.PINYIN) {
+            if (compactWubi == null) add(wubiPrefixes[key], Source.WUBI)
+            else if (result.size < resultLimit) {
+                compactWubi.prefix(key, resultLimit).forEach {
+                    if (result.size < resultLimit) result.putIfAbsent(it.text, it)
+                }
             }
         }
         return result.values.toList()
+    }
+
+    fun decodePinyin(raw: String, context: String, custom: List<Pair<String, String>>, fuzzy: Boolean, pairs: Set<String>, cancelled: () -> Boolean = { false }): List<PinyinDecoder.Option> {
+        val decoder = PinyinDecoder(cancelled = cancelled, lookup = { token ->
+            val exact = (indexedPinyin?.lookup("exact", compact(token), 64) ?: pinyinExact[compact(token)].orEmpty()).filter {
+                !token.contains('\'') || it.code.replace(" ", "'") == token
+            }.take(24)
+            if (!fuzzy || pairs.isEmpty() || token.length > 6 || token.contains('\'')) exact else {
+                val selected = pairs - "r_l"
+                val alternatives = (indexedPinyin?.lookup("fuzzy", fuzzyInputKey(token), 128)
+                    ?: fuzzyExact[fuzzyInputKey(token)].orEmpty()).asSequence().filter {
+                    fuzzyInputKey(it.code, selected) == fuzzyInputKey(token, selected) ||
+                        ("r_l" in pairs && matchesRL(token, it.code, selected))
+                }.take(24).toList()
+                (exact + alternatives).distinctBy { it.text }
+            }
+        }, predict = { contextText ->
+            indexedPinyin?.predictions(contextText) ?: pinyinExact.values.asSequence().flatten()
+                .filter { it.text.startsWith(contextText) && it.text.length > contextText.length }
+                .sortedByDescending { it.weight }.take(12).map { it.text.removePrefix(contextText) }.toList()
+        })
+        val decoded = decoder.candidates(raw, context, custom)
+        if (cancelled()) return emptyList()
+        return if(raw.length==1) {
+            val customInitials = custom.filter { it.first == raw }.map { PinyinDecoder.Option(it.second,1) }
+            (customInitials + initials(raw).map { PinyinDecoder.Option(it.text,1) } + decoded).distinctBy { it.text }
+        } else decoded
     }
 
     /** Complete only the supplied current word. Never accepts surrounding editor text. */

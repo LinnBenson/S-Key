@@ -9,5 +9,7 @@ interface WubiLookup {
 interface PinyinLookup {
     val entryCount: Int
     fun index(kind: String): Map<String, List<DictionaryEngine.Entry>>
+    fun lookup(kind: String, key: String, limit: Int): List<DictionaryEngine.Entry> = index(kind)[key].orEmpty().take(limit)
+    fun predictions(context: String): List<String> = emptyList()
 }
 interface EnglishLookup { fun complete(prefix: String, limit: Int): List<String> }
