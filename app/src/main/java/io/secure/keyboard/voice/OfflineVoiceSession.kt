@@ -48,6 +48,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val generation = AtomicLong(0)
+    private val captureEnvironment = VoiceCaptureEnvironment(context)
     private val microphoneGate = MicrophoneLifecycleGate()
     @Volatile private var recording = false
     @Volatile private var busy = false
@@ -103,6 +104,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             try {
                 activeRecorder?.stop()
             } catch (_: Exception) {}
+            captureEnvironment.close()
         }
         limitStop?.let { main.removeCallbacks(it) }
         limitStop = null
@@ -168,7 +170,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             if (generation.get() != id || !recording) return
             if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
                 throw SecurityException("麦克风权限已撤销")
-            val mic = MicrophoneCapture.start(context, microphoneGate,
+            val mic = MicrophoneCapture.start(context, captureEnvironment, microphoneGate,
                 { generation.get() == id && recording }) { activeRecorder = it } ?: return
             recorder = mic
             val status = MicrophoneStatus(mic)
@@ -189,6 +191,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             while (recording && generation.get() == id && samples < 16000 * 60 &&
                 SystemClock.elapsedRealtime() < deadline) {
                 status.checkAvailable()
+                captureEnvironment.checkAvailable()
                 val count = mic.read(pcm, 0, pcm.size, AudioRecord.READ_NON_BLOCKING)
                 if (count <= 0 && !recording) break
                 check(count >= 0) { "麦克风读取失败" }
@@ -230,6 +233,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                 try {
                     mic.stop()
                 } catch (_: Exception) {}
+                captureEnvironment.close()
             }
             if (generation.get() != id) return
             check(signal.hasVariation) { "未采集到有效声音，请检查麦克风后重试" }
@@ -259,6 +263,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                 try {
                     recorder?.stop()
                 } catch (_: Exception) {}
+                captureEnvironment.close()
                 // Clear under the same gate before release, so main-thread stop cannot race
                 // native release through a recorder reference captured just before cleanup.
                 activeRecorder = null

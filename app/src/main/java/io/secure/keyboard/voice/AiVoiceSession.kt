@@ -23,6 +23,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private val generation = AtomicLong()
+    private val captureEnvironment = VoiceCaptureEnvironment(context)
     private val gate = MicrophoneLifecycleGate()
     @Volatile private var recording = false
     @Volatile private var released = false
@@ -73,7 +74,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
 
     fun stop() {
         levels.clear()
-        gate.stop { recording = false; runCatching { recorder?.stop() } }
+        gate.stop { recording = false; runCatching { recorder?.stop() }; captureEnvironment.close() }
         timer?.let(main::removeCallbacks); timer=null
     }
     fun cancel() {
@@ -90,7 +91,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         var mic:AudioRecord?=null
         try {
             check(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED) { "请先允许麦克风权限" }
-            val input = MicrophoneCapture.start(context, gate, { current(id) && recording }) { recorder = it }
+            val input = MicrophoneCapture.start(context, captureEnvironment, gate, { current(id) && recording }) { recorder = it }
                 ?: return null
             mic = input
             val status = MicrophoneStatus(input)
@@ -103,6 +104,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
             val progress = AudioReadProgress(SystemClock.elapsedRealtime())
             while(current(id) && recording && count<pcm.size && SystemClock.elapsedRealtime()<deadline) {
                 status.checkAvailable()
+                captureEnvironment.checkAvailable()
                 val n=input.read(pcm,count,minOf(3200,pcm.size-count),AudioRecord.READ_NON_BLOCKING)
                 if(n<0) { if(!recording || !current(id)) break; error("录音中断，请重试") }
                 if (!current(id) || (n == 0 && !recording)) break
@@ -116,7 +118,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
                 }
             }
             status.checkAvailable()
-            gate.stop { recording=false; runCatching { input.stop() }; recorder=null }
+            gate.stop { recording=false; runCatching { input.stop() }; captureEnvironment.close(); recorder=null }
             input.release(); mic=null
             if(!current(id)) return null
             check(signal.hasVariation) { "未采集到有效声音，请检查麦克风后重试" }
@@ -126,7 +128,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         } finally {
             levels.clear()
             pcm.fill(0)
-            gate.stop { recording=false; recorder=null; runCatching { mic?.stop() }; runCatching { mic?.release() } }
+            gate.stop { recording=false; recorder=null; runCatching { mic?.stop() }; captureEnvironment.close(); runCatching { mic?.release() } }
 
         }
     }

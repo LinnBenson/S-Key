@@ -13,7 +13,7 @@ import android.os.SystemClock
 internal object MicrophoneCapture {
     // Prefer ordinary microphone capture over vendor-specific recognition preprocessing.
     // Fall back only on initialization/start failure, never merely because a user is quiet.
-    fun start(context: Context, gate: MicrophoneLifecycleGate, allowed: () -> Boolean,
+    fun start(context: Context, environment: VoiceCaptureEnvironment, gate: MicrophoneLifecycleGate, allowed: () -> Boolean,
               publish: (AudioRecord) -> Unit): AudioRecord? {
         val minimum = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT)
@@ -30,12 +30,15 @@ internal object MicrophoneCapture {
                 candidate = mic
                 check(mic.state == AudioRecord.STATE_INITIALIZED)
                 val started = gate.startIfAllowed(allowed) {
+                    environment.open(mic)
                     mic.startRecording()
                     check(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING)
                     publish(mic)
                 }
                 if (started) { transferred = true; return mic }
                 return null
+            } catch (e: RecordingFocusException) {
+                throw e
             } catch (e: SecurityException) {
                 throw e
             } catch (_: IllegalStateException) {
@@ -44,7 +47,10 @@ internal object MicrophoneCapture {
                 // Some devices reject a source even when the format is supported.
             } finally {
                 if (!transferred) {
-                    try { candidate?.stop() } catch (_: Exception) {}
+                    gate.stop {
+                        try { candidate?.stop() } catch (_: Exception) {}
+                        environment.close()
+                    }
                     candidate?.release()
                 }
             }
