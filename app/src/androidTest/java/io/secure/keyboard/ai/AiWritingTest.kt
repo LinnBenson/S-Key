@@ -11,6 +11,15 @@ import javax.net.ssl.HttpsURLConnection
 
 @Suppress("DEPRECATION")
 class AiWritingTest : AndroidTestCase() {
+    fun testDeepResponseIsRejectedAndNextRequestStillWorks() {
+        val nested = "{\"ignored\":" + "[".repeat(10000) + "0" + "]".repeat(10000) + "}"
+        try {
+            AiWriting.Call().readStream(("data: $nested\n\n").reader())
+            fail("Deep response must not reach the recursive platform parser")
+        } catch (_: IllegalStateException) { }
+        assertEquals("正常结果", AiWriting.Call().readStream(stream("正常结果").reader()))
+    }
+
     private fun delta(text: String) = JSONObject().put("type","response.output_text.delta").put("delta",text).toString()
     private fun complete(text: String, id: String = "resp_test", status: String = "completed"): String =
         JSONObject().put("type","response.completed").put("response",JSONObject().put("id",id).put("status",status)

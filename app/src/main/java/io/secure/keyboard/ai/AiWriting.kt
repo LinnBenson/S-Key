@@ -99,7 +99,7 @@ internal object AiWriting {
                         }
                         if(total>8192) "" else String(bytes,0,total,Charsets.UTF_8)
                     } }.getOrNull()
-                    val error = runCatching { JSONObject(body ?: "").optJSONObject("error") }.getOrNull()
+                    val error = runCatching { io.secure.keyboard.data.NetworkJson.objectValue(body ?: "").optJSONObject("error") }.getOrNull()
                     if (expiredCode(error)) throw ConversationExpired()
                 }
                 check(status==200) { when(status) {
@@ -130,7 +130,7 @@ internal object AiWriting {
                 val data = event.toString().trim(); event.setLength(0)
                 // Only response.completed makes a result eligible for insertion or continuation.
                 if (data == "[DONE]") return
-                val json = try { JSONObject(data) } catch (_: Exception) { error("流式响应格式错误，请检查接口") }
+                val json = try { io.secure.keyboard.data.NetworkJson.objectValue(data) } catch (_: Exception) { error("流式响应格式错误，请检查接口") }
                 val type = json.optString("type")
                 if(expiredCode(json.optJSONObject("error")) || expiredCode(json.optJSONObject("response")?.optJSONObject("error"))) throw ConversationExpired()
                 check(type !in listOf("error", "response.failed", "response.incomplete", "response.refusal.delta") &&

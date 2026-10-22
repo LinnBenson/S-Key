@@ -38,8 +38,13 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
     private var savedProfiles = emptyMap<String, String>()
     private var originalTheme = "system"
     private var attachedActivity: Activity? = null
-    private val context
-        get() = instrumentation.targetContext
+    private lateinit var sandbox: io.secure.keyboard.diagnostics.LifetimeSandbox
+    private lateinit var app: IsolatedApplication
+    private class IsolatedApplication(context: Context) : Application() {
+        init { attachBaseContext(context) }
+        override fun getApplicationContext(): Context = this
+    }
+    private val context get() = app
 
     private val prefs
         get() = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -59,10 +64,14 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
 
     override fun setUp() {
         super.setUp()
+        sandbox = io.secure.keyboard.diagnostics.LifetimeSandbox(instrumentation.targetContext)
+        check(!sandbox.root.exists()) { "Incomplete isolated fixture needs cleanup" }
+        sandbox.root.mkdirs()
+        app = IsolatedApplication(sandbox)
         savedProfiles =
             prefs.all.filterKeys { it.startsWith("profile_") }.mapValues { it.value as String }
         originalTheme = SettingsStore(context).theme
-        instrumentation.runOnMainSync {
+        onMainChecked {
             harness = ServiceHarness()
             service = harness.create(context)
         }
@@ -70,7 +79,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
 
     override fun tearDown() {
         try {
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 if (::harness.isInitialized) harness.close()
                 attachedActivity?.finish()
                 attachedActivity = null
@@ -81,12 +90,13 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
             savedProfiles.forEach { (key, value) -> edit.putString(key, value) }
             edit.commit()
         } finally {
+            if (::sandbox.isInitialized) sandbox.close()
             super.tearDown()
         }
     }
 
     fun testCombinedPunctuationUsesGlobeThemeRolesInBothLanguagesAndPalettes() {
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val settings = SettingsStore(context)
             val savedColors = listOf("themeTokens_light", "themeTokens_dark").associateWith {
                 prefs.getString(it, null)
@@ -149,7 +159,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
     }
 
     fun testOnlyThreeMarkedControlLabelsUseFifteenSpAndSameBoldFont() {
-        instrumentation.runOnMainSync {
+        onMainChecked {
             for (chinese in listOf(true, false)) for (height in listOf(260, 200)) {
                 for (theme in listOf("light", "dark")) {
                     SettingsStore(context).theme = theme
@@ -195,7 +205,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
     }
 
     fun testPairedBottomWidthsRemainProportionalAcrossProfileShapesAndFloating() {
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val profiles = listOf(true to false, true to true, false to false, false to true)
                 .map { (outer, landscape) -> SettingsStore.defaultLayoutProfile(outer, landscape) }
             for (profile in profiles) for (floating in listOf(false, true)) {
@@ -256,7 +266,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
                 lateinit var hint: TextView
                 val firstDraw = CountDownLatch(1)
                 val name = "${if (chinese) "chinese" else "english"}-$theme-${height}dp"
-                instrumentation.runOnMainSync {
+                onMainChecked {
                     SettingsStore(context).theme = theme
                     val row = bottomRow(chinese, height)
                     keyboard = row.rootView
@@ -274,7 +284,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
                 lateinit var keyboardBounds: Rect
                 var labelScroll = 0
                 var nativeHintColor = 0
-                instrumentation.runOnMainSync {
+                onMainChecked {
                     check(main.isAttachedToWindow && main.isShown)
                     keyBounds = screenBounds(key)
                     keyboardBounds = screenBounds(keyboard)
@@ -296,7 +306,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
                 // Inspect actual compositor pixels only after native TextView pre-draw and
                 // scroll handling. Standalone key.draw() before attachment missed this bug.
                 val coloredDraw = CountDownLatch(1)
-                instrumentation.runOnMainSync {
+                onMainChecked {
                     main.setTextColor(Color.BLUE)
                     hint.setTextColor(Color.RED)
                     afterNextDraw(keyboard, coloredDraw)
@@ -383,7 +393,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
     }
 
     private fun assertPunctuationInk(chinese: Boolean) {
-        instrumentation.runOnMainSync {
+        onMainChecked {
             for (height in listOf(260, 200)) {
                 val row = bottomRow(chinese, height)
                 val key = row.getChildAt(1) as KeyContainer
@@ -454,7 +464,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
     }
 
     fun testBottomRowWeightsStayBalancedAndHitTargetsStayContinuousAtMinimumHeight() {
-        instrumentation.runOnMainSync {
+        onMainChecked {
             for (chinese in listOf(true, false)) for (height in listOf(260, 200)) {
                 val row = bottomRow(chinese, height)
                 val keys = (0 until row.childCount).map { row.getChildAt(it) }
@@ -525,7 +535,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
     }
 
     fun testFloatingResizeArtworkIsSmallerInsideUnchangedHitTarget() {
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val row = bottomRow(chinese = true, heightDp = 260, floating = true)
             val resize = requireNotNull(find(row.rootView, "调整悬浮键盘大小")) as ToolIcon
             val density = service.resources.displayMetrics.density
@@ -639,4 +649,12 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
         }
         return bounds
     }
+    private fun onMainChecked(block: () -> Unit) {
+        var failure: Throwable? = null
+        instrumentation.runOnMainSync {
+            try { block() } catch (error: Throwable) { failure = error }
+        }
+        failure?.let { throw it }
+    }
+
 }

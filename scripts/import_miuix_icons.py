@@ -5,13 +5,13 @@ import material_keyboard_icons
 import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'third_party/miuix_icons'
-MAPPING = dict(ai='Edit', translate='Translate', globe='WorldClock', enter='Reply', shift='ExpandLess', caps='TopDownloads', backspace='Clear', more='GridView', hide='ExpandMore', back='Back', forward='ChevronForward', clear='Close', edit='Edit', open_link='WorldClock', pin='Pin', unpin='Unpin', delete='Delete', clipboard='Paste', phrases='Notes', voice='Mic', emoji='Community', recent='Recent', drag_handle='More', resize='ScreenCapture', quickedit='Edit', arrow_up='ExpandLess', arrow_down='ExpandMore', arrow_left='Back', arrow_right='Forward', undo='Undo', layout='GridView', floating='ScreenMirroring', floating_enter='ScreenMirroring', floating_exit='GridView', split='VerticalSplit', dictionary='ContactsBook', english_dictionary='Translate', theme='Theme', settings='Settings', input='Tune', keyboard='GridView', check='Ok')
+MAPPING = dict(ai='Edit', translate='Translate', globe='WorldClock', enter='Reply', shift='ExpandLess', caps='TopDownloads', backspace='Clear', more='GridView', hide='ExpandMore', back='Back', previous='ChevronForward', forward='ChevronForward', clear='Close', show='Show', edit='Edit', open_link='WorldClock', pin='Pin', unpin='Unpin', delete='Delete', clipboard='Paste', phrases='Notes', voice='Mic', emoji='Community', recent='Recent', drag_handle='More', resize='ScreenCapture', quickedit='Edit', arrow_up='ExpandLess', arrow_down='ExpandMore', arrow_left='Back', arrow_right='Forward', undo='Undo', layout='GridView', floating='Sidebar', floating_enter='Sidebar', floating_exit='HorizontalSplit', split='VerticalSplit', dictionary='ContactsBook', english_dictionary='Translate', theme='Theme', settings='Settings', input='Tune', keyboard='GridView', check='Ok')
 COMMANDS = dict(MoveTo='M', LineTo='L', HorizontalTo='H', VerticalTo='V', QuadTo='Q', CurveTo='C', ReflectiveCurveTo='S', ReflectiveQuadTo='T', Close='Z')
 ANDROID='http://schemas.android.com/apk/res/android'
 ET.register_namespace('android', ANDROID)
 def attrs(**values): return {f'{{{ANDROID}}}{k.replace("translation", "translate")}': str(v) for k,v in values.items()}
 def generate():
-    for name in sorted(set(MAPPING.values())):
+    for name in sorted({value for key,value in MAPPING.items() if key not in material_keyboard_icons.MAPPING and key != 'hide'}):
         source = (SOURCE / (name + '.kt')).read_text()
         regular = source.split(f'val MiuixIcons.Regular.{name}: ImageVector',1)[1].split('\nval MiuixIcons.',1)[0]
         width = re.search(r'viewportWidth = ([\d.]+)f',regular)[1]
@@ -38,6 +38,14 @@ def generate():
     ET.indent(down)
     (ROOT / 'app/src/main/res/drawable/ic_miuix_chevrondown.xml').write_text(
         '<?xml version="1.0" encoding="utf-8"?>\n<!-- Official Miuix ChevronForward rotated down. Apache-2.0. -->\n' + ET.tostring(down, encoding='unicode'))
+    previous = ET.Element('vector', forward.attrib)
+    group = ET.SubElement(previous, 'group', attrs(rotation=180,
+        pivotX=float(forward.get(f'{{{ANDROID}}}viewportWidth')) / 2,
+        pivotY=float(forward.get(f'{{{ANDROID}}}viewportHeight')) / 2))
+    for child in forward: group.append(child)
+    ET.indent(previous)
+    (ROOT / 'app/src/main/res/drawable/ic_miuix_chevronprevious.xml').write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n<!-- Official Miuix ChevronForward rotated left. Apache-2.0. -->\n' + ET.tostring(previous, encoding='unicode'))
     # Optical weight correction: these Regular paths have thinner strokes after
     # normalizing visible bounds than GridView / the dedicated keyboard symbols.
     # Outline the existing library paths (no replacement glyphs or raster blur).
@@ -53,6 +61,7 @@ def generate():
     lines = ['package io.secure.keyboard.ui','import io.secure.keyboard.R','/** Shared UI icon catalog: Miuix plus dedicated Material keyboard symbols. */','object KeyboardIcons {','    fun resource(kind: String): Int = when(kind) {']
     lines += [f'        "{kind}" -> R.drawable.' + (f'ic_keyboard_{material_keyboard_icons.MAPPING[kind]}' if kind in material_keyboard_icons.MAPPING else f'ic_miuix_{name.lower()}') for kind,name in MAPPING.items()]
     lines = [line.replace('ic_miuix_expandmore', 'ic_miuix_chevrondown') if '"hide"' in line else line for line in lines]
+    lines = [line.replace('ic_miuix_chevronforward', 'ic_miuix_chevronprevious') if '"previous"' in line else line for line in lines]
     lines += ['        else -> R.drawable.ic_miuix_gridview','    }','}']
     (ROOT/'app/src/main/java/io/secure/keyboard/ui/KeyboardIcons.kt').write_text('\n'.join(lines)+'\n')
 if __name__ == '__main__': generate()

@@ -61,7 +61,7 @@ internal object GoogleTranslation {
                         check(out.size()+n <= 1024*1024) { "翻译响应过大" }; out.write(bytes,0,n) }
                     out.toString("UTF-8")
                 }
-                val value = JSONObject(body).getJSONObject("data").getJSONArray("translations").getJSONObject(0).opt("translatedText") as? String
+                val value = io.secure.keyboard.data.NetworkJson.objectValue(body).getJSONObject("data").getJSONArray("translations").getJSONObject(0).opt("translatedText") as? String
                 checkActive()
                 check(!value.isNullOrBlank() && value.length <= 20000) { "翻译未返回有效文字" }
                 return value

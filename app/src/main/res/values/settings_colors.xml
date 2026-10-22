@@ -2,7 +2,6 @@
 <resources>
     <color name="settings_background">#EFEFF1</color>
     <color name="settings_surface">#FFFFFF</color>
-    <color name="settings_functional">#DFE2E9</color>
     <color name="settings_ink">#17283E</color>
     <color name="settings_accent">#2B2B2B</color>
     <color name="settings_secondary_text">#5B6573</color>

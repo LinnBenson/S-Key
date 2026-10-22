@@ -46,12 +46,14 @@ class RapidTypingTest : InstrumentationTestCase() {
     private lateinit var harness: ServiceHarness
     private lateinit var editor: EditText
     private lateinit var connection: ObservedConnection
-    private var originalCompletion = true
-    private var originalFourCode = false
-    private var originalVibration = true
-    private var originalLongPress = true
+    private lateinit var sandbox: io.secure.keyboard.diagnostics.LifetimeSandbox
+    private lateinit var app: IsolatedApplication
+    private class IsolatedApplication(context: Context) : Application() {
+        init { attachBaseContext(context) }
+        override fun getApplicationContext(): Context = this
+    }
     private val releases = mutableListOf<CountDownLatch>()
-    private val context get() = instrumentation.targetContext
+    private val context get() = app
     private val root get() = field<ViewGroup>("root")
     private val worker get() = field<ExecutorService>("worker")
     private var eventTime = 0L
@@ -92,12 +94,13 @@ class RapidTypingTest : InstrumentationTestCase() {
 
     override fun setUp() {
         super.setUp()
+        sandbox = io.secure.keyboard.diagnostics.LifetimeSandbox(instrumentation.targetContext)
+        check(!sandbox.root.exists()) { "Incomplete isolated fixture needs cleanup" }
+        sandbox.root.mkdirs()
+        app = IsolatedApplication(sandbox)
         SettingsStore(context).let {
-            originalCompletion = it.englishCompletion
-            originalFourCode = it.fourCodeAutoCommit
-            originalVibration = it.vibration
-            originalLongPress = it.longPressSymbols
             it.englishCompletion = true
+            it.englishSpaceSelectsFirst = true
             it.fourCodeAutoCommit = false
             it.vibration = false
             it.longPressSymbols = true
@@ -138,12 +141,7 @@ class RapidTypingTest : InstrumentationTestCase() {
             if (::harness.isInitialized) harness.close()
             if (::activity.isInitialized) activity.finish()
         }
-        SettingsStore(context).let {
-            it.englishCompletion = originalCompletion
-            it.fourCodeAutoCommit = originalFourCode
-            it.vibration = originalVibration
-            it.longPressSymbols = originalLongPress
-        }
+        if (::sandbox.isInitialized) sandbox.close()
         super.tearDown()
     }
 
@@ -178,7 +176,7 @@ class RapidTypingTest : InstrumentationTestCase() {
             var burstEndNanos = 0L
             var nextDrawNanos = 0L
             lateinit var drawListener: ViewTreeObserver.OnDrawListener
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 measuredDispatchNanos = 0
                 maximumDispatchNanos = 0
                 measuredEventCount = 0
@@ -199,7 +197,7 @@ class RapidTypingTest : InstrumentationTestCase() {
                 }
             }
             val observedDraw = drawn.await(5, TimeUnit.SECONDS)
-            instrumentation.runOnMainSync { root.viewTreeObserver.removeOnDrawListener(drawListener) }
+            onMainChecked { root.viewTreeObserver.removeOnDrawListener(drawListener) }
             timings.add("mode=${if (chinese) "Chinese" else "English"},keys=${expected.length}," +
                 "events=$measuredEventCount,root_dispatch_total_ms=${measuredDispatchNanos / 1_000_000.0}," +
                 "max_event_ms=${maximumDispatchNanos / 1_000_000.0}," +
@@ -211,7 +209,7 @@ class RapidTypingTest : InstrumentationTestCase() {
     fun testRapidCodeSpaceNextWordCommitsFirstWordAndPreservesLaterCode() {
         reset(true)
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             typeLetters("nihao")
             tap(key("五笔"))
             typeLetters("wo")
@@ -222,7 +220,7 @@ class RapidTypingTest : InstrumentationTestCase() {
         val releasedAt = SystemClock.elapsedRealtimeNanos()
         release.countDown()
         awaitOrderedInput("你好", "wo")
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals(listOf("你好"), connection.commits)
             timingStatus("RAPID_ASYNC_CONFIRM_TIMING worker_release_to_accepted_commit_ms=" +
                 (connection.acceptedCommitNanos.first() - releasedAt) / 1_000_000.0 +
@@ -233,7 +231,7 @@ class RapidTypingTest : InstrumentationTestCase() {
     fun testRapidCodePunctuationNextWordPreservesPunctuationExactlyOnce() {
         reset(true)
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             typeLetters("nihao")
             tap(key("，。"))
             typeLetters("wo")
@@ -241,13 +239,13 @@ class RapidTypingTest : InstrumentationTestCase() {
         }
         release.countDown()
         awaitOrderedInput("你好，", "wo")
-        instrumentation.runOnMainSync { assertEquals(listOf("你好", "，"), connection.commits) }
+        onMainChecked { assertEquals(listOf("你好", "，"), connection.commits) }
     }
 
     fun testSeveralRapidWordsResolveSuccessiveQueriesInOriginalOrder() {
         reset(true)
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             repeat(2) {
                 typeLetters("nihao")
                 tap(key("五笔"))
@@ -256,13 +254,13 @@ class RapidTypingTest : InstrumentationTestCase() {
         }
         release.countDown()
         awaitOrderedInput("你好你好", "wo")
-        instrumentation.runOnMainSync { assertEquals(listOf("你好", "你好"), connection.commits) }
+        onMainChecked { assertEquals(listOf("你好", "你好"), connection.commits) }
     }
 
     fun testRapidConfirmationBackspaceAndRawEnterPreserveReleaseOrder() {
         reset(true)
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             typeLetters("nihao")
             tap(key("五笔"))
             typeLetters("wo")
@@ -272,13 +270,13 @@ class RapidTypingTest : InstrumentationTestCase() {
         }
         release.countDown()
         awaitOrderedInput("你好w", "")
-        instrumentation.runOnMainSync { assertEquals(listOf("你好", "w"), connection.commits) }
+        onMainChecked { assertEquals(listOf("你好", "w"), connection.commits) }
     }
 
     fun testRepeatedQueuedSpaceAndCapturedOneShotShiftRemainDistinctActions() {
         reset(true)
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             typeLetters("nihao")
             tap(key("五笔"))
             tap(key("五笔"))
@@ -288,13 +286,13 @@ class RapidTypingTest : InstrumentationTestCase() {
         }
         release.countDown()
         awaitOrderedInput("你好 W", "o")
-        instrumentation.runOnMainSync { assertEquals(listOf("你好", " ", "W"), connection.commits) }
+        onMainChecked { assertEquals(listOf("你好", " ", "W"), connection.commits) }
     }
 
     fun testRawEnterNeedsNoDictionaryAndQueuedEnterFollowsPriorConfirmation() {
         reset(true)
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             typeLetters("nihao")
             tap(key("回车"))
             assertEquals("Raw Enter is immediate even while dictionary work is gated", "nihao", editor.text.toString())
@@ -313,7 +311,7 @@ class RapidTypingTest : InstrumentationTestCase() {
             reset(true)
             val release = gateWorker()
             val original = connection
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 typeLetters("nihao")
                 tap(key("五笔"))
                 typeLetters("wo")
@@ -330,7 +328,7 @@ class RapidTypingTest : InstrumentationTestCase() {
             }
             release.countDown()
             drainWorker()
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 assertEquals("", editor.text.toString())
                 assertTrue(original.commits.isEmpty())
                 assertTrue(connection.commits.isEmpty())
@@ -342,7 +340,7 @@ class RapidTypingTest : InstrumentationTestCase() {
     fun testEmptyCandidateResultReleasesQueueAndKeepsRawCodeForEnter() {
         reset(true)
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             typeLetters("qqqqqq")
             tap(key("五笔"))
             typeLetters("wo")
@@ -357,7 +355,7 @@ class RapidTypingTest : InstrumentationTestCase() {
         val release = gateWorker()
         val originalEngine = field<Any>("engine")
         try {
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 typeLetters("nihao")
                 tap(key("五笔"))
                 typeLetters("wo")
@@ -367,14 +365,14 @@ class RapidTypingTest : InstrumentationTestCase() {
             release.countDown()
             awaitOrderedInput("", "nihaowo")
         } finally {
-            instrumentation.runOnMainSync { setField("engine", originalEngine) }
+            onMainChecked { setField("engine", originalEngine) }
         }
     }
 
     fun testExceptionalQueueSaturationIsExplicitAndClearableWithoutRawInsertion() {
         reset(true)
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             typeLetters("nihao")
             tap(key("五笔"))
             repeat(1025) { tap(key("a")) }
@@ -388,14 +386,14 @@ class RapidTypingTest : InstrumentationTestCase() {
         }
         release.countDown()
         drainWorker()
-        instrumentation.runOnMainSync { assertEquals("", editor.text.toString()) }
+        onMainChecked { assertEquals("", editor.text.toString()) }
     }
 
     fun testFastSameKeySequentialTapsHaveNoDebounceOrLoss() {
         for (chinese in listOf(true, false)) {
             reset(chinese)
             val expected = "a".repeat(if (chinese) 32 else 200)
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 val target = key("a")
                 expected.forEach { tap(target) }
                 assertText(chinese, expected)
@@ -407,7 +405,7 @@ class RapidTypingTest : InstrumentationTestCase() {
     fun testOverlappingDifferentKeysAndRowsCommitEveryTapInReleaseOrder() {
         for (chinese in listOf(true, false)) for (reverse in listOf(false, true)) {
             reset(chinese)
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 val expected = StringBuilder()
                 repeat(3) {
                     for ((first, second) in listOf("q" to "p", "a" to "l", "z" to "m", "q" to "m")) {
@@ -425,7 +423,7 @@ class RapidTypingTest : InstrumentationTestCase() {
     fun testOverlappingSameKeyFingersDoNotCollapseIntoOneTap() {
         for (chinese in listOf(true, false)) for (reverse in listOf(false, true)) {
             reset(chinese)
-            instrumentation.runOnMainSync {
+            onMainChecked {
                 val target = key("a")
                 repeat(8) {
                     down(3, center(target))
@@ -441,7 +439,7 @@ class RapidTypingTest : InstrumentationTestCase() {
 
     fun testVisualHorizontalAndVerticalGapsRemainTouchableKeyCells() {
         reset(false)
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val expected = StringBuilder()
             for ((left, right) in listOf("q" to "w", "a" to "s", "z" to "x")) {
                 val a = bounds(key(left))
@@ -462,11 +460,11 @@ class RapidTypingTest : InstrumentationTestCase() {
 
     fun testCandidateResultsArrivingDuringHeldKeysKeepTheirTouchTargets() {
         reset(true)
-        instrumentation.runOnMainSync { tap(key("n")) }
+        onMainChecked { tap(key("n")) }
         drainWorker()
         lateinit var i: KeyContainer
         lateinit var h: KeyContainer
-        instrumentation.runOnMainSync {
+        onMainChecked {
             i = key("i")
             h = key("h")
             down(2, center(i))
@@ -475,7 +473,7 @@ class RapidTypingTest : InstrumentationTestCase() {
             invoke("refreshCandidates")
         }
         drainWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertSame(i, key("i"))
             assertSame(h, key("h"))
             assertTrue(i.isAttachedToWindow)
@@ -488,7 +486,7 @@ class RapidTypingTest : InstrumentationTestCase() {
 
     fun testShiftReleaseBetweenOverlappingLetterReleasesPreservesNextTapAndCase() {
         reset(false)
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val a = key("a")
             val b = key("b")
             tap(key("大写"))
@@ -509,7 +507,7 @@ class RapidTypingTest : InstrumentationTestCase() {
 
     fun testSameKeyMultitouchMoveCancelsOnlyThePointerThatMovedAway() {
         reset(false)
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val a = key("a")
             val start = center(a)
             down(2, start)
@@ -530,7 +528,7 @@ class RapidTypingTest : InstrumentationTestCase() {
         }
         var touchX = 0f
         var touchY = 0f
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val location = IntArray(2)
             editor.getLocationOnScreen(location)
             touchX = location[0] + editor.width / 2f
@@ -548,7 +546,7 @@ class RapidTypingTest : InstrumentationTestCase() {
         waitFor("real touch establishes the fixture editor's local touch mode and focus", 20_000) {
             activity.hasWindowFocus() && editor.isFocused && editor.isInTouchMode
         }
-        instrumentation.runOnMainSync {
+        onMainChecked {
             touchModeStatus("before-delete")
             assertTrue("Precondition: real touch must establish this window's local touch mode", editor.isInTouchMode)
             assertTrue("Precondition: the host editor must own focus", editor.isFocused)
@@ -557,7 +555,7 @@ class RapidTypingTest : InstrumentationTestCase() {
             tap(key("删除"))
         }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("abc", editor.text.toString())
             touchModeStatus("after-delete-before-swipe")
             val delta = 20 * context.resources.displayMetrics.density
@@ -567,7 +565,7 @@ class RapidTypingTest : InstrumentationTestCase() {
             up(2)
         }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals(2, editor.selectionStart)
             touchModeStatus("after-delete-and-swipe")
             assertEquals(listOf(KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_DEL,
@@ -596,7 +594,7 @@ class RapidTypingTest : InstrumentationTestCase() {
 
     fun testCancelAndMultitouchDoNotLeaveStuckRepeatOrProducePhantomTaps() {
         reset(false)
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val a = key("a")
             down(2, center(a))
             down(11, center(a))
@@ -619,13 +617,13 @@ class RapidTypingTest : InstrumentationTestCase() {
             SystemClock.uptimeMillis() + SettingsStore(context).longPressDelay + 70L,
         )
         assertTrue(holdDeadlinePassed.await(5, TimeUnit.SECONDS))
-        instrumentation.runOnMainSync { assertText(false, "ab") }
+        onMainChecked { assertText(false, "ab") }
     }
 
     fun testHeldSpacePreservesQueuedTapsAndReleaseSurvivesVoicePanelRebuild() {
         reset(true)
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             typeLetters("nihao")
             tap(key("五笔"))
             typeLetters("wo")
@@ -634,7 +632,7 @@ class RapidTypingTest : InstrumentationTestCase() {
         waitFor("held space transfers its pointer and waits behind earlier taps", 5_000) {
             field<Boolean>("heldVoice") && field<Boolean>("heldVoiceWaitingKeys")
         }
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("voice", field<String>("panel"))
             assertEquals("nihao", field<String>("code"))
             assertEquals(2, field<ArrayDeque<*>>("queuedKeys").size)
@@ -649,7 +647,7 @@ class RapidTypingTest : InstrumentationTestCase() {
         }
         release.countDown()
         awaitOrderedInput("你好", "wo")
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("Only the earlier ordinary space may confirm text", listOf("你好"), connection.commits)
             assertFalse("Finishing the old queue after UP must not start voice", field<Boolean>("heldVoice"))
             assertEquals("keys", field<String>("panel"))
@@ -659,14 +657,14 @@ class RapidTypingTest : InstrumentationTestCase() {
     fun testHeldSpaceRootCancelRevokesDeferredVoiceWithoutDroppingQueuedKeys() {
         reset(true)
         val release = gateWorker()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             typeLetters("nihao")
             tap(key("五笔"))
             typeLetters("wo")
             down(7, center(key("五笔")))
         }
         waitFor("held space claimed before cancel", 5_000) { field<Boolean>("heldVoice") }
-        instrumentation.runOnMainSync {
+        onMainChecked {
             cancel()
             assertEquals("keys", field<String>("panel"))
             assertFalse(field<Boolean>("heldVoice"))
@@ -678,7 +676,7 @@ class RapidTypingTest : InstrumentationTestCase() {
 
     fun testEarlyHorizontalSpaceMoveCancelsHoldBeforeFirstCursorStep() {
         reset(false)
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val start = center(key("English"))
             val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop.toFloat()
             val cursorStep = 18 * context.resources.displayMetrics.density
@@ -687,7 +685,7 @@ class RapidTypingTest : InstrumentationTestCase() {
             move(7, PointF(start.x + slop + 1, start.y))
         }
         waitPastHoldDeadline()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals("keys", field<String>("panel"))
             assertFalse(field<Boolean>("heldVoice"))
             up(7)
@@ -700,13 +698,13 @@ class RapidTypingTest : InstrumentationTestCase() {
 
     fun testSpaceMultitouchKeepsBothTapsAndDisablesTheHold() {
         reset(false)
-        instrumentation.runOnMainSync {
+        onMainChecked {
             val center = center(key("English"))
             down(7, center)
             down(22, center)
         }
         waitPastHoldDeadline()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertFalse(field<Boolean>("heldVoice"))
             up(22)
             up(7)
@@ -718,13 +716,13 @@ class RapidTypingTest : InstrumentationTestCase() {
         // Isolate overlapping-touch voice cancellation from English candidate selection.
         SettingsStore(context).englishCompletion = false
         reset(false)
-        instrumentation.runOnMainSync {
+        onMainChecked {
             down(7, center(key("English")))
             down(22, center(key("q")))
             up(22)
         }
         waitPastHoldDeadline()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertFalse(field<Boolean>("heldVoice"))
             up(7)
         }
@@ -735,13 +733,13 @@ class RapidTypingTest : InstrumentationTestCase() {
         // Isolate overlapping-touch voice cancellation from English candidate selection.
         SettingsStore(context).englishCompletion = false
         reset(false)
-        instrumentation.runOnMainSync {
+        onMainChecked {
             down(22, center(key("q")))
             down(7, center(key("English")))
             up(22)
         }
         waitPastHoldDeadline()
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertFalse(field<Boolean>("heldVoice"))
             up(7)
         }
@@ -758,7 +756,7 @@ class RapidTypingTest : InstrumentationTestCase() {
     }
 
     private fun reset(chinese: Boolean) {
-        instrumentation.runOnMainSync {
+        onMainChecked {
             if (pointers.isNotEmpty()) cancel()
             invoke("clearPending")
             editor.setText("")
@@ -795,7 +793,7 @@ class RapidTypingTest : InstrumentationTestCase() {
             editor.text.toString() == expectedHost && field<String>("code") == expectedCode &&
                 field<Any?>("pendingConfirmation") == null && field<ArrayDeque<*>>("queuedKeys").isEmpty()
         }
-        instrumentation.runOnMainSync {
+        onMainChecked {
             assertEquals(expectedHost, editor.text.toString())
             assertEquals(expectedCode, field<String>("code"))
         }

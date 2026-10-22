@@ -150,7 +150,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
                     else -> "翻译失败（HTTP $status），请稍后重试"
                 }
             }
-            val value = JSONObject(body).getJSONObject("data").getJSONArray("translations")
+            val value = io.secure.keyboard.data.NetworkJson.objectValue(body).getJSONObject("data").getJSONArray("translations")
                 .getJSONObject(0).opt("translatedText") as? String
             check(!value.isNullOrBlank() && value.length <= 20000) { "翻译未返回有效文字" }
             return value
@@ -198,7 +198,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
                     else -> "语音识别失败（HTTP $status）"
                 }
             }
-        return (JSONObject(body).opt("text") as? String)?.trim().orEmpty().also {
+        return (io.secure.keyboard.data.NetworkJson.objectValue(body).opt("text") as? String)?.trim().orEmpty().also {
             check(it.isNotEmpty() && it.length<=20000) { "未识别到有效文字，请重试" }
         }
     }

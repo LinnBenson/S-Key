@@ -100,7 +100,7 @@ internal object GrokModelCatalog {
                 }
                 output.toString("UTF-8")
             }
-            val data = JSONObject(body).getJSONArray("data")
+            val data = io.secure.keyboard.data.NetworkJson.objectValue(body).getJSONArray("data")
             return (0 until data.length()).mapNotNull { data.getJSONObject(it).optString("id").takeIf(String::isNotBlank) }.distinct().sorted()
         } finally { connection.disconnect() }
     }

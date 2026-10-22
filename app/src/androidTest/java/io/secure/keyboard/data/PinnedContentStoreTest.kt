@@ -96,45 +96,46 @@ class PinnedContentStoreTest : AndroidTestCase() {
         assertTrue(store.captureClipboard("third", 1002L, true))
         val thirdId = store.clipboard().last().id
         assertTrue(store.captureClipboard("fourth", 1003L, true))
+        store.addClipboard("fifth")
         val rows = store.clipboard()
-        assertEquals(3, rows.size)
-        assertEquals(3, rows.map { it.id }.distinct().size)
-        assertEquals(listOf("same", "third", "fourth"), rows.map { it.text })
+        assertEquals(4, rows.size)
+        assertEquals(4, rows.map { it.id }.distinct().size)
+        assertEquals(listOf("same", "third", "fourth", "fifth"), rows.map { it.text })
         assertEquals(listOf(pinnedId, thirdId), rows.take(2).map { it.id })
         assertFalse(rows.any { it.id == secondId })
         assertTrue(rows.first().pinned)
     }
 
-    fun testAllPinnedCapacityStillAcceptsNewCopyAndNeverExceedsLimit() {
+    fun testPinnedEntriesAreSeparateFromBoundedUnpinnedHistory() {
         settings.clipboardLimit = 3
         repeat(3) { store.addClipboard("copy$it") }
         store.clipboard().forEach { store.setClipboardPinned(it.id, true) }
         store.addClipboard("copy3")
-        assertEquals(listOf("copy1", "copy2", "copy3"), store.clipboard().map { it.text })
-        assertEquals(listOf(true, true, false), store.clipboard().map { it.pinned })
+        assertEquals(listOf("copy0", "copy1", "copy2", "copy3"), store.clipboard().map { it.text })
+        assertEquals(listOf(true, true, true, false), store.clipboard().map { it.pinned })
         repeat(20) { index ->
-            store.clipboard().forEach { store.setClipboardPinned(it.id, true) }
             store.addClipboard("new$index")
-            assertEquals(3, store.clipboard().size)
+            assertEquals(listOf("copy0", "copy1", "copy2"), store.clipboard().filter { it.pinned }.map { it.text })
+            assertTrue(store.clipboard().count { !it.pinned } <= 3)
             assertEquals("new$index", store.clipboard().last().text)
         }
     }
 
-    fun testReducingLimitTrimsUnpinnedFirstThenOldestPinned() {
+    fun testReducingLimitNeverEvictsPinnedEntries() {
         settings.clipboardLimit = 5
         repeat(5) { store.addClipboard("copy$it") }
         val original = store.clipboard()
         listOf(0, 2, 4).forEach { store.setClipboardPinned(original[it].id, true) }
         settings.clipboardLimit = 3
         store.trimClipboard()
-        assertEquals(listOf("copy0", "copy2", "copy4"), store.clipboard().map { it.text })
+        assertEquals((0..4).map { "copy$it" }, store.clipboard().map { it.text })
         settings.clipboardLimit = 1
         store.trimClipboard()
-        assertEquals(listOf("copy4"), store.clipboard().map { it.text })
-        assertTrue(store.clipboard().single().pinned)
+        assertEquals(listOf("copy0", "copy2", "copy3", "copy4"), store.clipboard().map { it.text })
+        assertEquals(3, store.clipboard().count { it.pinned })
         store.addClipboard("latest")
-        assertEquals(listOf("latest"), store.clipboard().map { it.text })
-        assertFalse(store.clipboard().single().pinned)
+        assertEquals(listOf("copy0", "copy2", "copy4", "latest"), store.clipboard().map { it.text })
+        assertFalse(store.clipboard().last().pinned)
     }
 
     fun testCategoryAndAllClearsDeletePinMetadataAndPreserveSettings() {

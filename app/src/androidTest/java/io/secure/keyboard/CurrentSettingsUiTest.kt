@@ -87,11 +87,8 @@ class CurrentSettingsUiTest : InstrumentationTestCase() {
             expectedLeft=l.left;expectedRight=r.right
             instrumentation.waitForIdleSync()
             SystemClock.sleep(600) // Let the dialog's window fade finish before visual evidence.
-            instrumentation.uiAutomation.takeScreenshot()?.let { bitmap ->
-                val file=java.io.File(instrumentation.targetContext.getExternalFilesDir(null),"settings-unified-$index.png")
-                file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }
-                bitmap.recycle()
-            }
+            // Capture visual evidence with adb screencap separately; some emulator GPU
+            // drivers crash the UiAutomation binder during takeScreenshot().
             click("取消")
         }
     }
