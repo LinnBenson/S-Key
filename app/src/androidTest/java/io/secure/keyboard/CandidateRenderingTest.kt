@@ -48,6 +48,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     private lateinit var service: OfflineKeyboardService
     private lateinit var harness: ServiceHarness
     private lateinit var connection: RecordingConnection
+    private var originalToolbarPins = emptyList<String>()
     private var originalSpacing = false
     private var originalCompletion = true
     private var originalChinese = true
@@ -100,6 +101,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     override fun setUp() {
         super.setUp()
         val settings = SettingsStore(context)
+        originalToolbarPins = settings.toolbarPins
         originalSpacing = settings.autoChineseSpacing
         settings.autoChineseSpacing = false
         originalChinese = settings.lastChineseLanguage
@@ -136,6 +138,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             if (::harness.isInitialized) harness.close()
             if (::activity.isInitialized) activity.finish()
         }
+        SettingsStore(context).toolbarPins = originalToolbarPins
         SettingsStore(context).autoChineseSpacing = originalSpacing
         SettingsStore(context).englishCompletion = originalCompletion
         SettingsStore(context).lastChineseLanguage = originalChinese
@@ -454,7 +457,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             val source=field<TextView>("translationTextView") as android.widget.EditText
             source.setText("abcd")
             source.setSelection(1,3)
-            OfflineKeyboardService::class.java.getDeclaredMethod("commitInputText",String::class.java).apply { isAccessible=true }.invoke(service,"X")
+            io.secure.keyboard.SessionTestAccess.method("commitInputText",String::class.java).apply { isAccessible=true }.invoke(service,"X")
             assertEquals("aXd",source.text.toString())
             source.setSelection(2)
             invoke("applyBackspace")
@@ -566,7 +569,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             setField("assistantBackspaceTapAt",SystemClock.uptimeMillis()-1000L)
             invoke("applyBackspace")
             assertTrue("Slow taps must not close",session.enabled)
-            val repeated=OfflineKeyboardService::class.java.getDeclaredMethod("performBackspace",Boolean::class.javaPrimitiveType).apply { isAccessible=true }
+            val repeated=io.secure.keyboard.SessionTestAccess.method("performBackspace",Boolean::class.javaPrimitiveType).apply { isAccessible=true }
             repeat(3) { repeated.invoke(service,false) }
             assertTrue("Held/swiped deletion must not close",session.enabled)
             invoke("applyBackspace")
@@ -583,17 +586,17 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             val session = field<io.secure.keyboard.translation.TranslationSession>("translation")
             session.edit("before ")
             val old = session.begin()
-            OfflineKeyboardService::class.java.getDeclaredMethod("pasteSourceText", CharSequence::class.java).apply { isAccessible = true }.invoke(service, "pasted😀")
+            io.secure.keyboard.SessionTestAccess.method("pasteSourceText", CharSequence::class.java).apply { isAccessible = true }.invoke(service, "pasted😀")
             assertEquals("before pasted😀", session.text)
             session.complete(old, "obsolete")
             assertEquals("", session.result)
             assertFalse(session.busy)
             assertTrue(connection.committed.isEmpty())
             session.edit("a".repeat(4999))
-            OfflineKeyboardService::class.java.getDeclaredMethod("pasteSourceText", CharSequence::class.java).apply { isAccessible = true }.invoke(service, "😀")
+            io.secure.keyboard.SessionTestAccess.method("pasteSourceText", CharSequence::class.java).apply { isAccessible = true }.invoke(service, "😀")
             assertEquals(4999, session.text.length)
             invoke("openTool", tool)
-            OfflineKeyboardService::class.java.getDeclaredMethod("pasteSourceText", CharSequence::class.java).apply { isAccessible = true }.invoke(service, "ignored")
+            io.secure.keyboard.SessionTestAccess.method("pasteSourceText", CharSequence::class.java).apply { isAccessible = true }.invoke(service, "ignored")
             assertEquals("", session.text)
         }
     }
@@ -625,7 +628,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                     if (view is ViewGroup) (0 until view.childCount).flatMap { texts(view.getChildAt(it)) } else emptyList()
                 fun begin(held: Boolean): io.secure.keyboard.voice.OfflineVoiceSession.Listener {
                     setField("assistantHeldVoice", held)
-                    OfflineKeyboardService::class.java.getDeclaredMethod("startAssistantVoice", Boolean::class.javaPrimitiveType)
+                    io.secure.keyboard.SessionTestAccess.method("startAssistantVoice", Boolean::class.javaPrimitiveType)
                         .apply { isAccessible = true }.invoke(service, held)
                     val session = if (settings.voiceMode == "ai") field<Any>("aiCommandVoice") else field<Any>("inlineOfflineVoice")
                     return session.javaClass.getDeclaredField("listener").apply { isAccessible = true }.get(session)
@@ -698,7 +701,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                     assertSame(source, field<EditText>("translationTextView"))
                 }
                 invoke("openTool", "clipboard")
-                OfflineKeyboardService::class.java.getDeclaredMethod("commitInputText", String::class.java)
+                io.secure.keyboard.SessionTestAccess.method("commitInputText", String::class.java)
                     .apply { isAccessible = true }.invoke(service, "粘贴")
                 assertEquals("A粘贴DE", source.text.toString())
                 invoke("openTool", "quickedit")
@@ -739,7 +742,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                         setField("chinese", chinese)
                         settings.voiceAutoTranslate = enabled
                         for (held in listOf(true, false)) {
-                            OfflineKeyboardService::class.java.getDeclaredMethod("startAssistantVoice", Boolean::class.javaPrimitiveType)
+                            io.secure.keyboard.SessionTestAccess.method("startAssistantVoice", Boolean::class.javaPrimitiveType)
                                 .apply { isAccessible = true }.invoke(service, held)
                             val session = field<Any>("aiCommandVoice")
                             val translates = session.javaClass.getDeclaredField("translateToEnglish")
@@ -799,6 +802,90 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testSavedPromptsReachActualRequestWithoutCustomLeakage() {
+        val promptPrefs=context.getSharedPreferences("ai_builtin_prompts",Context.MODE_PRIVATE)
+        val ids=listOf("common","custom_common","polish","correct","translate","tone_正式")
+        val priorPrompts=ids.associateWith { promptPrefs.getString(it,null) }
+        val prompts=io.secure.keyboard.ai.AiPromptStore(context)
+        val conversations=io.secure.keyboard.data.AiConversationStore(context);val priorConversation=conversations.load()
+        val settings=field<SettingsStore>("settings");val auto=settings.aiAutoApply
+        val requests=java.util.Collections.synchronizedList(mutableListOf<org.json.JSONObject>())
+        val provider: () -> io.secure.keyboard.data.ApiConfiguration = {
+            io.secure.keyboard.data.ApiConfiguration(grokUrl="https://example.invalid/v1",grokKey="synthetic",grokModel="test-model")
+        }
+        val factory: () -> io.secure.keyboard.ai.AiWriting.Call = {
+            io.secure.keyboard.ai.AiWriting.Call { url -> object: javax.net.ssl.HttpsURLConnection(url) {
+                val sent=java.io.ByteArrayOutputStream()
+                override fun connect() {}
+                override fun disconnect() {}
+                override fun usingProxy()=false
+                override fun getCipherSuite()="test"
+                override fun getLocalCertificates(): Array<java.security.cert.Certificate>?=null
+                override fun getServerCertificates(): Array<java.security.cert.Certificate> = emptyArray()
+                override fun getOutputStream()=sent
+                override fun getResponseCode(): Int { requests.add(org.json.JSONObject(sent.toString("UTF-8")));return 200 }
+                override fun getInputStream()=("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"id\":\"prompt_wire_${requests.size}\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"synthetic result\"}]}]}}\n\n").byteInputStream()
+            } }
+        }
+        fun send(task: String="custom"): org.json.JSONObject {
+            val count=requests.size+1
+            onMainChecked {
+                setField("aiTask",task);setField("aiTone","正式");setField("aiCustom","用户填写的独立指令")
+                field<io.secure.keyboard.translation.TranslationSession>("translation").editDraft("合成原文 $count")
+                invoke("requestAi")
+            }
+            waitFor("wire request $count completed") {
+                requests.size==count && !field<io.secure.keyboard.translation.TranslationSession>("translation").busy && field<Any?>("aiCall")==null
+            }
+            return requests.last()
+        }
+        fun assertInitial(body: org.json.JSONObject, expected: String) {
+            assertFalse("Changed prompts must start fresh",body.has("previous_response_id"))
+            val input=body.getJSONArray("input")
+            assertEquals(2,input.length())
+            assertEquals("system",input.getJSONObject(0).getString("role"))
+            assertEquals(expected,input.getJSONObject(0).getString("content"))
+            assertEquals("user",input.getJSONObject(1).getString("role"))
+            assertTrue(input.getJSONObject(1).getString("content").startsWith("合成原文 "))
+        }
+        try {
+            conversations.clear()
+            prompts.save("common","普通 AI 隔离标记")
+            prompts.restore("custom_common")
+            onMainChecked {
+                settings.aiAutoApply=false
+                setField("aiConfiguration",provider);setField("aiCallFactory",factory)
+                invoke("openTool","ai");setField("aiModel","test-model")
+            }
+            assertInitial(send(),"用户填写的独立指令")
+            prompts.save("custom_common","统一要求 A")
+            assertInitial(send(),"统一要求 A\n\n用户填写的独立指令")
+            prompts.save("custom_common","")
+            assertInitial(send(),"用户填写的独立指令")
+            // No stale shared instructions may remain through previous_response_id after clearing.
+            val continuation=send()
+            assertTrue(continuation.has("previous_response_id"))
+            assertEquals(1,continuation.getJSONArray("input").length())
+            assertEquals("user",continuation.getJSONArray("input").getJSONObject(0).getString("role"))
+            onMainChecked { invoke("resetAiConversation") }
+            prompts.save("custom_common"," \n\t ")
+            assertInitial(send(),"用户填写的独立指令")
+            for((task,id) in listOf("polish" to "polish","correct" to "correct","tone" to "tone_正式","translate" to "translate")) {
+                prompts.save(id,"修改后的 $id 提示词")
+                val body=send(task)
+                val system=body.getJSONArray("input").getJSONObject(0).getString("content")
+                assertTrue(system.startsWith("普通 AI 隔离标记\n"))
+                assertTrue(system.endsWith("修改后的 $id 提示词"))
+                assertFalse(system.contains("用户填写的独立指令"))
+                assertFalse(body.has("previous_response_id"))
+            }
+        } finally {
+            onMainChecked { invoke("stopAiRequest");settings.aiAutoApply=auto }
+            conversations.clear();if(priorConversation!=null) conversations.save(priorConversation)
+            promptPrefs.edit().apply { priorPrompts.forEach { (id,value) -> if(value==null) remove(id) else putString(id,value) } }.commit()
+        }
+    }
+
     fun testPersistentSingleInputConversation() {
         val store=io.secure.keyboard.data.AiConversationStore(context)
         val prior=store.load()
@@ -833,7 +920,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         fun session()=field<io.secure.keyboard.translation.TranslationSession>("translation")
         fun finish(n:Int) = waitFor("request $n finished") { requests.size==n && !session().busy && field<Any?>("aiCall")==null }
         fun send(value:String) = onMainChecked { source().setText(value);invoke("applyEnter") }
-        fun select(offset:Int) = OfflineKeyboardService::class.java.getDeclaredMethod("selectAiResult",Int::class.javaPrimitiveType).apply { isAccessible=true }.invoke(service,offset)
+        fun select(offset:Int) = io.secure.keyboard.SessionTestAccess.method("selectAiResult",Int::class.javaPrimitiveType).apply { isAccessible=true }.invoke(service,offset)
         try {
             store.clear()
             onMainChecked {
@@ -1669,7 +1756,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         query(false, "he")
         val release = gateWorker()
         onMainChecked {
-            connection.before = "hello"
+            connection.before = "zzzzunmatched"
             invoke("refreshCandidates")
             assertTrue(row.childCount > 0)
             row.getChildAt(0).performClick()
@@ -1678,13 +1765,13 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         release.countDown()
         waitFor("latest completed English query, including a legitimate empty result") {
             field<Int>("candidateGeneration") == field<Int>("generation") &&
-                field<String>("candidateQuery") == "hello"
+                field<String>("candidateQuery") == "zzzzunmatched"
         }
         onMainChecked {
             assertTrue(connection.committed.isEmpty())
             assertEquals(0, connection.deleted)
-            assertEquals("hello", connection.before)
-            assertTrue("A complete hello has no longer static completions", field<List<String>>("candidateTexts").isEmpty())
+            assertEquals("zzzzunmatched", connection.before)
+            assertTrue("An unmatched prefix has no static completions", field<List<String>>("candidateTexts").isEmpty())
             assertEquals("The stale row disappears only once the empty result is ready", 0, row.childCount)
         }
     }
@@ -2153,6 +2240,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     fun testKeysToolsEditingAndEmojiRequestOneFeedbackBeforeTheirActions() {
+        SettingsStore(context).toolbarPins = listOf("quickedit")
         val host = attachActualHost()
         fun descendants(view: View): List<View> = listOf(view) +
             if (view is ViewGroup) (0 until view.childCount).flatMap { descendants(view.getChildAt(it)) }
@@ -2322,6 +2410,79 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 assertEquals(listOf(example.cursorOffset), host.connection.cursorOffsets)
                 assertEquals(1, host.haptics.effects.size)
             }
+        }
+    }
+
+    fun testEnglishSpaceSelectsFirstCandidateAndKeepsSingleSpace() {
+        val host = attachActualHost()
+        for (before in listOf("hel", "hel world")) {
+            resetActualHost(host)
+            onMainChecked {
+                host.editor.setText(before)
+                host.editor.setSelection(3)
+                setField("chinese", false)
+                invoke("refreshCandidates")
+            }
+            awaitResults()
+            var first = ""
+            onMainChecked {
+                first = field<List<String>>("candidateTexts").first()
+                invoke("space")
+            }
+            drainWorker()
+            onMainChecked {
+                assertEquals(first + if (before.endsWith("world")) " world" else " ", host.editor.text.toString())
+                assertEquals(first.length + 1, host.editor.selectionStart)
+            }
+        }
+        resetActualHost(host)
+        onMainChecked {
+            setField("chinese", false)
+            invoke("clearCandidates")
+            invoke("space")
+            assertEquals(" ", host.editor.text.toString())
+        }
+    }
+
+    fun testEnglishSpacePreservesRapidFollowingKeys() {
+        val host = attachActualHost()
+        onMainChecked {
+            host.editor.setText("hel"); host.editor.setSelection(3)
+            setField("chinese", false); invoke("refreshCandidates")
+        }
+        awaitResults()
+        val release = gateWorker()
+        var first = ""
+        try {
+            onMainChecked {
+                first = field<List<String>>("candidateTexts").first()
+                invoke("space")
+                invoke("type", "w")
+                invoke("backspace")
+                invoke("type", "x")
+                assertEquals("Completion must precede queued keys", "hel", host.editor.text.toString())
+            }
+        } finally { release.countDown() }
+        drainWorker()
+        onMainChecked { assertEquals("$first x", host.editor.text.toString()) }
+    }
+
+    fun testEnglishSpaceCompletesOnlyAssistantDraft() {
+        query(false, "he")
+        onMainChecked {
+            invoke("openTool", "translate")
+            val editor = field<TextView>("translationTextView") as android.widget.EditText
+            editor.setText("hel"); editor.setSelection(3)
+            invoke("refreshCandidates")
+        }
+        waitFor("Local completion") {
+            field<Int>("candidateGeneration") == field<Int>("generation") && field<List<String>>("candidateTexts").isNotEmpty()
+        }
+        onMainChecked {
+            val first = field<List<String>>("candidateTexts").first()
+            invoke("space")
+            assertEquals("$first ", field<TextView>("translationTextView").text.toString())
+            assertTrue(connection.committed.isEmpty())
         }
     }
 
@@ -2546,22 +2707,22 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     @Suppress("UNCHECKED_CAST")
     private fun <T> field(name: String): T =
-        OfflineKeyboardService::class.java.getDeclaredField(name).apply { isAccessible = true }.get(service) as T
+        io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.get(service) as T
 
     private fun setField(name: String, value: Any) {
-        OfflineKeyboardService::class.java.getDeclaredField(name).apply { isAccessible = true }.set(service, value)
+        io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.set(service, value)
     }
 
     private fun invoke(name: String, value: String? = null): Any? {
         // These fixtures type alphabet/ordinary punctuation. Symbol-page behavior is exercised
         // by actual keys in KeyboardEnglishSymbolPairTest, not by this reflection shortcut.
         if (name == "type") {
-            return OfflineKeyboardService::class.java.getDeclaredMethod(
+            return io.secure.keyboard.SessionTestAccess.method(
                 name, String::class.java, Boolean::class.javaPrimitiveType,
             ).apply { isAccessible = true }.invoke(service, requireNotNull(value), false)
         }
-        val method = if (value == null) OfflineKeyboardService::class.java.getDeclaredMethod(name)
-        else OfflineKeyboardService::class.java.getDeclaredMethod(name, String::class.java)
+        val method = if (value == null) io.secure.keyboard.SessionTestAccess.method(name)
+        else io.secure.keyboard.SessionTestAccess.method(name, String::class.java)
         method.isAccessible = true
         return if (value == null) method.invoke(service) else method.invoke(service, value)
     }

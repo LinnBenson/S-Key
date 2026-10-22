@@ -542,19 +542,19 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
     }
 
     private fun type(value: String) {
-        OfflineKeyboardService::class.java.getDeclaredMethod("type", String::class.java,
+        io.secure.keyboard.SessionTestAccess.method("type", String::class.java,
             Boolean::class.javaPrimitiveType).apply { isAccessible = true }.invoke(service, value, false)
     }
 
     private fun invoke(name: String, value: String? = null): Any? {
-        val method = if (value == null) OfflineKeyboardService::class.java.getDeclaredMethod(name)
-            else OfflineKeyboardService::class.java.getDeclaredMethod(name, String::class.java)
+        val method = if (value == null) io.secure.keyboard.SessionTestAccess.method(name)
+            else io.secure.keyboard.SessionTestAccess.method(name, String::class.java)
         method.isAccessible = true
         return if (value == null) method.invoke(service) else method.invoke(service, value)
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun <T> field(name: String): T = OfflineKeyboardService::class.java.getDeclaredField(name)
+    private fun <T> field(name: String): T = io.secure.keyboard.SessionTestAccess.field(name)
         .apply { isAccessible = true }.get(service) as T
 
     /** Report fixture assertions through JUnit rather than terminating Android's main thread. */
@@ -567,6 +567,6 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
     }
 
     private fun setField(name: String, value: Any) {
-        OfflineKeyboardService::class.java.getDeclaredField(name).apply { isAccessible = true }.set(service, value)
+        io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.set(service, value)
     }
 }

@@ -136,7 +136,7 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
                 invoke("cancelVoice")
                 assertEquals(0, mailbox.snapshot().pending)
                 arm()
-                OfflineKeyboardService::class.java.getDeclaredMethod(
+                io.secure.keyboard.SessionTestAccess.method(
                     "queueVoiceSegment", Long::class.javaPrimitiveType, String::class.java
                 ).apply { isAccessible = true }.invoke(service, 0L, "obsolete $index")
                 assertEquals(1, mailbox.snapshot().running)
@@ -145,7 +145,7 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
             invoke("cancelVoice")
             arm()
             repeat(9) { index ->
-                OfflineKeyboardService::class.java.getDeclaredMethod(
+                io.secure.keyboard.SessionTestAccess.method(
                     "queueVoiceSegment", Long::class.javaPrimitiveType, String::class.java
                 ).apply { isAccessible = true }.invoke(service, index.toLong(), "当前$index")
             }
@@ -240,7 +240,7 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
     }
 
     private fun submitStartCheck(request: Long, editor: Int, target: InputConnection) {
-        OfflineKeyboardService::class.java.getDeclaredMethod(
+        io.secure.keyboard.SessionTestAccess.method(
             "checkVoiceStart", Long::class.javaPrimitiveType, Int::class.javaPrimitiveType,
             InputConnection::class.java,
         ).apply { isAccessible = true }.invoke(service, request, editor, target)
@@ -804,8 +804,7 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
             .apply { isAccessible = true }.get(voice) as OfflineVoiceSession.Listener
     }
 
-    private fun invokeTool(tool: String) = OfflineKeyboardService::class.java
-        .getDeclaredMethod("openTool", String::class.java).apply { isAccessible = true }
+    private fun invokeTool(tool: String) = io.secure.keyboard.SessionTestAccess.method("openTool", String::class.java).apply { isAccessible = true }
         .invoke(service, tool)
 
     private fun arm() {
@@ -821,7 +820,7 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
     }
 
     private fun queue(id: Long, text: String) = onMainChecked {
-        OfflineKeyboardService::class.java.getDeclaredMethod(
+        io.secure.keyboard.SessionTestAccess.method(
             "queueVoiceSegment", Long::class.javaPrimitiveType, String::class.java
         ).apply { isAccessible = true }.invoke(service, id, text)
     }
@@ -856,12 +855,9 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun <T> field(name: String): T = OfflineKeyboardService::class.java
-        .getDeclaredField(name).apply { isAccessible = true }.get(service) as T
-    private fun setField(name: String, value: Any) = OfflineKeyboardService::class.java
-        .getDeclaredField(name).apply { isAccessible = true }.set(service, value)
-    private fun invoke(name: String): Any? = OfflineKeyboardService::class.java
-        .getDeclaredMethod(name).apply { isAccessible = true }.invoke(service)
+    private fun <T> field(name: String): T = io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.get(service) as T
+    private fun setField(name: String, value: Any) = io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.set(service, value)
+    private fun invoke(name: String): Any? = io.secure.keyboard.SessionTestAccess.method(name).apply { isAccessible = true }.invoke(service)
     /** Keep diagnostic assertion failures on JUnit's thread instead of crashing Android main. */
     private fun onMainChecked(block: () -> Unit) {
         var failure: Throwable? = null

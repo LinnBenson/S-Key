@@ -259,7 +259,7 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
 
     fun testLateBackgroundLoadCannotRestoreHiddenPanel() {
         store.addClipboard("fixture")
-        val worker = OfflineKeyboardService::class.java.getDeclaredField("worker").apply {
+        val worker = io.secure.keyboard.SessionTestAccess.field("worker").apply {
             isAccessible = true
         }.get(service) as java.util.concurrent.ExecutorService
         val entered = java.util.concurrent.CountDownLatch(1)
@@ -278,7 +278,7 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
     }
 
     private fun awaitContent() {
-        val worker = OfflineKeyboardService::class.java.getDeclaredField("worker").apply {
+        val worker = io.secure.keyboard.SessionTestAccess.field("worker").apply {
             isAccessible = true
         }.get(service) as java.util.concurrent.ExecutorService
         worker.submit {}.get(60, java.util.concurrent.TimeUnit.SECONDS)
@@ -289,7 +289,7 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
             instrumentation.waitForIdleSync()
             var ready = false
             instrumentation.checkedMain {
-                val body = OfflineKeyboardService::class.java.getDeclaredField("body").apply {
+                val body = io.secure.keyboard.SessionTestAccess.field("body").apply {
                     isAccessible = true
                 }.get(service) as View
                 fun loading(view: View): Boolean =
@@ -311,10 +311,10 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
 
     private fun showPanel(panel: String) {
         setField("panel", panel)
-        OfflineKeyboardService::class.java.getDeclaredMethod("renderBody").apply {
+        io.secure.keyboard.SessionTestAccess.method("renderBody").apply {
             isAccessible = true
         }.invoke(service)
-        val body = OfflineKeyboardService::class.java.getDeclaredField("body").apply {
+        val body = io.secure.keyboard.SessionTestAccess.field("body").apply {
             isAccessible = true
         }.get(service) as View
         fun hasManagement(view: View): Boolean =
@@ -325,7 +325,7 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
     }
 
     private fun rows(): List<ContentEntryRow> {
-        val body = OfflineKeyboardService::class.java.getDeclaredField("body").apply {
+        val body = io.secure.keyboard.SessionTestAccess.field("body").apply {
             isAccessible = true
         }.get(service) as View
         fun collect(view: View): List<ContentEntryRow> = when (view) {
@@ -337,7 +337,7 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
     }
 
     private fun setField(name: String, value: Any) {
-        OfflineKeyboardService::class.java.getDeclaredField(name).apply {
+        io.secure.keyboard.SessionTestAccess.field(name).apply {
             isAccessible = true
         }.set(service, value)
     }

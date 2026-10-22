@@ -922,15 +922,13 @@ class RapidTypingTest : InstrumentationTestCase() {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun <T> field(name: String): T = OfflineKeyboardService::class.java
-        .getDeclaredField(name).apply { isAccessible = true }.get(service) as T
+    private fun <T> field(name: String): T = io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.get(service) as T
 
     private fun setField(name: String, value: Any?) {
-        OfflineKeyboardService::class.java.getDeclaredField(name).apply { isAccessible = true }.set(service, value)
+        io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.set(service, value)
     }
 
-    private fun invoke(name: String) = OfflineKeyboardService::class.java
-        .getDeclaredMethod(name).apply { isAccessible = true }.invoke(service)
+    private fun invoke(name: String) = io.secure.keyboard.SessionTestAccess.method(name).apply { isAccessible = true }.invoke(service)
     /** Keep diagnostic assertion failures on JUnit's thread instead of crashing Android main. */
     private fun onMainChecked(block: () -> Unit) {
         var failure: Throwable? = null

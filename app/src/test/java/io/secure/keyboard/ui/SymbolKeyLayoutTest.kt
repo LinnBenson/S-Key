@@ -7,9 +7,9 @@ class SymbolKeyLayoutTest {
     @Test
     fun allFourPagesKeepExactCodePointsAndOrder() {
         val expected = listOf(
-            Triple(true, false, listOf("1234567890", "@#${'$'}_&-+（）/", "、.,：；！？")),
+            Triple(true, false, listOf("1234567890", "@#${'$'}_&-+（）/", ".,、：；！？")),
             Triple(true, true, listOf("~`|•《》÷×*§", "“”€¥^°=「」\\", "%‘’™✓［］")),
-            Triple(false, false, listOf("1234567890", "@#${'$'}_&-+()/", "*.,:;!?")),
+            Triple(false, false, listOf("1234567890", "@#${'$'}_&-+()/", ".,*:;!?")),
             Triple(false, true, listOf("~`|•<>÷×§∆", "\"'€¥^°={}\\", "%©®™✓[]")),
         )
         for ((chinese, secondary, rows) in expected) {

@@ -428,7 +428,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
                 clipboard.setPrimaryClip(ClipData.newPlainText("keyboard-password-test", fixture))
                 assertEquals("System clipboard must be readable by the focused host before paste",
                     fixture, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
-                OfflineKeyboardService::class.java.getDeclaredMethod("captureClipboard", Boolean::class.javaPrimitiveType)
+                io.secure.keyboard.SessionTestAccess.method("captureClipboard", Boolean::class.javaPrimitiveType)
                     .apply { isAccessible = true }.invoke(service, true)
                 textButton("粘贴").performClick()
                 assertEquals("Explicit host paste remains usable", "qw$fixture", editor.text.toString())
@@ -503,11 +503,11 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     }
 
     private fun invoke(name: String) {
-        OfflineKeyboardService::class.java.getDeclaredMethod(name).apply { isAccessible = true }.invoke(service)
+        io.secure.keyboard.SessionTestAccess.method(name).apply { isAccessible = true }.invoke(service)
     }
 
     private fun setField(name: String, value: Any) {
-        OfflineKeyboardService::class.java.getDeclaredField(name).apply { isAccessible = true }.set(service, value)
+        io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.set(service, value)
     }
 
     private fun createService() {
@@ -636,8 +636,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
         requireNotNull(keys()[description]) { "Missing visible keyboard key: $description" }
 
     @Suppress("UNCHECKED_CAST")
-    private fun <T> field(name: String): T = OfflineKeyboardService::class.java
-        .getDeclaredField(name).apply { isAccessible = true }.get(service) as T
+    private fun <T> field(name: String): T = io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.get(service) as T
 
     private class IsolatedApplication(context: Context) : Application() {
         init { attachBaseContext(context) }

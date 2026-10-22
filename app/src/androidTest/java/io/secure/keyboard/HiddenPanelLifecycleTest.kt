@@ -590,11 +590,11 @@ class HiddenPanelLifecycleTest : InstrumentationTestCase() {
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun <T> field(name: String): T = OfflineKeyboardService::class.java.getDeclaredField(name)
+    private fun <T> field(name: String): T = io.secure.keyboard.SessionTestAccess.field(name)
         .apply { isAccessible = true }.get(service) as T
-    private fun set(name: String, value: Any?) = OfflineKeyboardService::class.java.getDeclaredField(name)
+    private fun set(name: String, value: Any?) = io.secure.keyboard.SessionTestAccess.field(name)
         .apply { isAccessible = true }.set(service, value)
-    private fun invoke(name: String) = OfflineKeyboardService::class.java.getDeclaredMethod(name)
+    private fun invoke(name: String) = io.secure.keyboard.SessionTestAccess.method(name)
         .apply { isAccessible = true }.invoke(service)
 
     /** Catch all test/setup/teardown failures inside UI work, then rethrow on the JUnit thread. */

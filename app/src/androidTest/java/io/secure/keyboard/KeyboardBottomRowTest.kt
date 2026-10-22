@@ -592,9 +592,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
                 config.orientation == Configuration.ORIENTATION_LANDSCAPE,
                 profileOverride ?: SettingsStore.LayoutProfile(heightDp = heightDp, floating = floating),
             )
-        OfflineKeyboardService::class
-            .java
-            .getDeclaredField("chinese")
+        io.secure.keyboard.SessionTestAccess.field("chinese")
             .apply { isAccessible = true }
             .setBoolean(service, chinese)
         val root = service.onCreateInputView()
@@ -604,7 +602,7 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
     }
 
     private fun setSymbols(symbols: Boolean) {
-        OfflineKeyboardService::class.java.getDeclaredField("symbols")
+        io.secure.keyboard.SessionTestAccess.field("symbols")
             .apply { isAccessible = true }.setBoolean(service, symbols)
     }
 

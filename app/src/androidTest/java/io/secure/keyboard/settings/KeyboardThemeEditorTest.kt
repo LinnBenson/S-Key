@@ -18,7 +18,7 @@ import android.widget.EditText
 import android.widget.SeekBar
 import io.secure.keyboard.SettingsActivity
 import io.secure.keyboard.data.SettingsStore
-import io.secure.keyboard.ui.KeyboardThemeEditor
+import io.secure.keyboard.settings.KeyboardThemeEditor
 
 /** Real editor/dialog recreation tests use an isolated SettingsStore, never live preferences. */
 @Suppress("DEPRECATION")
@@ -69,7 +69,7 @@ class KeyboardThemeEditorTest : InstrumentationTestCase() {
     fun testPreviewTapSelectsRoleButCancelledScrollDoesNotOpenEditor() {
         open(false)
         instrumentation.runOnMainSync {
-            val preview = find<io.secure.keyboard.ui.PalettePreview>(activity!!.window.decorView, "theme_interactive_preview")
+            val preview = find<io.secure.keyboard.settings.PalettePreview>(activity!!.window.decorView, "theme_interactive_preview")
             fun touch(action: Int, x: Float, y: Float) {
                 val event = MotionEvent.obtain(0, 1, action, x, y, 0)
                 try { preview.onTouchEvent(event) } finally { event.recycle() }

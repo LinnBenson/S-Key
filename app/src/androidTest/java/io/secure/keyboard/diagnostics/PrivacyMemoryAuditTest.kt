@@ -11,6 +11,19 @@ import java.io.File
 
 @Suppress("DEPRECATION")
 class PrivacyMemoryAuditTest : InstrumentationTestCase() {
+    private fun containsSentinel(file: File, sentinel: String): Boolean = file.inputStream().use { input ->
+        val bytes = ByteArray(64 * 1024)
+        var tail = ""
+        while (true) {
+            val count = input.read(bytes)
+            if (count < 0) break
+            val chunk = tail + String(bytes, 0, count, Charsets.ISO_8859_1)
+            if (chunk.contains(sentinel)) return@use true
+            tail = chunk.takeLast(sentinel.length - 1)
+        }
+        false
+    }
+
     fun testCleanupInterruptedSyntheticFixture() {
         val context = instrumentation.targetContext
         val root = File(context.filesDir, "lifetime-dictionary-fixture")
@@ -31,7 +44,7 @@ class PrivacyMemoryAuditTest : InstrumentationTestCase() {
                 store.addPhrase("audit-phrase-$it")
             }
             val sentinel = "SKEY_AUDIT_PRIVATE_20261012"
-            val commit = fixture.service.javaClass.getDeclaredMethod("commit", String::class.java).apply { isAccessible = true }
+            val commit = io.secure.keyboard.SessionTestAccess.method("commit", String::class.java).apply { isAccessible = true }
             repeat(60) { cycle ->
                 instrumentation.checkedMain {
                     fixture.replaceHost()
@@ -65,7 +78,7 @@ class PrivacyMemoryAuditTest : InstrumentationTestCase() {
                 }
             }
             assertFalse("Typed text must not enter isolated app files",
-                fixture.sandbox.root.walkTopDown().filter { it.isFile }.any { it.readText().contains(sentinel) })
+                fixture.sandbox.root.walkTopDown().filter { it.isFile }.any { containsSentinel(it, sentinel) })
             assertFalse("Typed text must not enter settings",
                 fixture.sandbox.getSharedPreferences("settings", 0).all.values.any { it.toString().contains(sentinel) })
             assertEquals(12, store.clipboard().size)
@@ -81,8 +94,8 @@ class PrivacyMemoryAuditTest : InstrumentationTestCase() {
         val probe = LifetimeMemoryProbe(instrumentation.targetContext, "assistant-tools-audit")
         try {
             fixture.open()
-            val open = fixture.service.javaClass.getDeclaredMethod("openTool", String::class.java).apply { isAccessible = true }
-            val commit = fixture.service.javaClass.getDeclaredMethod("commitInputText", String::class.java).apply { isAccessible = true }
+            val open = io.secure.keyboard.SessionTestAccess.method("openTool", String::class.java).apply { isAccessible = true }
+            val commit = io.secure.keyboard.SessionTestAccess.method("commitInputText", String::class.java).apply { isAccessible = true }
             repeat(60) { cycle ->
                 instrumentation.checkedMain {
                     fixture.replaceHost()
@@ -103,7 +116,7 @@ class PrivacyMemoryAuditTest : InstrumentationTestCase() {
                 }
             }
             val sentinel = "SKEY_PRIVATE_ASSISTANT_AUDIT_20261019"
-            assertFalse(fixture.sandbox.root.walkTopDown().filter { it.isFile }.any { it.readText().contains(sentinel) })
+            assertFalse(fixture.sandbox.root.walkTopDown().filter { it.isFile }.any { containsSentinel(it, sentinel) })
             assertFalse(fixture.sandbox.getSharedPreferences("settings", 0).all.values.any { it.toString().contains(sentinel) })
         } finally { probe.stop(); fixture.close() }
     }

@@ -1,36 +1,32 @@
 package io.secure.keyboard.engine
 
 import android.content.Context
-import java.io.FileInputStream
-import java.nio.channels.FileChannel
 
 /** Read-only packaged tables shared across service lifecycles. Call load() off the UI thread. */
 class OfflineEngine(context: Context) {
     private val assets = context.applicationContext.assets
+    private val repository = io.secure.keyboard.dictionaries.DictionaryRepository(context)
+    private val prefs = context.applicationContext.getSharedPreferences("settings",0)
+    val revision: String get() = prefs.getString("builtin_dictionary_revision", "default-v2")!!
     val isLoaded: Boolean
         get() = packagedDictionary != null
 
     fun load() {
-        if (packagedDictionary != null) return
         synchronized(initializationLock) {
-            if (packagedDictionary != null) return
-            // A single process-wide parser prevents overlapping startup work when Android
+            val version = repository.identity + revision
+            if (loadedVersion == version && packagedDictionary != null) return
+                // A single process-wide parser prevents overlapping startup work when Android
             // destroys/recreates the IME while an earlier service is still loading assets.
-            // .skwb is stored uncompressed inside the signed APK. Map its asset byte range
-            // directly; do not copy it to heap, extract a disk cache, or deserialize all words.
-            val wubi = assets.openFd("dictionaries/compact-wubi.skwb").use { descriptor ->
-                require(descriptor.length in 64..Int.MAX_VALUE.toLong()) { "Invalid Wubi asset size" }
-                FileInputStream(descriptor.fileDescriptor).use { stream ->
-                    CompactWubiTable(stream.channel.map(
-                        FileChannel.MapMode.READ_ONLY, descriptor.startOffset, descriptor.length,
-                    ))
-                }
-            }
-            val parsed = assets.open("dictionaries/pinyin_simp.dict.yaml").reader(Charsets.UTF_8).use { p ->
-                assets.open("dictionaries/english_frequency.tsv").reader(Charsets.UTF_8).use { e ->
-                    DictionaryEngine(wubi, p, EnglishLexicon(e))
-                }
-            }
+            val file = repository.activeFile() ?: repository.defaultRuntime()
+            if (loadedPath == file.path && packagedDictionary != null) { loadedVersion=version; return }
+            val replacement = io.secure.keyboard.dictionaries.CompiledDictionary(file)
+            val previous = compiled
+            compiled = replacement
+            loadedPath = file.path
+            loadedVersion = version
+            val parsed = replacement.engine
+            previous?.close()
+            repository.cleanupSnapshots(file)
             packagedEmoji = assets.open("dictionaries/emoji_keywords.tsv").reader(Charsets.UTF_8).use { EmojiLexicon(it) }
             packagedDictionary = parsed
         }
@@ -39,19 +35,26 @@ class OfflineEngine(context: Context) {
     fun appendEmoji(words: List<String>): List<String> = packagedEmoji?.appendTo(words) ?: words
 
     fun exactWubi(code: String, limit: Int = 40): List<Candidate> =
-        packagedDictionary?.exactWubi(code, limit).orEmpty()
+        withDictionary { it.exactWubi(code, limit) }
 
     fun candidates(
         code: String,
         fuzzyPinyin: Boolean = true,
         limit: Int = 40,
         fuzzyPairs: Set<String> = DictionaryEngine.DEFAULT_FUZZY_PAIRS,
-    ): List<Candidate> = packagedDictionary?.candidates(code, fuzzyPinyin, limit, fuzzyPairs, allExactWubi = true).orEmpty()
+    ): List<Candidate> = withDictionary { it.candidates(code, fuzzyPinyin, limit, fuzzyPairs, allExactWubi = true) }
 
     fun completeEnglish(prefix: String, limit: Int = 8): List<Candidate> =
-        packagedDictionary?.completeEnglish(prefix, limit).orEmpty()
+        withDictionary { it.completeEnglish(prefix, limit) }
 
+    private fun <T> withDictionary(block: (DictionaryEngine)->T): T = synchronized(initializationLock) {
+        load()
+        block(checkNotNull(packagedDictionary))
+    }
     companion object {
+        private var loadedVersion: String? = null
+        private var loadedPath: String? = null
+        private var compiled: io.secure.keyboard.dictionaries.CompiledDictionary? = null
         private val initializationLock = Any()
         // Only immutable bundled dictionary tables live here. Never editor text, a query,
         // candidates, user frequencies, imported words, Context, or a learning/history model.

@@ -29,3 +29,16 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
  implementation(files("libs/sherpa-onnx-1.13.8.aar")); testImplementation("junit:junit:4.13.2") }
+
+
+// Reproducible default source catalog and immutable indexes; no generated databases in Git.
+val buildDictionaryCatalog by tasks.registering(Exec::class) {
+    workingDir(rootProject.projectDir)
+    commandLine("python3", "scripts/build_dictionary_catalog.py")
+    inputs.files(rootProject.file("scripts/build_dictionary_catalog.py"), rootProject.file("scripts/build_compact_wubi.py"))
+    inputs.dir(rootProject.file("third_party/wubi_supplements"))
+    inputs.files(file("src/main/assets/dictionaries/wubi86.dict.yaml"), file("src/main/assets/dictionaries/pinyin_simp.dict.yaml"), file("src/main/assets/dictionaries/english_frequency.tsv"), file("src/main/assets/dictionaries/english_extended.tsv"))
+    outputs.dir(layout.buildDirectory.dir("generated/dictionaryCatalog"))
+}
+android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/dictionaryCatalog"))
+tasks.named("preBuild").configure { dependsOn(buildDictionaryCatalog) }

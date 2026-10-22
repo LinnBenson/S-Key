@@ -14,15 +14,15 @@ source = '\n'.join(p.read_text() for p in (root/'app/src/main/java').rglob('*.kt
 for prohibited in ['setComposingText(', 'setComposingRegion(', 'SpeechRecognizer.', 'MediaRecorder()', 'Log.d(', 'Log.i(', 'Log.e(', 'println(']:
     assert prohibited not in source, prohibited
 assert 'debug = false' in source
-service = (root/'app/src/main/java/io/secure/keyboard/OfflineKeyboardService.kt').read_text()
+service = '\n'.join(p.read_text() for p in (root/'app/src/main/java/io/secure/keyboard/ime').glob('*.kt'))
 assert 'openConnection(' not in service
 ai = (root/'app/src/main/java/io/secure/keyboard/ai/AiWriting.kt').read_text()
 assert 'instanceFollowRedirects=false' in ai and 'canceled.get()' in ai
 assert 'aiCall!==call' in service and 'revision!=translation.revision' in service
 assert 'aiSelectionTarget.matches(selected,epoch)' in service
 # Network transport stays in API helpers; generation is an explicit action, never a keystroke side effect.
-for handler in ['private fun commitInputText', 'private fun applyBackspace']:
-    section = service.split(handler, 1)[1].split('\n    private fun ', 1)[0]
+for handler in ['internal fun KeyboardSession.commitInputTextImpl', 'internal fun KeyboardSession.applyBackspaceImpl']:
+    section = service.split(handler, 1)[1].split('\n    internal fun ', 1)[0]
     assert 'requestAi(' not in section and 'GrokModelCatalog' not in section
 api = (root/'app/src/main/java/io/secure/keyboard/data/ApiConfiguration.kt').read_text()
 assert 'AES/GCM/NoPadding' in api and 'AndroidKeyStore' in api
@@ -43,7 +43,7 @@ assert 'voiceGuard !== guard' in service and 'guard.reserve(' in service
 assert 'currentInputConnection === connection' in service and 'voiceSegments.clear()' in service
 assert 'segmentId <= lastSegmentId' in guard and 'selectionStart != expectedCursor' in guard
 # Scope the dictation callback; AI command preview is a separate listener.
-listener = service.split('private fun voiceListener()', 1)[1].split('private fun failVoice', 1)[0]
+listener = service.split('internal fun KeyboardSession.voiceListenerImpl()', 1)[1].split('internal fun KeyboardSession.failVoiceImpl', 1)[0]
 preview = listener.split('override fun onPreview(text: String, isFinal: Boolean)', 1)[1].split('override fun onSegment', 1)[0]
 assert 'commit' not in preview and 'queueVoiceSegment' not in preview
 assert '确认插入' not in service and 'button("开始")' not in service

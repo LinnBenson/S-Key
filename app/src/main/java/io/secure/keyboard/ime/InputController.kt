@@ -1,0 +1,540 @@
+package io.secure.keyboard.ime
+
+import android.content.*
+import android.os.*
+import android.view.*
+import android.widget.*
+import kotlin.math.*
+import io.secure.keyboard.data.DictionaryKind
+
+import io.secure.keyboard.*
+import io.secure.keyboard.ime.KeyboardSession.QueuedKey
+import io.secure.keyboard.ime.KeyboardSession.PendingConfirmation
+
+/** Input composition, commit ordering and editor interaction. */
+internal object InputController {
+    internal fun KeyboardSession.clearPendingImpl() {
+        spacingEpoch++; spacingPending = false; spacingTexts.clear(); spacingExpectedCursors.clear()
+        pendingConfirmation = null
+        englishConfirmation = null
+        queueReplayPosted = false
+        queuedKeys.clear()
+        queueSaturationNotified = false
+        clearComposition()
+    }
+
+    /** Successful ordered commits clear the code without discarding later queued keystrokes. */
+    internal fun KeyboardSession.clearCompositionImpl() {
+        generation++
+        candidateQueries.clear()
+        code = ""
+        clearCandidates()
+        if (candidatesExpanded) {
+            candidatesExpanded = false
+            if (bodyInitialized) renderKeyboardBody()
+        }
+    }
+
+    /** Finished/hidden/editor-invalidated ownership only; never the asynchronous loading path. */
+    internal fun KeyboardSession.releaseFinishedInputPresentationImpl() {
+        // Native posted clicks/long presses must be revoked while their views are still in
+        // the root. cancelTransient separately revokes our key timers and voice session.
+        quickPasteState.clear()
+        if (headerInitialized) {
+            toolbarGroup.removeAllViews()
+            toolbarSignature = null
+        }
+        if (rootInitialized) root.cancelPendingInputEvents()
+        contentQueries.clear()
+        val releasePanel = panel != "keys" || translation.enabled
+        stopAiRequest()
+        clearAiConversation(); aiMode = false; aiCustom = ""; aiCustomReasoning = "low"; aiCustomPresetName = ""; aiEditingInstruction = false; aiSelectionTarget.revoke()
+        translation.close()
+        releaseAssistantViews()
+        if (assistantAreaInitialized) assistantArea.removeAllViews()
+        // Reset before cancelTransient: held-voice cancellation must not rebuild an obsolete
+        // body before a new editor's language/privacy policy has been resolved.
+        panel = "keys"
+        if (candidateStripInitialized) candidateStrip.releasePresentation()
+        candidateGrid?.let { grid ->
+            grid.releasePresentation()
+            (grid.parent as? ViewGroup)?.removeView(grid)
+        }
+        candidateGrid = null
+        candidatesExpanded = false
+        if (releasePanel && bodyInitialized) {
+            // Content rows own complete strings and callbacks; emoji/other panels own their
+            // models/listeners. Drop only the finished panel, retaining ordinary letter keys.
+            body.removeAllViews()
+            letterKeyViews.clear()
+            shiftKeyView = null
+        }
+        if (preeditInitialized) {
+            preedit.text = ""
+            preedit.visibility = View.GONE
+        }
+        voicePreview = ""
+        voiceText?.text = ""
+        voiceStatus?.text = ""
+        voiceText = null
+        voiceStatus = null
+        voiceWaveform = null
+    }
+
+    internal fun KeyboardSession.chooseImpl(value: String): Boolean = choose(value) {}
+
+    internal fun KeyboardSession.chooseImpl(value: String, feedback: () -> Unit): Boolean {
+        dismissQuickPasteOnInput()
+        val ic = currentInputConnection ?: return false
+        val kind = if (chinese) DictionaryKind.CHINESE else DictionaryKind.ENGLISH
+        val dictionaryRevision = candidateDictionaryRevision
+        if (candidateDictionaryKind != kind || dictionaryRevision != content.dictionaryRevision(kind) || candidateRuntimeRevision != engine.revision) {
+            clearCandidates()
+            renderHeader()
+            return false
+        }
+        if (
+            !active || secret || candidateGeneration != generation ||
+                candidateConnection !== ic || value !in candidateTexts
+        ) return false
+        if (chinese) {
+            if (candidateQuery != code || code.isEmpty()) return false
+            feedback()
+            if (!commitInputText(value)) return false
+            clearComposition()
+        } else {
+            if (candidateQuery.isEmpty() || !settings.englishCompletion) return false
+            val expected = candidateQuery
+            activeAssistantEditor()?.let { editor ->
+                if(assistantEnglishPrefix(editor)!=expected) return false
+                val end=editor.selectionStart
+                val existingSpace=editor.text.getOrNull(end)==' '
+                feedback()
+                editor.text.replace(end-expected.length,end,if(existingSpace) value else "$value ")
+                editor.setSelection((end-expected.length+value.length+1).coerceAtMost(editor.length()))
+                clearPending(); refreshCandidates()
+                return true
+            }
+            val seq = ++generation
+            englishConfirmation = seq
+            candidateQueries.clear()
+            worker.execute {
+                val prefix = englishPrefix(ic)
+                val following = try { ic.getTextAfterCursor(1, 0)?.toString() }
+                    catch (_: RuntimeException) { null }
+                val existingSpace = following?.startsWith(" ") == true
+                main.post {
+                    try {
+                    if (following == null) return@post
+                    if (
+                        !active ||
+                            chinese ||
+                            secret ||
+                            !settings.englishCompletion ||
+                            seq != generation ||
+                            currentInputConnection !== ic ||
+                            prefix != expected ||
+                            candidateQuery != expected ||
+                            candidateDictionaryKind != kind ||
+                            candidateDictionaryRevision != dictionaryRevision
+                    )
+                        return@post
+                    // A deletion/edit can occur after the tap and during either host-prefix read.
+                    // Validate the same language's revision again before host mutation.
+                    if (dictionaryRevision != content.dictionaryRevision(kind)) {
+                        clearCandidates()
+                        renderHeader()
+                        return@post
+                    }
+                    feedback()
+                    ic.beginBatchEdit()
+                    try {
+                        if (dictionaryRevision != content.dictionaryRevision(kind)) {
+                            clearCandidates()
+                            renderHeader()
+                            return@post
+                        }
+                        if (!ic.deleteSurroundingText(prefix.length, 0)) return@post
+                        // Cursor=2 advances over the existing ASCII space after the replacement.
+                        // Otherwise insert exactly one new space without touching host suffix text.
+                        if (!ic.commitText(outputText(if (existingSpace) value else "$value "),
+                                if (existingSpace) 2 else 1)) return@post
+                    } finally {
+                        ic.endBatchEdit()
+                    }
+                    clearComposition()
+                    renderHeader()
+                    } finally {
+                        if (englishConfirmation == seq) {
+                            englishConfirmation = null
+                            replayQueuedKeys()
+                        }
+                    }
+                }
+            }
+            return true
+        }
+        renderHeader()
+        return true
+    }
+
+    internal fun KeyboardSession.commitInputTextImpl(value: String): Boolean {
+        dismissQuickPasteOnInput()
+        if (aiCommandVoice != null || inlineOfflineVoice != null) cancelAiCommandVoice()
+        if (translation.enabled) {
+            activeAssistantEditor()?.let { editor ->
+                val start=minOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(0)
+                val end=maxOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(start)
+                val retainedLength = editor.length() - (end - start)
+                editor.text.replace(start,end,value)
+                // Editable.replace keeps selection spans; explicitly collapse after accepted text.
+                val insertedLength = (editor.length() - retainedLength).coerceAtLeast(0)
+                editor.setSelection((start + insertedLength).coerceAtMost(editor.length()))
+                return true
+            }
+            if (aiMode) stopAiRequest()
+            if (aiMode && aiEditingInstruction) {
+                if (aiCustom.length + value.length > 2000) { toast("指令最多2000字符"); return false }
+                aiCustom += value; resetAiConversation(); translation.invalidate(); updateTranslationPreview(); return true
+            }
+            val accepted = translation.edit(translation.text + value)
+            if (!accepted) toast("原文最多 5000 字符")
+            updateTranslationPreview()
+            return accepted
+        }
+        if (settings.autoChineseSpacing && !secret && value.isNotEmpty()) {
+            val type = currentInputEditorInfo?.inputType ?: 0
+            val variation = type and android.text.InputType.TYPE_MASK_VARIATION
+            if (type and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT &&
+                variation !in listOf(android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+                    android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, android.text.InputType.TYPE_TEXT_VARIATION_URI)) {
+                if (spacingTexts.size >= 1024) return false
+                spacingTexts.addLast(value)
+                if (!spacingPending) commitNextSpacedText()
+                return true
+            }
+        }
+        return currentInputConnection?.commitText(outputText(value), 1) == true
+    }
+
+    internal fun KeyboardSession.commitNextSpacedTextImpl() {
+        val connection = currentInputConnection ?: run { spacingTexts.clear(); spacingPending=false; return }
+        val value = spacingTexts.removeFirstOrNull() ?: run { spacingPending=false; replayQueuedKeys(); return }
+        spacingPending = true
+        val token = spacingEpoch
+        val editor = voiceEditorGeneration
+        val selectionEpoch = spacingSelectionVersion
+        worker.execute {
+            val selection = readVoiceSelection(connection)
+            val edit = runCatching {
+                val before = connection.getTextBeforeCursor(2, 0)?.toString() ?: ""
+                val after = connection.getTextAfterCursor(2, 0)?.toString() ?: ""
+                // Without absolute selection coordinates avoid adding a suffix we cannot place the cursor before.
+                ChineseSpacing.format(value, before, if (selection == null) "" else after)
+            }.getOrElse { ChineseSpacing.format(value) }
+            main.post {
+                if (token != spacingEpoch) return@post
+                if (!active || secret || editor != voiceEditorGeneration || connection !== currentInputConnection ||
+                    selectionEpoch != spacingSelectionVersion) { spacingPending=false; spacingTexts.clear(); queuedKeys.clear(); return@post }
+                val convertedText = outputText(edit.text)
+                if (selection != null) {
+                    if (spacingExpectedCursors.size >= 1024) spacingExpectedCursors.removeFirst()
+                    spacingExpectedCursors.addLast(minOf(selection.first, selection.second) + convertedText.length - if (edit.trailingSpace) 1 else 0)
+                }
+                connection.beginBatchEdit()
+                try {
+                    val accepted = connection.commitText(convertedText, 1)
+                    if (accepted && edit.trailingSpace && selection != null) {
+                        val cursor = minOf(selection.first, selection.second) + convertedText.length - 1
+                        connection.setSelection(cursor, cursor)
+                    }
+                } finally { connection.endBatchEdit() }
+                spacingPending=false
+                if (spacingTexts.isNotEmpty()) commitNextSpacedText() else replayQueuedKeys()
+                refreshCandidates()
+            }
+        }
+    }
+
+    internal fun KeyboardSession.commitImpl(value: String) {
+        commitInputText(value)
+        refreshCandidates()
+    }
+
+    internal fun KeyboardSession.typeImpl(s: String, fromSymbolPage: Boolean = false) {
+        val asCode =
+            chinese &&
+                !symbols &&
+                !secret &&
+                !shifted &&
+                !capsLocked &&
+                s.length == 1 &&
+                s[0] in 'a'..'z'
+        // Capture case/mode at release. A later Shift or symbol-page change must not reinterpret
+        // a key that is waiting behind an earlier Chinese confirmation.
+        if (shifted && !capsLocked) {
+            shifted = false
+            updateShiftKeyFaces()
+        }
+        val rule = if (fromSymbolPage && symbols) io.secure.keyboard.data.SymbolClosureStore(this).rules().firstOrNull { it.opening == s } else null
+        dispatchKey(if (rule != null) QueuedKey.EnglishPair(rule.opening, rule.closing, rule.moveBackUnits) else QueuedKey.Text(s, asCode))
+    }
+
+    internal fun KeyboardSession.dispatchKeyImpl(key: QueuedKey) {
+        dismissQuickPasteOnInput()
+        if (key != QueuedKey.Backspace) assistantBackspaceTapAt = 0L
+        if (pendingConfirmation != null || englishConfirmation != null || queueReplayPosted || spacingPending) {
+            if (queuedKeys.size >= 1024) {
+                if (!queueSaturationNotified) {
+                    queueSaturationNotified = true
+                    toast("等待输入过多，请先取消待输入内容再继续")
+                }
+                return
+            }
+            queuedKeys.addLast(key)
+            return
+        }
+        applyKey(key)
+    }
+
+    internal fun KeyboardSession.applyKeyImpl(key: QueuedKey) {
+        when (key) {
+            is QueuedKey.Text -> applyText(key.value, key.asCode)
+            is QueuedKey.EnglishPair -> applyEnglishPair(key.opening, key.closing, key.moveBackUnits)
+            QueuedKey.Space -> applySpace()
+            QueuedKey.Enter -> applyEnter()
+            QueuedKey.Backspace -> applyBackspace()
+            QueuedKey.RepeatedBackspace -> performBackspace(false)
+        }
+    }
+
+    internal fun KeyboardSession.applyEnglishPairImpl(opening: String, closing: String, moveBackUnits: Int) {
+        if (translation.enabled) {
+            val editor = activeAssistantEditor()
+            if (editor == null) { commit(opening + closing); return }
+            val start = minOf(editor.selectionStart, editor.selectionEnd).coerceAtLeast(0)
+            val end = maxOf(editor.selectionStart, editor.selectionEnd).coerceAtLeast(start)
+            // Reject the whole pair at the limit instead of letting LengthFilter insert half.
+            if (editor.length() - (end - start) + opening.length + closing.length > 5000) {
+                toast("原文最多 5000 字符"); return
+            }
+            if (!commitInputText(opening + closing)) return
+            editor.setSelection(start + opening.length + closing.length - moveBackUnits)
+            sourceCursor = editor.selectionStart
+            symbols = false
+            symbolPage = false
+            renderBody()
+            refreshCandidates()
+            return
+        }
+        val connection = currentInputConnection ?: return
+        connection.beginBatchEdit()
+        val inserted = try {
+            // Replace the selection once, then move back by the configured UTF-16 offset with an empty
+            // edit. A nonempty commit at cursor=0 is unreliable on older BaseInputConnection:
+            // its selection marker advances across the newly inserted character. The negative offset is
+            // relative to the already-collapsed caret, and no second text insertion can move it.
+            // Both operations use the same connection/batch; no text reads or queued key events.
+            connection.commitText(outputText(opening + closing), 1) && (moveBackUnits == 0 || connection.commitText("", -moveBackUnits))
+        } finally {
+            connection.endBatchEdit()
+        }
+        if (!inserted) return
+        symbols = false
+        symbolPage = false
+        renderBody()
+        refreshCandidates()
+    }
+
+    internal fun KeyboardSession.applyTextImpl(s: String, asCode: Boolean) {
+        if (asCode) {
+            if(aiMode) aiDraftEpoch++
+            if (translation.enabled && !aiMode) { translation.invalidate(); updateTranslationPreview() }
+            if (code.length >= 40) return
+            code += s.lowercase()
+            refreshCandidates()
+            if (settings.fourCodeAutoCommit && code.length == 4 && loaded) {
+                engine.exactWubi(code, 1).firstOrNull()?.let {
+                    // A detached or temporarily unavailable host may reject the edit.
+                    // Retain composition and candidates so the user can retry explicitly.
+                    if (commitInputText(it.text)) {
+                        clearComposition()
+                        renderHeader()
+                    }
+                }
+            }
+        } else {
+            if (chinese && code.isNotEmpty()) {
+                if (!confirmChinese(s)) return
+            }
+            commit(s)
+        }
+    }
+
+    /** Returns true only when the candidate has already been committed synchronously. */
+    internal fun KeyboardSession.confirmChineseImpl(suffix: String?): Boolean {
+        val connection = currentInputConnection ?: return false
+        val ready = candidateGeneration == generation && candidateQuery == code &&
+            candidateConnection === connection &&
+            candidateDictionaryKind == DictionaryKind.CHINESE &&
+            candidateDictionaryRevision == content.dictionaryRevision(DictionaryKind.CHINESE)
+        if (ready) {
+            if (candidateTexts.isEmpty()) {
+                toast("没有匹配候选，请修改编码或按回车输入编码")
+                return false
+            }
+            val committed = choose(candidateTexts.first())
+            if (!committed) toast("输入框暂时无法接收文字，请重试")
+            return committed
+        }
+        if (!loaded && dictionaryLoadFailed) {
+            toast("词库不可用，可按回车输入原始编码")
+            return false
+        }
+        pendingConfirmation = PendingConfirmation(code, connection, suffix)
+        // Keep confirmation/queued keys separate from the latest derived query. Never commit a stale row.
+        refreshCandidates()
+        return false
+    }
+
+    internal fun KeyboardSession.finishPendingConfirmationImpl() {
+        val pending = pendingConfirmation ?: return
+        if (!active || !chinese || secret || currentInputConnection !== pending.connection ||
+            code != pending.code) {
+            clearPending()
+            renderHeader()
+            return
+        }
+        if (candidateGeneration != generation || candidateQuery != pending.code ||
+            candidateConnection !== pending.connection) return
+        pendingConfirmation = null
+        val first = candidateTexts.firstOrNull()
+        if (first == null) {
+            toast("没有匹配候选，请修改编码或按回车输入编码")
+        } else if (choose(first)) {
+            pending.suffix?.let { commit(it) }
+        } else {
+            toast("输入框暂时无法接收文字，请重试")
+        }
+        replayQueuedKeys()
+    }
+
+    /** Failure revokes only the wait; the original code remains editable and later taps replay. */
+    internal fun KeyboardSession.releasePendingConfirmationImpl() {
+        pendingConfirmation = null
+        replayQueuedKeys()
+    }
+
+    internal fun KeyboardSession.replayQueuedKeysImpl() {
+        if (queueReplayPosted) return
+        while (active && pendingConfirmation == null && englishConfirmation == null && !spacingPending && queuedKeys.isNotEmpty()) {
+            val key = queuedKeys.removeFirst()
+            applyKey(key)
+            if (key == QueuedKey.Backspace || key == QueuedKey.RepeatedBackspace || key == QueuedKey.Enter) {
+                // Host key events are dispatched asynchronously. Let them run before a later commit.
+                val epoch = spacingEpoch
+                queueReplayPosted = true
+                main.post {
+                    if (epoch == spacingEpoch) {
+                        queueReplayPosted = false
+                        replayQueuedKeys()
+                    }
+                }
+                return
+            }
+        }
+        if (queuedKeys.isEmpty()) queueSaturationNotified = false
+        startHeldVoiceWhenKeysSettle()
+    }
+
+    internal fun KeyboardSession.backspaceImpl() = dispatchKey(QueuedKey.Backspace)
+
+    internal fun KeyboardSession.applyBackspaceImpl() = performBackspace(true)
+
+    internal fun KeyboardSession.performBackspaceImpl(tap: Boolean) {
+        dismissQuickPasteOnInput()
+        // Unconfirmed Chinese input belongs to the composition, not the editor's text.
+        if (translation.enabled && chinese && code.isNotEmpty()) {
+            assistantBackspaceTapAt = 0L
+            code = code.dropLast(1)
+            refreshCandidates()
+            return
+        }
+        activeAssistantEditor()?.let { editor ->
+            if(editor.text.isNotEmpty()) {
+                assistantBackspaceTapAt = 0L
+                val start=minOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(0)
+                val end=maxOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(start)
+                if(start!=end) editor.text.delete(start,end)
+                else if(start>0) editor.text.delete(Character.offsetByCodePoints(editor.text,start,-1),start)
+                return
+            }
+        }
+        if (translation.enabled && translation.text.isEmpty() && code.isEmpty() &&
+            !(aiMode && aiEditingInstruction)) {
+            val now = SystemClock.uptimeMillis()
+            if (tap && assistantBackspaceTapAt != 0L &&
+                now - assistantBackspaceTapAt <= ViewConfiguration.getDoubleTapTimeout()) {
+                assistantBackspaceTapAt = 0L
+                if (aiMode) resetAiConversation()
+                openTool(if (aiMode) "ai" else "translate")
+            } else assistantBackspaceTapAt = if (tap) now else 0L
+            return
+        }
+        assistantBackspaceTapAt = 0L
+        if (translation.enabled && !aiMode) { translation.invalidate(); updateTranslationPreview() }
+        if (chinese && code.isNotEmpty()) {
+            code = code.dropLast(1)
+            refreshCandidates()
+        } else if (translation.enabled) {
+            if (aiMode) stopAiRequest()
+            if (aiMode && aiEditingInstruction) {
+                if (aiCustom.isNotEmpty()) { aiCustom = aiCustom.substring(0, aiCustom.offsetByCodePoints(aiCustom.length,-1)); resetAiConversation() }
+                translation.invalidate(); updateTranslationPreview(); return
+            }
+            translation.backspace(); updateTranslationPreview(); refreshCandidates()
+        } else {
+            // Delegate selection and Unicode deletion to the host's standard Backspace handler.
+            // Synchronous text reads here can deadlock a same-process WebView renderer.
+            arrow(KeyEvent.KEYCODE_DEL)
+            refreshCandidates()
+        }
+    }
+
+    /** Host cursor navigation preserves the editor's own Unicode/grapheme and selection rules. */
+    internal fun KeyboardSession.moveCursorImpl(direction: Int) {
+        if (translation.enabled && activeAssistantEditor()==null) return
+        arrow(if (direction < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT)
+    }
+
+    internal fun KeyboardSession.spaceImpl() = dispatchKey(QueuedKey.Space)
+
+    internal fun KeyboardSession.applySpaceImpl() {
+        if (chinese && code.isNotEmpty()) {
+            confirmChinese(null)
+        } else if (!chinese && candidateTexts.isNotEmpty() && choose(candidateTexts.first())) {
+            // English completion owns replacement and its single trailing space.
+            return
+        } else commit(" ")
+    }
+
+    internal fun KeyboardSession.enterImpl() = dispatchKey(QueuedKey.Enter)
+
+    internal fun KeyboardSession.applyEnterImpl() {
+        if (chinese && code.isNotEmpty()) {
+            val rawCode = code
+            if (!commitInputText(rawCode)) return
+            clearComposition()
+            renderHeader()
+            return
+        }
+        if (translation.enabled) {
+            if (aiMode && translation.busy) {
+                stopAiRequest(); val token=translation.begin(); translation.complete(token,"已停止生成",true); updateAiPreview()
+            } else requestTranslation()
+            return
+        }
+        if (!sendDefaultEditorAction(true)) commit("\n")
+    }
+
+}

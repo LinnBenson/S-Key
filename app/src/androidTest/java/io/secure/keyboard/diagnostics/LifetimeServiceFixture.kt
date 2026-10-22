@@ -110,9 +110,9 @@ internal class LifetimeServiceFixture(private val instrumentation: Instrumentati
         error(message)
     }
 
-    @Suppress("UNCHECKED_CAST") fun <T> field(name: String): T = service.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(service) as T
-    fun set(name: String, value: Any?) = service.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(service, value)
-    fun invoke(name: String): Any? = service.javaClass.getDeclaredMethod(name).apply { isAccessible = true }.invoke(service)
+    @Suppress("UNCHECKED_CAST") fun <T> field(name: String): T = io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.get(service) as T
+    fun set(name: String, value: Any?) = io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.set(service, value)
+    fun invoke(name: String): Any? = io.secure.keyboard.SessionTestAccess.method(name).apply { isAccessible = true }.invoke(service)
 
     override fun close() {
         instrumentation.checkedMain {

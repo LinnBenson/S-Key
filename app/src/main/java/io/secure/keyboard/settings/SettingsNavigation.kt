@@ -51,7 +51,7 @@ class SettingsNavigation {
     companion object {
         const val HOME = "home"
         const val RECOVERY = "recovery"
-        val routes = setOf(HOME, "behavior", "layout", "toolbar", "clipboard", "phrases",
+        val routes = setOf(HOME, "symbol_keyboard", "symbol_closure", "builtin_dictionaries", "builtin_ai_prompts", "behavior", "layout", "toolbar", "clipboard", "phrases",
             "dictionary", "english_dictionary", "emoji", "theme_light", "theme_dark", "feedback", "input", "cleanup",
             "profile_outer_portrait", "profile_outer_landscape", "profile_inner_portrait",
             "profile_inner_landscape", RECOVERY)

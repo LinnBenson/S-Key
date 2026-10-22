@@ -1,7 +1,7 @@
 # Static English completion data
 
-The application packages 25,000 useful English word forms in
-`app/src/main/assets/dictionaries/english_frequency.tsv`.
+The application packages 133,051 English word forms: 25,000 frequency-ranked common words in
+`app/src/main/assets/dictionaries/english_frequency.tsv` and 108,051 additional words in `english_extended.tsv`.
 Frequency ranking comes from Hermit Dave's **FrequencyWords / OpenSubtitles
 2018**; a **SCOWL 2020.12.07** spelling filter removes most names, acronyms,
 malformed tokens, and non-word strings. Both US and UK spellings are eligible.
@@ -39,25 +39,33 @@ highest corpus counts; equal counts use alphabetical order. No handwritten
 word boosts, previous user text, or generated frequencies are included; calendar
 names keep their unchanged corpus counts.
 
+## ESDB extension
+
+The extension uses the official [ESDB (formerly SCOWL)](https://wordlist.aspell.net/)
+US and GB large word lists, pinned to `en-wl/wordlist-diff` commit
+`7f2f4078354752045ee16a041605686561122185`. Unchanged inputs and the full upstream
+Copyright are vendored under `esdb/`; SHA-256 values are in `esdb/manifest.json`.
+ESDB permits redistribution and modification with its notices retained.
+The complete notice ships as `assets/licenses/ESDB-Copyright.txt`.
+
+Rebuild offline with `python3 third_party/english/rebuild_extended.py`.
+Only lowercase ASCII words of 2–40 letters are retained, matching the current
+completion engine. Take the union of US/GB, remove the existing common words,
+and sort lexically. Extension weights are 1 (fallback rank, not measured corpus
+frequencies). All 25,000 existing corpus weights remain unchanged, so uncommon
+additions cannot displace frequent completions. New coverage includes
+asynchronous, refactoring, serialization, neuroscience, virtualization and
+algorithmic. Apostrophes, accents, hyphens and capitalized proper nouns remain
+outside this completion format; the collection is larger, not exhaustive.
+
 ## Runtime and integration
 
-`EnglishLexicon(reader)` parses the packaged TSV once and closes the reader.
-`entryCount` reports validated unique words.
-`complete(prefix, limit = 8)` returns frequency-ranked strict extensions of
-the one supplied current word. It accepts a first letter, preserves the typed
-prefix, treats a single uppercase initial as title case, and produces uppercase
-completions when a longer prefix is all uppercase. Empty, multiword, numeric,
-punctuated, and non-ASCII inputs produce no results. No surrounding editor text
-is accepted. Exact words are not repeated as their own completion.
-
-The lexically sorted in-memory index uses binary searches to isolate a prefix
-range and a bounded priority queue for its best results. Queries are read-only
-and thread-safe, and do not allocate/sort the whole dictionary each keystroke.
-
-Current limitations: this is prefix completion, not typo correction or
-next-word prediction. The fixed 2018 frequencies emphasize conversational
-English. Inflections are included, but rare words, apostrophes, accents,
-hyphens, and names are deliberately limited. Corpus words are not censored.
+Both original TSV files appear under built-in English dictionaries and can be
+edited, exported or deleted. Changes take effect after successful compilation.
+`CompiledDictionary` queries the read-only SQLite snapshot; `EnglishLexicon`
+is retained as a reference reader for tests. Completion remains a strict prefix
+extension with typed casing preserved, not typo correction or next-word prediction.
+Existing custom English words still apply immediately.
 
 ## Deterministic examples
 

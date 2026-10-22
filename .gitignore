@@ -18,3 +18,5 @@ local.properties
 *.p12
 *.keystore
 keystore-password.txt
+
+.kotlin/

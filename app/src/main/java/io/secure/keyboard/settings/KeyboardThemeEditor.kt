@@ -1,4 +1,6 @@
-package io.secure.keyboard.ui
+package io.secure.keyboard.settings
+
+import io.secure.keyboard.ui.*
 
 import android.app.Activity
 import android.app.AlertDialog

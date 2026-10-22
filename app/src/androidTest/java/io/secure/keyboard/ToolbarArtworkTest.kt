@@ -55,7 +55,7 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
         instrumentation.runOnMainSync {
             harness = Harness()
             service = harness.create(context)
-            OfflineKeyboardService::class.java.getDeclaredField("settings")
+            io.secure.keyboard.SessionTestAccess.field("settings")
                 .apply { isAccessible = true }.set(service, settings)
             service.onCreateInputMethodInterface().startInput(
                 BaseInputConnection(View(context), true),
@@ -270,7 +270,7 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
     private fun dp(value: Int) = (value * context.resources.displayMetrics.density).roundToInt()
 
     @Suppress("UNCHECKED_CAST")
-    private fun <T> field(name: String): T = OfflineKeyboardService::class.java.getDeclaredField(name)
+    private fun <T> field(name: String): T = io.secure.keyboard.SessionTestAccess.field(name)
         .apply { isAccessible = true }.get(service) as T
 
     private class IsolatedContext(base: Context) : ContextWrapper(base) {

@@ -17,7 +17,9 @@ class DictionaryEngine private constructor(
     wubi: Reader?,
     pinyin: Reader,
     private val englishLexicon: EnglishLexicon?,
-    private val compactWubi: CompactWubiTable?,
+    private val compactWubi: WubiLookup?,
+    private val indexedPinyin: PinyinLookup? = null,
+    private val indexedEnglish: EnglishLookup? = null,
 ) {
     /** Text constructor retained for reference validation and small test fixtures. */
     constructor(wubi: Reader, pinyin: Reader, englishLexicon: EnglishLexicon? = null) :
@@ -27,7 +29,10 @@ class DictionaryEngine private constructor(
     constructor(wubi: CompactWubiTable, pinyin: Reader, englishLexicon: EnglishLexicon? = null) :
         this(null, pinyin, englishLexicon, wubi)
 
-    private data class Entry(val text: String, val code: String, val weight: Long)
+    data class Entry(val text: String, val code: String, val weight: Long)
+
+    constructor(wubi: WubiLookup, pinyin: PinyinLookup, english: EnglishLookup) :
+        this(null, java.io.StringReader("...\n"), null, wubi, pinyin, english)
 
     private val wubiExact: Map<String, List<Entry>>
     private val pinyinExact: Map<String, List<Entry>>
@@ -46,10 +51,10 @@ class DictionaryEngine private constructor(
         wubiPrefixes = prefixEntries(wubiEntries)
 
         val pinyinEntries = parse(pinyin)
-        pinyinEntryCount = pinyinEntries.size
-        pinyinExact = groupEntries(pinyinEntries) { compact(it.code) }
-        fuzzyExact = groupEntries(pinyinEntries) { fuzzyKey(it.code) }
-        syllables =
+        pinyinEntryCount = indexedPinyin?.entryCount ?: pinyinEntries.size
+        pinyinExact = indexedPinyin?.index("exact") ?: groupEntries(pinyinEntries) { compact(it.code) }
+        fuzzyExact = indexedPinyin?.index("fuzzy") ?: groupEntries(pinyinEntries) { fuzzyKey(it.code) }
+        syllables = indexedPinyin?.index("syllable") ?:
             groupEntries(
                 pinyinEntries,
                 include = {
@@ -145,8 +150,7 @@ class DictionaryEngine private constructor(
 
     /** Complete only the supplied current word. Never accepts surrounding editor text. */
     fun completeEnglish(prefix: String, limit: Int = 8): List<Candidate> =
-        englishLexicon
-            ?.complete(prefix, limit)
+        (indexedEnglish?.complete(prefix, limit) ?: englishLexicon?.complete(prefix, limit))
             ?.map { Candidate(it, prefix, Source.ENGLISH) }
             .orEmpty()
 
@@ -318,7 +322,7 @@ class DictionaryEngine private constructor(
             return reachable[raw.length]
         }
 
-        private fun fuzzyInputKey(raw: String, pairs: Set<String> = ALL_FUZZY_PAIRS): String {
+        fun fuzzyInputKey(raw: String, pairs: Set<String> = ALL_FUZZY_PAIRS): String {
             // Broad index gives a bounded shortlist. The query filters this shortlist with
             // the selected pairs; explicit syllable boundaries are checked separately.
             var v = compact(raw)

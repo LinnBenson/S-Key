@@ -358,7 +358,12 @@ class ContentStore(context: Context) {
             } catch (_: Exception) {
                 0L
             }
-        if (token > 0L) settings.lastClipboardToken = token
+        if (token > 0L) {
+            settings.lastClipboardToken = token
+            settings.quickPasteConsumedToken = token
+        }
+        app.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
+            .putString("clipboard_clear_revision", UUID.randomUUID().toString()).apply()
     }
 
     fun phrases(): List<Phrase> =

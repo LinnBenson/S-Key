@@ -81,7 +81,7 @@ class ServiceOwnershipDiagnosticTest : InstrumentationTestCase() {
     }
 
     private fun mailboxSnapshot(): Any? {
-        val field = fixture.service.javaClass.declaredFields.firstOrNull { it.name == "candidateQueries" } ?: return null
+        val field = fixture.service.session.javaClass.declaredFields.firstOrNull { it.name == "candidateQueries" } ?: return null
         val mailbox = field.apply { isAccessible = true }.get(fixture.service)
         return mailbox.javaClass.getDeclaredMethod("snapshot").apply { isAccessible = true }.invoke(mailbox)
     }

@@ -9,10 +9,10 @@ import java.nio.ByteOrder
  * Only a requested candidate page is decoded. The same buffer is safe across lookup threads:
  * primitive reads are absolute, and text reads use a short-lived independent view.
  */
-class CompactWubiTable(buffer: ByteBuffer) {
+class CompactWubiTable(buffer: ByteBuffer) : WubiLookup {
     private val bytes = buffer.asReadOnlyBuffer().order(ByteOrder.BIG_ENDIAN)
     val mappedByteCount: Int = bytes.capacity()
-    val entryCount: Int
+    override val entryCount: Int
     private val exactCount: Int
     private val prefixCount: Int
     private val exactIndex: Int
@@ -51,12 +51,12 @@ class CompactWubiTable(buffer: ByteBuffer) {
         require((48 until HEADER_BYTES).all { bytes.get(it).toInt() == 0 }) { "Invalid Wubi reserved header" }
     }
 
-    fun exactCandidateCount(code: String): Int {
+    override fun exactCandidateCount(code: String): Int {
         val index = find(code, exactIndex, exactCount)
         return if (index < 0) 0 else countAt(index, false)
     }
 
-    fun exact(code: String, limit: Int): List<Candidate> {
+    override fun exact(code: String, limit: Int): List<Candidate> {
         if (limit <= 0) return emptyList()
         val index = find(code, exactIndex, exactCount)
         if (index < 0) return emptyList()
@@ -71,7 +71,7 @@ class CompactWubiTable(buffer: ByteBuffer) {
         return result
     }
 
-    fun prefix(code: String, limit: Int): List<Candidate> {
+    override fun prefix(code: String, limit: Int): List<Candidate> {
         if (limit <= 0 || code.length >= 4) return emptyList()
         val index = find(code, prefixIndex, prefixCount)
         if (index < 0) return emptyList()

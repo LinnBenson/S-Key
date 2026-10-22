@@ -264,17 +264,13 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
     private fun dp(value: Int): Int = (value * service.resources.displayMetrics.density).roundToInt()
 
     @Suppress("UNCHECKED_CAST")
-    private fun <T> field(name: String): T = OfflineKeyboardService::class.java
-        .getDeclaredField(name).apply { isAccessible = true }.get(service) as T
+    private fun <T> field(name: String): T = io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.get(service) as T
 
-    private fun setField(name: String, value: Any) = OfflineKeyboardService::class.java
-        .getDeclaredField(name).apply { isAccessible = true }.set(service, value)
+    private fun setField(name: String, value: Any) = io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }.set(service, value)
 
-    private fun invoke(name: String) = OfflineKeyboardService::class.java
-        .getDeclaredMethod(name).apply { isAccessible = true }.invoke(service)
+    private fun invoke(name: String) = io.secure.keyboard.SessionTestAccess.method(name).apply { isAccessible = true }.invoke(service)
 
-    private fun invokeTool(tool: String) = OfflineKeyboardService::class.java
-        .getDeclaredMethod("openTool", String::class.java).apply { isAccessible = true }.invoke(service, tool)
+    private fun invokeTool(tool: String) = io.secure.keyboard.SessionTestAccess.method("openTool", String::class.java).apply { isAccessible = true }.invoke(service, tool)
 
     private class IsolatedContext(base: Context) : ContextWrapper(base) {
         val root = File(base.noBackupFilesDir, "emoji-category-instrumentation-tests")

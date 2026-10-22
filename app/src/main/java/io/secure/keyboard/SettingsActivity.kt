@@ -47,6 +47,7 @@ import kotlin.math.roundToInt
 open class SettingsActivity : ComponentActivity() {
     protected open val initialPage = "home"
     private val model: SettingsModel by viewModels()
+    private val builtinModel: BuiltinDictionaryModel by viewModels()
     private var incomingPage by mutableStateOf<String?>(null)
     private var voiceState by mutableStateOf<ModelImportCoordinator.State>(ModelImportCoordinator.State.Idle)
     private var microphone by mutableStateOf(false)
@@ -130,6 +131,7 @@ open class SettingsActivity : ComponentActivity() {
         var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
         fun ask(message: String, action: () -> Unit) { confirm = message to action }
         fun back() {
+            if (route == "builtin_dictionaries" && builtinModel.selected != null) { builtinModel.back(); return }
             incomingPage = when {
                 route.startsWith("input_") -> "input"
                 route.startsWith("profile_") -> "layout"
@@ -153,6 +155,22 @@ open class SettingsActivity : ComponentActivity() {
                     IconButton(onClick = { back() }) { UiIcon("back", "返回") }
                 })
             }) { padding ->
+                if (route == "symbol_keyboard") {
+                    SymbolKeyboardScreen(Modifier.padding(padding))
+                    return@Scaffold
+                }
+                if (route == "symbol_closure") {
+                    SymbolClosureScreen(Modifier.padding(padding))
+                    return@Scaffold
+                }
+                if (route == "builtin_ai_prompts") {
+                    BuiltinAiPromptScreen(Modifier.padding(padding))
+                    return@Scaffold
+                }
+                if (route == "builtin_dictionaries") {
+                    BuiltinDictionaryScreen(Modifier.padding(padding), builtinModel)
+                    return@Scaffold
+                }
                 key(route) {
                     LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).imePadding(),
                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
@@ -292,6 +310,13 @@ open class SettingsActivity : ComponentActivity() {
             Nav("布局配置", "横竖屏、折叠屏、悬浮与分离", "layout") { openPage("layout") }
         }
         Spacer(Modifier.height(16.dp))
+        Group("内置设置") {
+            Nav("内置词库", "五笔、拼音、英文 · 编辑与编译", "dictionary") { openPage("builtin_dictionaries") }
+            Nav("内置 AI 提示词", "各类助手提示词与自定义 AI 统一提示词", "ai") { openPage("builtin_ai_prompts") }
+            Nav("符号自动闭合", "输入符号、闭合符号与光标回移", "keyboard") { openPage("symbol_closure") }
+            Nav("符号键盘", "中文、英文 · 可视化修改两页符号", "keyboard") { openPage("symbol_keyboard") }
+        }
+        Spacer(Modifier.height(16.dp))
         Group("本机内容") {
             Nav("剪贴板", "${model.clipboard.size} 条", "clipboard") { openPage("clipboard") }
             Nav("常用语", "${model.phrases.size} 条", "phrases") { openPage("phrases") }
@@ -372,6 +397,7 @@ open class SettingsActivity : ComponentActivity() {
         model.revision
         val s = model.settings
         Group("中文输入偏好") {
+            Toggle("简繁转换", s.traditionalOutput, if (s.traditionalOutput) "繁体输出 · 上屏时转换" else "简体输出 · 默认") { s.traditionalOutput = it }
             Toggle("自动插入空格", s.autoChineseSpacing, "在中文与字母、数字之间插入空格，如：中 aa 文") { s.autoChineseSpacing = it }
             Toggle("五笔四码自动上屏", s.fourCodeAutoCommit) { s.fourCodeAutoCommit = it }
             Toggle("模糊拼音", s.fuzzyPinyin, "用于原版混输中的拼音候选") { s.fuzzyPinyin = it }
@@ -406,6 +432,11 @@ open class SettingsActivity : ComponentActivity() {
             Toggle("滑动退格删除", s.swipeDelete) { s.swipeDelete = it }
             Info("空格左右滑动移动光标，长按空格离线听写。")
             Nav("定制工具栏", "固定工具与排列顺序", "more") { openPage("toolbar") }
+        }
+        Spacer(Modifier.height(16.dp))
+        Group("剪贴板设置") {
+            Toggle("快捷粘贴", s.quickPaste) { s.quickPaste = it }
+            Info("新复制的内容仅在下次打开键盘时显示一次，点击即可粘贴。键盘打开期间复制的内容留待下次显示。")
         }
     }
     @Composable private fun Appearance() {
@@ -710,7 +741,8 @@ open class SettingsActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             notices = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 listOf("SHERPA_ONNX_LICENSE", "ONNXRUNTIME_LICENSE", "ONNXRUNTIME_THIRD_PARTY_NOTICES")
-                    .joinToString("\n\n") { assets.open("voice-licenses/$it").bufferedReader().use { reader -> reader.readText() } }
+                    .joinToString("\n\n") { assets.open("voice-licenses/$it").bufferedReader().use { reader -> reader.readText() } } +
+                    "\n\nOpenCC 1.1.9 · 简转繁数据\n" + assets.open("opencc/LICENSE").bufferedReader().use { it.readText() }
             }
         }
         Group("开源组件") {
@@ -802,7 +834,7 @@ open class SettingsActivity : ComponentActivity() {
     }
     @Composable private fun Modal(title: String, close: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
         Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Card(Modifier.fillMaxWidth().padding(20.dp).widthIn(max = 560.dp).heightIn(max = (LocalConfiguration.current.screenHeightDp * .85f).dp)) {
+            Card(io.secure.keyboard.settings.settingsDialogModifier()) {
                 Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(title, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
                     content()
@@ -811,10 +843,18 @@ open class SettingsActivity : ComponentActivity() {
         }
     }
     @Composable private fun UiIcon(kind: String, description: String?) {
+        if (kind == "script") {
+            Text(if (model.settings.traditionalOutput) "繁" else "简", modifier = Modifier.size(24.dp))
+            return
+        }
         Icon(painter = painterResource(io.secure.keyboard.ui.KeyboardIcons.resource(kind)), contentDescription = description,
             modifier = Modifier.size(24.dp), tint = hexColor(model.settings.themeTokens(model.settings.isDark(LocalConfiguration.current.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)).toolbarIcon))
     }
     private fun pageTitle(route: String): String = when(route) {
+        "symbol_keyboard" -> "符号键盘"
+        "symbol_closure" -> "符号自动闭合"
+        "builtin_ai_prompts" -> "内置 AI 提示词"
+        "builtin_dictionaries" -> "内置词库"
         "dashboard" -> "S Key"
         "input" -> "输入方式"
         "input_english" -> "英文设置"
@@ -839,7 +879,7 @@ open class SettingsActivity : ComponentActivity() {
         else -> if (route.startsWith("profile_")) "${if (route.contains("outer")) "外屏" else "内屏"} · ${if (route.endsWith("landscape")) "横屏" else "竖屏"}" else "偏好设置"
     }
     private fun toolName(id: String) = when(id) {
-        "floating" -> "悬浮键盘"; "split" -> "分离键盘"; "theme" -> "切换主题"
+        "script" -> "简繁转换"; "floating" -> "悬浮键盘"; "split" -> "分离键盘"; "theme" -> "切换主题"
         "quickedit" -> "快捷编辑"; "more" -> "更多"; else -> pageTitle(id)
     }
     companion object {

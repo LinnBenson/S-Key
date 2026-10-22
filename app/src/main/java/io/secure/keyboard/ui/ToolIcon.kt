@@ -25,6 +25,21 @@ class ToolIcon @JvmOverloads constructor(
         setImageResource(resource)
         imageTintList = ColorStateList.valueOf(tint)
     }
+    private val scriptPaint = if (kind == "script" || kind == "script_traditional")
+        android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textAlign = android.graphics.Paint.Align.CENTER
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        } else null
+    override fun onDraw(canvas: Canvas) {
+        if (kind == "script" || kind == "script_traditional") {
+            val paint = checkNotNull(scriptPaint).apply {
+                color = tint
+                textSize = minOf(20f * resources.displayMetrics.density, minOf(width, height) * 0.6f)
+            }
+            canvas.drawText(if (kind == "script_traditional") "繁" else "简", width / 2f,
+                height / 2f - (paint.ascent() + paint.descent()) / 2f, paint)
+        } else super.onDraw(canvas)
+    }
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         val artwork = drawable ?: return

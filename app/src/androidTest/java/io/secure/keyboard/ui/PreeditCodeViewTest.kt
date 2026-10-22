@@ -163,9 +163,9 @@ class PreeditCodeViewTest : InstrumentationTestCase() {
             instrumentation.runOnMainSync { before = geometry(field(service, "body")) }
             for (code in listOf("gojy", "", "gjypq", "")) {
                 instrumentation.runOnMainSync {
-                    OfflineKeyboardService::class.java.getDeclaredField("code")
+                    io.secure.keyboard.SessionTestAccess.field("code")
                         .apply { isAccessible = true }.set(service, code)
-                    OfflineKeyboardService::class.java.getDeclaredMethod("renderHeader")
+                    io.secure.keyboard.SessionTestAccess.method("renderHeader")
                         .apply { isAccessible = true }.invoke(service)
                 }
                 instrumentation.waitForIdleSync()
@@ -225,7 +225,7 @@ class PreeditCodeViewTest : InstrumentationTestCase() {
 
     @Suppress("UNCHECKED_CAST")
     private fun <T> field(service: OfflineKeyboardService, name: String): T =
-        OfflineKeyboardService::class.java.getDeclaredField(name).apply { isAccessible = true }
+        io.secure.keyboard.SessionTestAccess.field(name).apply { isAccessible = true }
             .get(service) as T
 
     private class ServiceHarness : ServiceTestCase<OfflineKeyboardService>(OfflineKeyboardService::class.java) {

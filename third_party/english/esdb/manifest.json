@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/en-wl/wordlist-diff",
+  "commit": "7f2f4078354752045ee16a041605686561122185",
+  "sha256": {
+    "en_US-large.txt": "815abb6f1855304a6c3f358aa1e5ce85823140a547226ce4114386f9b796c30f",
+    "en_GB-large.txt": "e89e38c3685ba5830f76d804cd6998ba7048d734bd92a97f24855d96b6d26d20",
+    "Copyright": "71bffd4b74ad47fff01c8b3c666e77da92737854e568850d8728024e0a53f304"
+  }
+}

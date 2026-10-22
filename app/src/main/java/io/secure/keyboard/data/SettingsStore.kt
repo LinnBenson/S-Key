@@ -10,6 +10,18 @@ class SettingsStore(context: Context) {
     private val prefs =
         context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
+    var traditionalOutput: Boolean
+        get() = prefs.getBoolean("traditionalOutput", false)
+        set(value) { prefs.edit().putBoolean("traditionalOutput", value).apply() }
+
+    var quickPaste: Boolean
+        get() = prefs.getBoolean("quickPaste", true)
+        set(value) { prefs.edit().putBoolean("quickPaste", value).apply() }
+
+    var quickPasteConsumedToken: Long
+        get() = prefs.getLong("quickPasteConsumedToken", 0L)
+        set(value) { prefs.edit().putLong("quickPasteConsumedToken", value).apply() }
+
     var lastCustomAiPresetId: String?
         get() = prefs.getString("lastCustomAiPresetId", null)
         set(value) { prefs.edit().putString("lastCustomAiPresetId", value).apply() }
@@ -382,7 +394,7 @@ class SettingsStore(context: Context) {
         // Keep the complete tool catalog independent of which tools are pinned by default.
         val availablePins = listOf(
             "ai", "translate", "clipboard", "phrases", "voice", "quickedit", "emoji", "layout",
-            "floating", "split", "theme", "dictionary", "english_dictionary", "settings",
+            "floating", "split", "theme", "script", "dictionary", "english_dictionary", "settings",
         )
     }
 }

@@ -20,7 +20,7 @@ import io.secure.keyboard.SettingsActivity
 import io.secure.keyboard.data.ContentStore
 import io.secure.keyboard.data.SettingsStore
 import io.secure.keyboard.settings.ColorPickerView
-import io.secure.keyboard.ui.KeyboardThemeEditor
+import io.secure.keyboard.settings.KeyboardThemeEditor
 import org.json.JSONObject
 import java.lang.ref.WeakReference
 
