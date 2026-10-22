@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新复查：[Bug、隐私与内存](bug-privacy-memory-followup-2026-10-22.md)。
+
 当前功能验证：[内置词库与核心职责拆分（2026-10-22）](builtin-dictionaries-2026-10-22/REPORT.md)。
 
 最新增量：[内置 AI 提示词（2026-10-22）](builtin-ai-prompts-2026-10-22.md)。
@@ -17,6 +19,10 @@
 新增专项：[Bug、隐私、内存与残留审计及弹窗统一](audit-2026-10-22.md)。
 
 新增专项：[三种输入模式与词库格式校验](input-modes-2026-10-22.md)。
+
+新增专项：[词库查询优化](dictionary-search-2026-10-22.md)。
+
+新增专项：[拼音联想显示与高优先级词库](pinyin-prediction-priority-2026-10-22.md)。
 
 ## 常用检查入口
 
@@ -38,3 +44,5 @@ python3 tests/privacy_audit.py
 外层 `diagnostics/` 是本地原始日志和诊断输出；需要随源码保留的结论整理进本目录，避免把设备日志直接作为当前版本验证结论。
 
 - [2026-10-22 全模块检查、剪贴板联动删除与长按符号](full-audit-2026-10-22.md)
+
+- [候选分页、剪贴板保留与设置备份](settings-policy-pagination-2026-10-22.md)

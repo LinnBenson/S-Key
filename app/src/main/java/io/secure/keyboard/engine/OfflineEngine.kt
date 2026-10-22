@@ -70,6 +70,31 @@ class OfflineEngine(context: Context) {
     fun completeEnglish(prefix: String, limit: Int = 8): List<Candidate> =
         withDictionary { it.completeEnglish(prefix, limit) }
 
+    internal fun boundedCandidates(code: String, fuzzy: Boolean, limit: Int, pairs: Set<String>, mode: ChineseInputMode) =
+        withDictionary { (if(mode==ChineseInputMode.MIXED) checkNotNull(mixedDictionary) else it).candidates(code,fuzzy,limit,pairs,mode=mode) }
+    /** Each SQL page is materialized under the snapshot lock; no cursor survives between pages. */
+    internal fun wordPages(kind: String, query: String, expectedRevision: String): Sequence<String> = sequence {
+        var offset = 0
+        while (true) {
+            val page = withDictionary {
+                check(revision == expectedRevision) { "词库已更新" }
+                when(kind) {
+                    "wubi" -> checkNotNull(compiled).exactWubiPage(query,offset,40)
+                    "initials" -> checkNotNull(compiled).initialsPage(query,offset,40)
+                    "pinyin" -> checkNotNull(compiled).pinyinPage(query,offset,40)
+                    "priority_pinyin" -> checkNotNull(compiled).pinyinPage(query,offset,40,priorityOnly=true)
+                    "english" -> checkNotNull(compiled).englishPage(query,offset,40)
+                    else -> error("Unknown candidate source")
+                }
+            }
+            yieldAll(page)
+            if(page.size < 40) break
+            offset += page.size
+        }
+    }
+    internal fun decodePinyinWithoutInitials(raw: String, context: String, custom: List<Pair<String,String>>, fuzzy: Boolean, pairs: Set<String>, cancelled: () -> Boolean) =
+        withDictionary { it.decodePinyin(raw,context,custom,fuzzy,pairs,cancelled,includeInitials=false) }
+
     private fun <T> withDictionary(block: (DictionaryEngine)->T): T = synchronized(initializationLock) {
         load()
         block(checkNotNull(packagedDictionary))

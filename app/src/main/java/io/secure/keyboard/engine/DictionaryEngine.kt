@@ -30,7 +30,7 @@ class DictionaryEngine private constructor(
     constructor(wubi: CompactWubiTable, pinyin: Reader, englishLexicon: EnglishLexicon? = null) :
         this(null, pinyin, englishLexicon, wubi)
 
-    data class Entry(val text: String, val code: String, val weight: Long)
+    data class Entry(val text: String, val code: String, val weight: Long, val priority: Long = Long.MAX_VALUE)
 
     constructor(wubi: WubiLookup, pinyin: PinyinLookup, english: EnglishLookup, initials: (String)->List<Entry> = { emptyList() }) :
         this(null, java.io.StringReader("...\n"), null, wubi, pinyin, english, initials)
@@ -80,6 +80,20 @@ class DictionaryEngine private constructor(
             .toList()
     }
 
+    private fun matchingPinyin(kind: String, key: String, limit: Int, predicate: (Entry)->Boolean): List<Entry> {
+        if(indexedPinyin==null) return (if(kind=="exact") pinyinExact[key] else fuzzyExact[key]).orEmpty().asSequence().filter(predicate).distinctBy { it.text }.take(limit).toList()
+        val matches=ArrayList<Entry>()
+        val seen=HashSet<String>()
+        var offset=0
+        while(matches.size<limit) {
+            val page=indexedPinyin.lookupPage(kind,key,offset,40)
+            for(entry in page) if(predicate(entry) && seen.add(entry.text)) { matches.add(entry); if(matches.size==limit) break }
+            if(page.size<40) break
+            offset+=page.size
+        }
+        return matches
+    }
+
     fun candidates(
         code: String,
         fuzzyPinyin: Boolean = true,
@@ -117,7 +131,7 @@ class DictionaryEngine private constructor(
         if (mode != ChineseInputMode.WUBI) {
             val segmented = raw.contains('\'') || raw.contains(' ')
             val syllableCode = raw.split(' ', '\'').filter(String::isNotEmpty).joinToString(" ")
-            val exactPinyin = pinyinExact[key]?.filter { !segmented || it.code == syllableCode }
+            val exactPinyin = matchingPinyin("exact",key,resultLimit) { !segmented || it.code == syllableCode }
             add(exactPinyin, Source.PINYIN)
             if (fuzzyPinyin && fuzzyPairs.isNotEmpty()) {
                 // Preserve the existing pairs' matching rules. The optional r/l pair has a
@@ -128,7 +142,7 @@ class DictionaryEngine private constructor(
                     if (segmented) syllableCode.split(' ').map { fuzzySyllable(it, selectedPairs) }
                     else emptyList()
                 add(
-                    fuzzyExact[fuzzyInputKey(raw)]?.filter {
+                    matchingPinyin("fuzzy",fuzzyInputKey(raw),resultLimit) {
                         (fuzzyInputKey(it.code, selectedPairs) == selectedKey &&
                             (!segmented ||
                                 it.code.split(' ').map { part -> fuzzySyllable(part, selectedPairs) } ==
@@ -156,7 +170,7 @@ class DictionaryEngine private constructor(
         return result.values.toList()
     }
 
-    fun decodePinyin(raw: String, context: String, custom: List<Pair<String, String>>, fuzzy: Boolean, pairs: Set<String>, cancelled: () -> Boolean = { false }): List<PinyinDecoder.Option> {
+    fun decodePinyin(raw: String, context: String, custom: List<Pair<String, String>>, fuzzy: Boolean, pairs: Set<String>, cancelled: () -> Boolean = { false }, includeInitials: Boolean = true): List<PinyinDecoder.Option> {
         val decoder = PinyinDecoder(cancelled = cancelled, lookup = { token ->
             val exact = (indexedPinyin?.lookup("exact", compact(token), 64) ?: pinyinExact[compact(token)].orEmpty()).filter {
                 !token.contains('\'') || it.code.replace(" ", "'") == token
@@ -177,9 +191,11 @@ class DictionaryEngine private constructor(
         })
         val decoded = decoder.candidates(raw, context, custom)
         if (cancelled()) return emptyList()
-        return if(raw.length==1) {
+        return if(raw.length==1 && includeInitials) {
             val customInitials = custom.filter { it.first == raw }.map { PinyinDecoder.Option(it.second,1) }
-            (customInitials + initials(raw).map { PinyinDecoder.Option(it.text,1) } + decoded).distinctBy { it.text }
+            val priorityInitials = indexedPinyin?.lookup("exact",compact(raw),64).orEmpty()
+                .filter { it.priority!=Long.MAX_VALUE }.map { PinyinDecoder.Option(it.text,1) }
+            (priorityInitials + customInitials + (if(includeInitials) initials(raw) else emptyList()).map { PinyinDecoder.Option(it.text,1) } + decoded).distinctBy { it.text }
         } else decoded
     }
 

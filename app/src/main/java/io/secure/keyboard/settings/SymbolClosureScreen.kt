@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.secure.keyboard.data.SymbolClosureStore
@@ -29,7 +30,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
     var error by rememberSaveable { mutableStateOf("") }
     val colors = MiuixTheme.colorScheme
     Column(modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+        LazyColumn(Modifier.weight(1f),contentPadding=SettingsPagePadding,verticalArrangement=Arrangement.spacedBy(16.dp)) {
             item { Text("输入左侧符号时自动补全右侧符号。光标回移 0 位表示停在末尾。",fontSize=14.sp,color=colors.onSurfaceSecondary) }
             item { Card { Column(Modifier.padding(16.dp)) {
                 Row(Modifier.fillMaxWidth().padding(vertical=8.dp)) {
@@ -51,15 +52,15 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
         }
     }
     if(editing) Dialog(onDismissRequest={},properties=DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress=false,dismissOnClickOutside=false)) {
-        Card(settingsDialogModifier()) { Column(Modifier.padding(20.dp).imePadding().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(14.dp)) {
-            Text(if(original==null) "添加规则" else "修改规则",fontSize=20.sp)
+        Card(settingsDialogModifier()) { Column(settingsDialogContentModifier(),verticalArrangement=Arrangement.spacedBy(SettingsDialogSpacing)) {
+            Text(if(original==null) "添加规则" else "修改规则",fontSize=20.sp,fontWeight=FontWeight.SemiBold)
             TextField(value=opening,onValueChange={if(it.length<=8) opening=it},label="输入符号（一个字符）")
             TextField(value=closing,onValueChange={if(it.length<=32) closing=it},label="闭合符号")
             TextField(value=move,onValueChange={if(it.length<=3 && it.all { c -> c in '0'..'9' }) move=it},label="光标回移位")
             Text("例如 { ｜ } ｜ 1，插入 {} 后光标停在中间。",fontSize=13.sp,color=colors.onSurfaceSecondary)
             if(error.isNotEmpty()) Text(error,fontSize=13.sp)
             if(original!=null) TextButton(text="删除规则",modifier=Modifier.fillMaxWidth(),onClick={store.delete(original!!);rules=store.rules();editing=false})
-            Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement=Arrangement.spacedBy(SettingsActionSpacing)) {
                 TextButton(text="取消",modifier=Modifier.weight(1f),onClick={editing=false})
                 Button(modifier=Modifier.weight(1f),colors=ButtonDefaults.buttonColorsPrimary(),onClick={
                     try {

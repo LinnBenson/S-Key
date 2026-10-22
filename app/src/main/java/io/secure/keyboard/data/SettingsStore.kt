@@ -153,6 +153,14 @@ class SettingsStore(context: Context) {
     private fun validatedColor(value: String): String = normalizedColor(value)
         ?: throw IllegalArgumentException("请输入不透明的六位十六进制颜色，例如 #336699；不支持透明度。")
 
+    var clipboardRetention: String
+        get() = prefs.getString("clipboardRetention", "forever")?.takeIf { it in setOf("none", "timed", "forever") } ?: "forever"
+        set(value) { require(value in setOf("none", "timed", "forever")); prefs.edit().putString("clipboardRetention", value).apply() }
+
+    var clipboardRetentionHours: Int
+        get() = prefs.getInt("clipboardRetentionHours", 24).coerceIn(1, 720)
+        set(value) { prefs.edit().putInt("clipboardRetentionHours", value.coerceIn(1, 720)).apply() }
+
     var clipboardLimit: Int
         get() = prefs.getInt("clipboardLimit", 30)
         set(value) {
@@ -393,7 +401,7 @@ class SettingsStore(context: Context) {
                 selectedKeyText = accentText,
             )
         }
-        private val symbolHintModes = setOf("all", "digits", "hidden")
+        internal val symbolHintModes = setOf("all", "digits", "hidden")
         val defaultPins = listOf("floating", "clipboard", "quickedit", "emoji", "voice")
         // Keep the complete tool catalog independent of which tools are pinned by default.
         val availablePins = listOf(

@@ -16,7 +16,8 @@ def build():
     CREATE INDEX entry_library ON entries(library,id);
     CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
     INSERT INTO metadata VALUES('dirty','0');
-    INSERT INTO metadata VALUES('catalog_version','5');
+    INSERT INTO metadata VALUES('catalog_version','6');
+    INSERT INTO metadata VALUES('priority_libraries_added','1');
     INSERT INTO metadata VALUES('initials_added','1');
     INSERT INTO metadata VALUES('initials_version','2');
     ''')
@@ -53,6 +54,8 @@ def build():
         if not line or line.startswith('#'): continue
         word,code,weight=line.split('\t')
         db.execute('INSERT INTO entries(library,text,code,weight) VALUES(11,?,?,?)',(word,code,int(weight)))
+    db.execute("INSERT INTO libraries VALUES(12,'本地高优先级词库','pinyin',1,'Local user-maintained entries')")
+    db.execute("INSERT INTO libraries VALUES(13,'本地高优先级词库','english',1,'Local user-maintained entries')")
     db.execute("ALTER TABLE libraries ADD COLUMN filename TEXT NOT NULL DEFAULT ''")
     db.execute("ALTER TABLE libraries ADD COLUMN source_path TEXT NOT NULL DEFAULT ''")
     sources=DEST.parent.parent/'dictionary-sources'; sources.mkdir(parents=True,exist_ok=True)
@@ -60,9 +63,18 @@ def build():
         original=(ROOT/'app/src/main/assets/dictionaries' if i==1 else ROOT/'third_party/wubi_supplements')/spec['filename']
         shutil.copyfile(original,sources/spec['filename'])
         db.execute('UPDATE libraries SET filename=? WHERE id=?',(spec['filename'],i))
-    for i,name in [(8,'pinyin_simp.dict.yaml'),(9,'english_frequency.tsv'),(10,'english_extended.tsv'),(11,'pinyin_initials.dict.yaml')]:
+    for i,name in [(8,'pinyin_simp.dict.yaml'),(9,'english_frequency.tsv'),(10,'english_extended.tsv'),(11,'pinyin_initials.dict.yaml'),(12,'pinyin_high_priority.dict.yaml'),(13,'english_high_priority.tsv')]:
         shutil.copyfile(ROOT/'app/src/main/assets/dictionaries'/name,sources/name)
         db.execute('UPDATE libraries SET filename=? WHERE id=?',(name,i))
+    for lib,filename,kind in [(12,'pinyin_high_priority.dict.yaml','pinyin'),(13,'english_high_priority.tsv','english')]:
+        lines=(ROOT/'app/src/main/assets/dictionaries'/filename).read_text()
+        if kind=='pinyin': lines=lines.split('...\n',1)[1]
+        for line in lines.splitlines():
+            if not line or line.startswith('#'): continue
+            parts=line.split('\t')
+            if kind=='english': text,weight=parts; code=text
+            else: text,code=parts[:2]; weight=parts[2] if len(parts)>2 else 0
+            db.execute('INSERT INTO entries(library,text,code,weight) VALUES(?,?,?,?)',(lib,text,code,int(weight)))
     db.commit(); db.execute('VACUUM'); db.close()
     print(DEST)
 if __name__=='__main__': build()
@@ -90,5 +102,17 @@ def compile_runtime():
     db.execute("CREATE INDEX syllable_words ON words(kind,syllable,weight DESC,ordinal) WHERE kind='pinyin'")
     db.execute("CREATE INDEX mixed_fuzzy_words ON words(kind,fuzzy,weight DESC,ordinal) WHERE kind='mixed_pinyin'")
     db.execute("CREATE INDEX mixed_syllable_words ON words(kind,syllable,weight DESC,ordinal) WHERE kind='mixed_pinyin'")
+    db.execute("CREATE INDEX ranked_exact_words ON words(kind,compact,weight DESC,ordinal) WHERE kind='pinyin_initial'")
+    db.execute("CREATE INDEX prediction_words ON words(kind,text,weight DESC) WHERE kind IN ('pinyin','mixed_pinyin')")
+    db.execute("CREATE TABLE short_prefixes(kind TEXT NOT NULL,prefix TEXT NOT NULL,rank INTEGER NOT NULL,word_id INTEGER NOT NULL,PRIMARY KEY(kind,prefix,rank)) WITHOUT ROWID")
+    for kind,limit,order in [('wubi',30,'weight DESC,ordinal'),('english',12,'weight DESC,text')]:
+        counts={}
+        for rowid,code in db.execute(f"SELECT rowid,compact FROM words WHERE kind='{kind}' ORDER BY {order}"):
+            for size in range(1,min(2,len(code)-1)+1):
+                prefix=code[:size]; rank=counts.get(prefix,0)
+                if rank>=limit: continue
+                db.execute('INSERT INTO short_prefixes VALUES(?,?,?,?)',(kind,prefix,rank,rowid))
+                counts[prefix]=rank+1
+    db.execute('PRAGMA user_version=3')
     db.commit(); db.execute('VACUUM'); db.close(); source.close(); print(path)
 if __name__=='__main__': compile_runtime()

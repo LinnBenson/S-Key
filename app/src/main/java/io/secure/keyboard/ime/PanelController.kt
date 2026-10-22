@@ -261,6 +261,9 @@ internal object PanelController {
 
     internal fun KeyboardSession.captureClipboardImpl(newCopyEvent: Boolean = false) {
         if (!clipsInitialized || (!active && !newCopyEvent) || secret) return
+        if (!newCopyEvent && !worker.isShutdown) clipboardWrites.submit(0) {
+            try { content.trimClipboard() } catch (_: Exception) { reportContentError() }
+        }
         try {
             val clip = clips.primaryClip ?: return
             val text = ClipboardCapturePolicy.textForHistory(clip) ?: return

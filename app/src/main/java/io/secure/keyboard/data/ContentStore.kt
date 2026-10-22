@@ -18,7 +18,7 @@ import org.json.JSONObject
 
 /** Private, backup-excluded content. Does not observe the clipboard itself. */
 class ContentStore(context: Context) {
-    data class ClipboardItem(val id: String, val text: String, val pinned: Boolean = false)
+    data class ClipboardItem(val id: String, val text: String, val pinned: Boolean = false, val copiedAt: Long = 0L)
 
     data class AiPreset(val id: String, val name: String, val prompt: String, val reasoningEffort: String = "low")
 
@@ -51,6 +51,7 @@ class ContentStore(context: Context) {
         val revision: Long,
         val stamp: DictionaryStamp,
         val rows: List<DictionaryEntry>,
+        val searches: MutableMap<DictionaryKind, io.secure.keyboard.engine.CustomDictionaryIndex<DictionaryEntry>> = mutableMapOf(),
     )
 
     /** Lock-free path-and-kind-scoped revision; never waits behind content I/O on the main thread. */
@@ -259,10 +260,12 @@ class ContentStore(context: Context) {
         else row.getString("word").length.toLong() + row.getString("reading").length
     }
 
-    fun clipboard(): List<ClipboardItem> =
-        objects("clipboard").toMutableList().apply { deduplicateClipboard(this) }.map {
-            ClipboardItem(it.getString("id"), it.getString("text"), it.optBoolean("pinned"))
+    fun clipboard(): List<ClipboardItem> = synchronized(lock) {
+        trimClipboard()
+        objects("clipboard").map {
+            ClipboardItem(it.getString("id"), it.getString("text"), it.optBoolean("pinned"), it.optLong("copiedAt"))
         }
+    }
 
     /** Exact text only: whitespace and line breaks are meaningful clipboard content. */
     private fun deduplicateClipboard(list: MutableList<JSONObject>) {
@@ -283,7 +286,9 @@ class ContentStore(context: Context) {
 
     fun setClipboardPinned(id: String, pinned: Boolean) =
         mutate("clipboard") { list ->
+            if (pinned) require(list.count { it.optBoolean("pinned") } < 1000) { "最多置顶 1000 条记录" }
             list.find { it.optString("id") == id }?.put("pinned", pinned)
+            pruneClipboard(list, System.currentTimeMillis())
         }
 
     /** Snapshot when an OS copy event is received, before queueing its storage work. */
@@ -314,29 +319,54 @@ class ContentStore(context: Context) {
 
     fun addClipboard(text: String) {
         require(text.length <= MAX_CLIPBOARD_ITEM_CHARACTERS) { "剪贴板单条最多保存 65536 个字符，原文仍可从系统剪贴板粘贴。" }
-        if (text.isNotEmpty())
-            mutate("clipboard") { list ->
-                val existing = list.find { it.getString("text") == text }
-                if (existing != null) list.remove(existing)
-                // Select a victim from existing history, so a full all-pinned history still
-                // accepts the newest copy. Pins cannot bypass the configured storage bound.
-                var characters = list.sumOf { it.getString("text").length.toLong() }
-                while (list.isNotEmpty() && (list.size >= settings.clipboardLimit ||
-                        characters + text.length > MAX_CLIPBOARD_CHARACTERS)) {
-                    characters -= evictOldestClipboard(list).getString("text").length
-                }
-                list.add(existing ?: item(text))
+        if (text.isEmpty()) return
+        mutate("clipboard") { list ->
+            val now = System.currentTimeMillis()
+            pruneClipboard(list, now)
+            val existing = list.find { it.getString("text") == text }
+            if (settings.clipboardRetention == "none" && existing?.optBoolean("pinned") != true) return@mutate
+            if (existing != null) list.remove(existing)
+            val row = (existing ?: item(text)).put("copiedAt", now)
+            val pinned = row.optBoolean("pinned")
+            while (list.any { !it.optBoolean("pinned") } &&
+                ((!pinned && list.count { !it.optBoolean("pinned") } >= settings.clipboardLimit) ||
+                    list.sumOf { it.getString("text").length.toLong() } + text.length > MAX_CLIPBOARD_CHARACTERS)) {
+                list.removeAt(list.indexOfFirst { !it.optBoolean("pinned") })
             }
+            // Automatic eviction never removes a pin. A full pinned budget skips new history.
+            if (list.sumOf { it.getString("text").length.toLong() } + text.length <= MAX_CLIPBOARD_CHARACTERS)
+                list.add(row)
+        }
+        scheduleClipboardCleanup()
     }
 
-    fun trimClipboard() =
-        mutate("clipboard") { list ->
-            while (list.size > settings.clipboardLimit) evictOldestClipboard(list)
-        }
+    private fun pruneClipboard(list: MutableList<JSONObject>, now: Long) {
+        // Old records acquire an age once, so upgrading cannot erase an entire history.
+        list.forEach { if (!it.has("copiedAt")) it.put("copiedAt", now) }
+        val retention = settings.clipboardRetention
+        val cutoff = now - settings.clipboardRetentionHours * 3_600_000L
+        list.removeAll { !it.optBoolean("pinned") &&
+            (retention == "none" || (retention == "timed" && it.optLong("copiedAt") <= cutoff)) }
+        while (list.count { !it.optBoolean("pinned") } > settings.clipboardLimit)
+            list.removeAt(list.indexOfFirst { !it.optBoolean("pinned") })
+    }
 
-    private fun evictOldestClipboard(list: MutableList<JSONObject>): JSONObject {
-        val oldestUnpinned = list.indexOfFirst { !it.optBoolean("pinned") }
-        return list.removeAt(if (oldestUnpinned >= 0) oldestUnpinned else 0)
+    fun trimClipboard() = synchronized(lock) {
+        val root = read()
+        val rows = array(root, "clipboard")
+        val list = (0 until rows.length()).map { rows.getJSONObject(it) }.toMutableList()
+        val before = rows.toString()
+        deduplicateClipboard(list)
+        pruneClipboard(list, System.currentTimeMillis())
+        val after = JSONArray(list)
+        if (before != after.toString()) { root.put("clipboard", after); write(root) }
+        scheduleClipboardCleanup(list)
+    }
+
+    private fun scheduleClipboardCleanup(rows: List<JSONObject> = objects("clipboard")) {
+        val oldest = rows.filterNot { it.optBoolean("pinned") }.minOfOrNull { it.optLong("copiedAt") }
+        ClipboardCleanupJob.schedule(app, if (settings.clipboardRetention == "timed" && oldest != null)
+            oldest + settings.clipboardRetentionHours * 3_600_000L else null)
     }
 
     fun deleteClipboard(id: String) =
@@ -459,6 +489,16 @@ class ContentStore(context: Context) {
             }
         }
 
+    /** Shares the same invalidation and corruption checks as the saved-row snapshot. */
+    fun matchingDictionary(query: String, kind: DictionaryKind): List<DictionaryEntry> = synchronized(lock) {
+        val rows = dictionary(kind)
+        val snapshot = dictionarySnapshots.getValue(dictionaryCacheKeys.getValue(kind))
+        val index = snapshot.searches.getOrPut(kind) {
+            io.secure.keyboard.engine.CustomDictionaryIndex(rows, { it.reading }, kind == DictionaryKind.ENGLISH)
+        }
+        index.matching(query)
+    }
+
     fun addDictionary(word: String, reading: String, kind: DictionaryKind = DictionaryKind.CHINESE) {
         kind.validateEntry(word, reading)
         mutate(kind.storageKey) {
@@ -534,16 +574,20 @@ class ContentStore(context: Context) {
         val root = read()
         val data = JSONObject()
         BACKUP_KEYS.forEach { data.put(it, array(root, it)) }
-        val envelope = JSONObject().put("format", "skey-content-backup").put("version", 1)
-            .put("data", data)
+        val envelope = JSONObject().put("format", "skey-content-backup").put("version", 2)
+            .put("data", data).put("settings", SettingsBackup(app).snapshot())
         val writer = JsonWriter(output.bufferedWriter(Charsets.UTF_8))
         writeJson(writer, envelope)
         writer.flush()
     }
 
-    fun restoreBackup(input: java.io.InputStream) {
+    class BackupPlan internal constructor(internal val clean: JSONObject, internal val configuration: JSONObject?, val summary: String)
+
+    fun restoreBackup(input: java.io.InputStream) = restoreBackup(prepareBackup(input))
+
+    fun prepareBackup(input: java.io.InputStream): BackupPlan {
         val backup = ContentBackupReader.read(input)
-        require(backup.getString("format") == "skey-content-backup" && backup.getInt("version") == 1)
+        require(backup.getString("format") == "skey-content-backup" && backup.getInt("version") in 1..2)
         val data = backup.getJSONObject("data")
         val clean = JSONObject()
         for (key in BACKUP_KEYS) {
@@ -586,17 +630,35 @@ class ContentStore(context: Context) {
             }
             clean.put(key, checked)
         }
-        synchronized(lock) {
-            val root = read()
-            BACKUP_KEYS.forEach { root.put(it, clean.getJSONArray(it)) }
-            // Invalidate in-flight consumers and continuation state before replacing presets.
-            AiConversationStore(app).clear()
-            DictionaryKind.entries.forEach { advanceDictionaryEpoch(it) }
-            invalidateDictionarySnapshots()
-            aiPresetEpoch.incrementAndGet()
+        val configuration = backup.optJSONObject("settings")
+        configuration?.let { SettingsBackup(app).validate(it) }
+        val current = synchronized(lock) { read() }
+        val names = mapOf("dictionary" to "中文自定义词库", "englishDictionary" to "英文自定义词库", "phrases" to "常用语", "aiPresets" to "自定义 AI")
+        val lines = BACKUP_KEYS.map { "${names.getValue(it)}：${array(current,it).length()} → ${clean.getJSONArray(it).length()} 条（替换）" } +
+            (configuration?.let { SettingsBackup(app).changes(it) } ?: listOf("旧版备份：不修改设置"))
+        return BackupPlan(clean, configuration, lines.joinToString("\n") + "\n\n剪贴板、内置词库文件和 API 密钥不变。AI 会话将清空。")
+    }
+
+    fun restoreBackup(plan: BackupPlan) = synchronized(lock) {
+        val root = read()
+        val old = JSONObject(root.toString())
+        val settingsBackup = SettingsBackup(app)
+        val previous = settingsBackup.snapshot()
+        BACKUP_KEYS.forEach { root.put(it, plan.clean.getJSONArray(it)) }
+        // Validation precedes every mutation; roll back both stores on an I/O failure.
+        try {
             write(root)
-            settings.lastCustomAiPresetId = null
+            plan.configuration?.let(settingsBackup::apply)
+        } catch (failure: Exception) {
+            runCatching { write(old); if(plan.configuration != null) settingsBackup.apply(previous) }
+                .exceptionOrNull()?.let(failure::addSuppressed)
+            throw failure
         }
+        AiConversationStore(app).clear()
+        DictionaryKind.entries.forEach { advanceDictionaryEpoch(it) }
+        invalidateDictionarySnapshots()
+        aiPresetEpoch.incrementAndGet()
+        settings.lastCustomAiPresetId = null
     }
 
     fun customAiEpoch(): Long = aiPresetEpoch.get()

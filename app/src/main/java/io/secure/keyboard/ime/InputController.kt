@@ -41,6 +41,7 @@ internal object InputController {
     internal fun KeyboardSession.releaseFinishedInputPresentationImpl() {
         // Native posted clicks/long presses must be revoked while their views are still in
         // the root. cancelTransient separately revokes our key timers and voice session.
+        main.removeCallbacks(quickPasteExpiry)
         quickPasteState.clear()
         if (headerInitialized) {
             toolbarGroup.removeAllViews()
@@ -88,6 +89,8 @@ internal object InputController {
     internal fun KeyboardSession.chooseImpl(value: String, feedback: () -> Unit): Boolean {
         dismissQuickPasteOnInput()
         val ic = currentInputConnection ?: return false
+        // A queued tap on the retired word must not cancel the next-word loading presentation.
+        if (pinyinPredictionGeneration == generation && candidateTexts.isEmpty()) return false
         val kind = if (chinese) DictionaryKind.CHINESE else DictionaryKind.ENGLISH
         val dictionaryRevision = candidateDictionaryRevision
         if (candidateDictionaryKind != kind || dictionaryRevision != content.dictionaryRevision(kind) || candidateRuntimeRevision != engine.revision) {

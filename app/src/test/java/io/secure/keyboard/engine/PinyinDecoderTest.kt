@@ -5,6 +5,17 @@ import org.junit.Test
 import java.io.StringReader
 
 class PinyinDecoderTest {
+    @org.junit.Test fun exactPriorityOverridesFrequencyAndContextWithoutReweightingSegments() {
+        val decoder=PinyinDecoder(lookup={ token ->
+            if(token=="nihao") listOf(
+                DictionaryEngine.Entry("拟好","ni hao",0,10),
+                DictionaryEngine.Entry("你好","ni hao",1000000,11),
+                DictionaryEngine.Entry("霓皓","ni hao",999999999)
+            ) else emptyList()
+        },predict={ listOf("霓皓") })
+        org.junit.Assert.assertEquals(listOf("拟好","你好","霓皓"),decoder.candidates("nihao","你好").map { it.text })
+    }
+
     @org.junit.Test fun obsoleteQueriesStopBeforeTraversingTheWholeLattice() {
         var queries = 0
         val decoder = PinyinDecoder(

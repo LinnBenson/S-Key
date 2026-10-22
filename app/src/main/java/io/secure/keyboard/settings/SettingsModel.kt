@@ -42,6 +42,7 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
         private set
     var busy by mutableStateOf(false)
         private set
+    var pendingBackup by mutableStateOf<ContentStore.BackupPlan?>(null)
     var message by mutableStateOf<String?>(null)
     var edit by mutableStateOf<ContentEdit?>(null)
     var clipboard by mutableStateOf<List<ContentStore.ClipboardItem>>(emptyList())

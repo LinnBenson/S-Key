@@ -317,7 +317,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
             val session = service.session
             val state = session.quickPasteState
             assertTrue(SettingsStore(application).quickPaste)
-            state.open(101, "完整复制内容\n第二行", 0) {}
+            state.open(System.currentTimeMillis(), "完整复制内容\n第二行", 0) {}
             session.renderHeader()
             val preview = descendants(root).first { it.contentDescription?.startsWith("快捷粘贴：") == true }
             assertTrue(preview.isShown)
@@ -326,16 +326,46 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
             assertNull(state.text)
             preview.performClick()
             assertEquals("完整复制内容\n第二行", editor.text.toString())
-            state.open(102, "dismiss", 101) {}
+            state.open(System.currentTimeMillis(), "dismiss", 101) {}
             session.renderHeader()
             descendants(root).first { it.contentDescription == "关闭快捷粘贴" }.performClick()
             assertNull(state.text)
             assertFalse(descendants(root).any { it.contentDescription == "关闭快捷粘贴" })
-            state.open(103, "unused", 102) {}
+            state.open(System.currentTimeMillis(), "unused", 102) {}
             session.renderHeader()
             service.onFinishInputView(false)
             assertNull(state.text)
             assertFalse(descendants(root).any { it.contentDescription?.startsWith("快捷粘贴：") == true })
+        }
+    }
+
+    fun testQuickPasteExpiresWhileKeyboardStaysOpen() {
+        instrumentation.runOnMainSync {
+            val session = service.session
+            session.quickPasteState.open(System.currentTimeMillis() - 299_500L, "expired preview", 0) {}
+            session.renderHeader()
+            assertTrue(descendants(root).any { it.contentDescription == "关闭快捷粘贴" })
+            session.main.postDelayed(session.quickPasteExpiry, session.quickPasteState.remainingMillis)
+        }
+        Thread.sleep(800)
+        instrumentation.runOnMainSync {
+            assertNull(service.session.quickPasteState.text)
+            assertFalse(descendants(root).any { it.contentDescription == "关闭快捷粘贴" })
+            assertEquals("", editor.text.toString())
+        }
+    }
+
+    fun testExpiredQueuedQuickPasteClickDoesNotInsert() {
+        instrumentation.runOnMainSync {
+            val session = service.session
+            session.quickPasteState.open(System.currentTimeMillis() - 299_500L, "expired click", 0) {}
+            session.renderHeader()
+            val preview = descendants(root).first { it.contentDescription?.startsWith("快捷粘贴：") == true }
+            // Simulate a delayed UI queue: click validation must not depend on the timer running first.
+            Thread.sleep(600)
+            preview.performClick()
+            assertNull(session.quickPasteState.text)
+            assertEquals("", editor.text.toString())
         }
     }
 
@@ -353,7 +383,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
             actions.forEachIndexed { index, action ->
                 session.clearPending()
                 session.clearComposition()
-                session.quickPasteState.open(200L + index, "pending", 0) {}
+                session.quickPasteState.open(System.currentTimeMillis(), "pending", 0) {}
                 session.renderHeader()
                 assertTrue(descendants(root).any { it.contentDescription == "关闭快捷粘贴" })
                 action()
@@ -386,7 +416,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
         instrumentation.runOnMainSync {
             val session = service.session
             SettingsStore(application).traditionalOutput = true
-            session.quickPasteState.open(999, "剪贴板汉字", 0) {}
+            session.quickPasteState.open(System.currentTimeMillis(), "剪贴板汉字", 0) {}
             session.renderHeader()
             descendants(root).first { it.contentDescription?.startsWith("快捷粘贴：") == true }.performClick()
             assertEquals("剪貼板漢字", editor.text.toString())
@@ -404,7 +434,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
 
     fun testClearingClipboardRevokesQuickPastePreview() {
         instrumentation.runOnMainSync {
-            service.session.quickPasteState.open(1234, "synthetic private clip", 0) {}
+            service.session.quickPasteState.open(System.currentTimeMillis(), "synthetic private clip", 0) {}
             service.session.renderHeader()
             service.session.content.clearClipboard()
         }

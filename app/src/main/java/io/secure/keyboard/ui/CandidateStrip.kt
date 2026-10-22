@@ -20,6 +20,7 @@ class CandidateStrip(
     private val feedback: () -> KeyboardPressFeedback = { KeyboardPressFeedback() },
     private val textSizeSp: Float = 20f,
     private val chooseWithFeedback: ((String, () -> Unit) -> Unit)? = null,
+    private val loadMore: () -> Unit = {},
     private val choose: (String) -> Unit,
 ) : HorizontalScrollView(context) {
     private val row = LinearLayout(context)
@@ -34,6 +35,9 @@ class CandidateStrip(
             !isLayoutRequested && !row.isLayoutRequested &&
             row.width - scrollX - width <= width) {
             bindThrough(minOf(displayed.size, row.childCount + BATCH_SIZE), displayed, row.childCount)
+        } else if (displayed.isNotEmpty() && row.childCount == displayed.size && width > 0 && row.width > 0 &&
+            !isLayoutRequested && !row.isLayoutRequested && row.width - scrollX - width <= width) {
+            loadMore()
         }
     }
 
@@ -80,7 +84,7 @@ class CandidateStrip(
     }
 
     private fun scheduleAppend() {
-        if (!appendScheduled && row.childCount < displayed.size) {
+        if (!appendScheduled && displayed.isNotEmpty()) {
             appendScheduled = true
             postOnAnimation(appendNearEnd)
         }
@@ -100,7 +104,8 @@ class CandidateStrip(
         if (displayed == values) return
         val previous = displayed
         displayed = values.toList()
-        val visibleCount = minOf(BATCH_SIZE, values.size)
+        val appended = previous.isNotEmpty() && values.size > previous.size && values.take(previous.size) == previous
+        val visibleCount = if(appended) minOf(values.size, maxOf(row.childCount, BATCH_SIZE)) else minOf(BATCH_SIZE, values.size)
         bindThrough(visibleCount, previous)
         if (row.childCount > visibleCount)
             row.removeViews(visibleCount, row.childCount - visibleCount)

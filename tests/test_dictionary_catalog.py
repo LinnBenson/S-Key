@@ -20,6 +20,15 @@ class CatalogTest(unittest.TestCase):
             self.assertEqual('ok',db.execute('pragma integrity_check').fetchone()[0])
             self.assertEqual([136916,12,1522,481,316743,141,32633,65125,25000,108051,16855],
                 [row[0] for row in db.execute('select count(*) from entries group by library order by library')])
+    def test_empty_priority_templates_are_in_catalog(self):
+        with sqlite3.connect(GENERATED/'catalog.db') as db:
+            self.assertEqual(13,db.execute('select count(*) from libraries').fetchone()[0])
+            for name,kind in [('pinyin_high_priority.dict.yaml','pinyin'),('english_high_priority.tsv','english')]:
+                row=db.execute('select id,kind,priority from libraries where filename=?',(name,)).fetchone()
+                self.assertEqual((kind,1),row[1:])
+                self.assertEqual(0,db.execute('select count(*) from entries where library=?',(row[0],)).fetchone()[0])
+            self.assertEqual('1',db.execute("select value from metadata where key='priority_libraries_added'").fetchone()[0])
+
     def test_english_extension_coverage_and_common_ranking(self):
         core={line.split('\t')[0]:int(line.split('\t')[1]) for line in (ASSETS/'english_frequency.tsv').read_text().splitlines() if line and not line.startswith('#')}
         with sqlite3.connect(GENERATED/'runtime.db') as db:
@@ -69,6 +78,32 @@ class CatalogTest(unittest.TestCase):
             self.assertEqual(expected,{(word,code):weight for word,code,weight in db.execute("select text,code,weight from words where kind='pinyin_initial'")})
             self.assertEqual(['你','那','呢','能','年'],[r[0] for r in db.execute("select text from words where kind='pinyin_initial' and code='n' order by weight desc,ordinal limit 5")])
             self.assertEqual([],db.execute("select text from words where kind='mixed_pinyin' and code='b'").fetchall())
+    def test_short_prefix_index_matches_unbounded_ranking(self):
+        with sqlite3.connect(GENERATED/'runtime.db') as db:
+            for kind,limit,order in [('wubi',30,'weight desc,ordinal'),('english',12,'weight desc,text')]:
+                expected={}
+                for rowid,code in db.execute(f"select rowid,compact from words where kind='{kind}' order by {order}"):
+                    for length in range(1,min(2,len(code)-1)+1):
+                        bucket=expected.setdefault(code[:length],[])
+                        if len(bucket)<limit: bucket.append(rowid)
+                actual={}
+                for prefix,rowid in db.execute('select prefix,word_id from short_prefixes where kind=? order by prefix,rank',(kind,)):
+                    actual.setdefault(prefix,[]).append(rowid)
+                self.assertEqual(expected,actual)
+                self.assertNotIn('',actual)
+
+    def test_query_plans_use_ranked_and_covering_indexes(self):
+        with sqlite3.connect(GENERATED/'runtime.db') as db:
+            for kind in ['pinyin','mixed_pinyin','pinyin_initial']:
+                ranking='weight DESC,ordinal' if kind=='pinyin_initial' else 'priority,weight DESC,ordinal'
+                plan=str(db.execute(f"EXPLAIN QUERY PLAN SELECT text,code,weight FROM words WHERE kind='{kind}' AND kind IN ('pinyin','mixed_pinyin','pinyin_initial') AND compact='n' ORDER BY {ranking} LIMIT 64").fetchall())
+                self.assertIn('ranked_exact_words' if kind=='pinyin_initial' else 'exact_words',plan)
+                self.assertNotIn('TEMP B-TREE',plan)
+            plan=str(db.execute("EXPLAIN QUERY PLAN SELECT w.text,w.code,w.weight FROM short_prefixes p JOIN words w ON w.rowid=p.word_id WHERE p.kind='english' AND p.prefix='w' ORDER BY p.rank LIMIT 12").fetchall())
+            self.assertNotIn('TEMP B-TREE',plan)
+            plan=str(db.execute("EXPLAIN QUERY PLAN SELECT text FROM words WHERE kind='pinyin' AND kind IN ('pinyin','mixed_pinyin') AND text>'中国' AND text<'中国\uffff' ORDER BY weight DESC LIMIT 12").fetchall())
+            self.assertIn('COVERING INDEX prediction_words',plan)
+
     def test_runtime_only_readable_rows(self):
         with sqlite3.connect(GENERATED/'runtime.db') as db:
             self.assertEqual('ok',db.execute('pragma integrity_check').fetchone()[0])

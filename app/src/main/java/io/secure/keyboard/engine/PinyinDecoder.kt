@@ -54,7 +54,9 @@ class PinyinDecoder(
         }
         val full = paths[raw.length].map { Option(it.text, raw.length) }
         // Full sentences first, then longest selectable words; partial choices leave the remainder.
-        return (full + prefixes.sortedWith(compareByDescending<Pair<Option, Double>> { it.first.consumed }.thenByDescending { it.second }).map { it.first })
+        val priorityExact = entries(raw).filter { it.priority!=Long.MAX_VALUE }
+            .sortedBy { it.priority }.map { Option(it.text,raw.length) }
+        return (priorityExact + full + prefixes.sortedWith(compareByDescending<Pair<Option, Double>> { it.first.consumed }.thenByDescending { it.second }).map { it.first })
             .distinctBy { it.text }.take(60)
     }
 

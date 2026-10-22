@@ -29,6 +29,7 @@ class CandidateGrid(
     private val feedback: () -> KeyboardPressFeedback = { KeyboardPressFeedback() },
     private val textSizeSp: Float = 18f,
     private val chooseWithFeedback: ((String, () -> Unit) -> Unit)? = null,
+    private val loadMore: () -> Unit = {},
     private val choose: (String) -> Unit,
 ) : GridView(context) {
     private var displayed = emptyList<String>()
@@ -47,6 +48,12 @@ class CandidateGrid(
         isVerticalScrollBarEnabled = true
         scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
         setSelector(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        setOnScrollListener(object : AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(view: AbsListView?, state: Int) = Unit
+            override fun onScroll(view: AbsListView?, first: Int, visible: Int, total: Int) {
+                if (total > 0 && first + visible >= total - 12) loadMore()
+            }
+        })
         adapter = cells
     }
 

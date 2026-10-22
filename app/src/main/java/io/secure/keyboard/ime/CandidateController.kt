@@ -18,6 +18,9 @@ import io.secure.keyboard.*
 /** Candidate queries and stale-result checks. */
 internal object CandidateController {
     internal fun KeyboardSession.clearCandidatesImpl() {
+        candidatePager = null
+        candidatePageLoading = false
+        pinyinPredictionGeneration = null
         pinyinCandidates = emptyList()
         candidateTexts = emptyList()
         candidateQuery = ""
@@ -68,6 +71,8 @@ internal object CandidateController {
     }
 
     internal fun KeyboardSession.refreshCandidatesImpl() {
+        candidatePager = null
+        candidatePageLoading = false
         val seq = ++generation
         val zh = chinese
         val kind = if (zh) DictionaryKind.CHINESE else DictionaryKind.ENGLISH
@@ -92,6 +97,9 @@ internal object CandidateController {
             renderHeader()
             return
         }
+        pinyinPredictionGeneration = seq.takeIf {
+            zh && mode == io.secure.keyboard.engine.ChineseInputMode.PINYIN && localCode.isEmpty() && localContext.isNotEmpty()
+        }
         renderHeader()
         val fuzzy = settings.fuzzyPinyin
         val fuzzyPairs = settings.fuzzyPairs
@@ -106,29 +114,47 @@ internal object CandidateController {
             val dictionaryRevision = content.dictionaryRevision(kind)
             val runtimeRevision = engine.revision
             val user = readContent(emptyList<ContentStore.DictionaryEntry>()) {
-                content.dictionary(kind)
+                if (zh && mode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) content.dictionary(kind)
+                else content.matchingDictionary(query,kind)
             }
-            var decoded = emptyList<io.secure.keyboard.engine.PinyinDecoder.Option>()
-            val results =
+            val source: Sequence<io.secure.keyboard.engine.PinyinDecoder.Option> =
                 if (zh && mode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) {
-                    val surrounding = if (assistantContext != null) assistantContext else try {
+                    val surrounding = assistantContext ?: try {
                         connection?.getTextBeforeCursor(16, 0)?.toString().orEmpty()
                     } catch (_: RuntimeException) { "" }
-                    decoded = engine.decodePinyin(query, surrounding + selectedPinyin, user.map { it.reading to it.word }, fuzzy, fuzzyPairs) { destroyed || seq != generation }
-                    decoded.map { it.text }
-                } else if (zh) {
-                    val base = engine.candidates(query, fuzzy, 40, fuzzyPairs, mode)
-                    val baseline =
-                        base.filter { it.source == Source.WUBI }.map { it.text } +
-                            base.filter { it.source != Source.WUBI }.map { it.text }
-                    engine.appendEmoji(CustomCandidateRanking.merge(
-                        query, baseline, user,
-                        reading = { it.reading }, text = { it.word },
-                    ))
-                } else EnglishCustomCandidateRanking.merge(
-                    query, engine.completeEnglish(query, 12).map { it.text }, user,
-                    reading = { it.reading }, text = { it.word },
-                )
+                    val decoded = engine.decodePinyinWithoutInitials(query, surrounding + selectedPinyin, user.map { it.reading to it.word }, fuzzy, fuzzyPairs) { destroyed || seq != generation }
+                    if(query.length==1) sequence {
+                        // Exact high-priority and custom entries precede the paged initials table.
+                        yieldAll(engine.wordPages("priority_pinyin",query,runtimeRevision).map { io.secure.keyboard.engine.PinyinDecoder.Option(it,1) })
+                        yieldAll(user.asSequence().filter { it.reading==query }.map { io.secure.keyboard.engine.PinyinDecoder.Option(it.word,1) })
+                        yieldAll(engine.wordPages("initials",query,runtimeRevision).map { io.secure.keyboard.engine.PinyinDecoder.Option(it,1) })
+                        yieldAll(decoded)
+                        yieldAll(engine.wordPages("pinyin",query,runtimeRevision).map { io.secure.keyboard.engine.PinyinDecoder.Option(it,1) })
+                    }.distinctBy { it.text } else sequence {
+                        yieldAll(decoded)
+                        if(query.isNotEmpty()) yieldAll(engine.wordPages("pinyin",query,runtimeRevision).map { io.secure.keyboard.engine.PinyinDecoder.Option(it,query.length) })
+                    }.distinctBy { it.text }
+                } else {
+                    val baseline = if(!zh) engine.wordPages("english",query,runtimeRevision) else if(query.length==4) sequence {
+                        yieldAll(engine.wordPages("wubi",query,runtimeRevision))
+                        val base=engine.boundedCandidates(query,fuzzy,40,fuzzyPairs,mode)
+                        yieldAll(base.filter { it.source==Source.WUBI }.map { it.text })
+                        yieldAll(base.filter { it.source!=Source.WUBI }.map { it.text })
+                    } else {
+                        val base=engine.boundedCandidates(query,fuzzy,40,fuzzyPairs,mode)
+                        (base.filter { it.source==Source.WUBI }.map { it.text } + base.filter { it.source!=Source.WUBI }.map { it.text }).asSequence()
+                    }
+                    val ranked=io.secure.keyboard.engine.CandidateSources.merge(query,baseline,user,zh,{it.reading},{it.word})
+                    val words=if(zh) sequence {
+                        val leading=ranked.take(3).toList()
+                        yieldAll(engine.appendEmoji(leading))
+                        yieldAll(ranked.drop(3))
+                    }.distinct() else ranked
+                    words.map { io.secure.keyboard.engine.PinyinDecoder.Option(it,query.length) }
+                }
+            val pager = io.secure.keyboard.engine.CandidatePager(source.takeWhile { !destroyed && seq==generation })
+            val decoded = pager.next()
+            val results = decoded.map { it.text }
             if (destroyed || seq != generation) return@query
             CandidateFont.prepare(this, results, candidatePaint)
             if (destroyed || seq != generation) return@query
@@ -148,7 +174,9 @@ internal object CandidateController {
                         if (pendingConfirmation != null) refreshCandidates()
                         return@post
                     }
+                    pinyinPredictionGeneration = null
                     candidateRuntimeRevision = runtimeRevision
+                    candidatePager = pager.takeUnless { it.exhausted }
                     pinyinCandidates = decoded
                     candidateTexts = results
                     candidateQuery = query
@@ -163,6 +191,32 @@ internal object CandidateController {
             } catch (_: Exception) {
                 candidateQueryFailed(seq, zh, connection)
             }
+        }
+    }
+
+    internal fun KeyboardSession.loadMoreCandidates() {
+        val pager = candidatePager ?: return
+        if(candidatePageLoading || candidateGeneration != generation || !active || secret) return
+        val seq=generation
+        candidatePageLoading=true
+        val paint=candidateStrip.normalPaintSnapshot()
+        candidateQueries.submit(onRejected={ main.post { if(seq==generation) candidatePageLoading=false } }) {
+            try {
+                val page=pager.next()
+                if (destroyed || seq!=generation) return@submit
+                CandidateFont.prepare(this, page.map { it.text }, paint)
+                main.post {
+                    if(seq!=generation || candidatePager !== pager || !active || secret) return@post
+                    candidatePageLoading=false
+                    if(candidateDictionaryKind?.let { content.dictionaryRevision(it)!=candidateDictionaryRevision }==true || engine.revision!=candidateRuntimeRevision) {
+                        clearCandidates(); refreshCandidates(); return@post
+                    }
+                    pinyinCandidates=pinyinCandidates+page
+                    candidateTexts=candidateTexts+page.map { it.text }
+                    if(pager.exhausted) candidatePager=null
+                    renderHeader()
+                }
+            } catch(_: Exception) { main.post { if(seq==generation) { candidatePageLoading=false; candidatePager=null; toast("更多候选读取失败，请重新输入") } } }
         }
     }
 

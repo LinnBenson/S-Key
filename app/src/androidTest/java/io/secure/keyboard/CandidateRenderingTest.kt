@@ -242,7 +242,9 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         } finally { settings.toolbarPins=pins }
     }
 
-    fun testClosingAssistantRemovesQueuedSensitiveRequests() {
+    fun testClosingAssistantRemovesQueuedSensitiveRequests() = checkClosingAssistantRequests()
+
+    private fun checkClosingAssistantRequests() {
         for (tool in listOf("ai", "translate")) {
             val executor = field<java.util.concurrent.ThreadPoolExecutor>(if(tool == "ai") "aiWorker" else "translationWorker")
             val started = CountDownLatch(2)
@@ -1297,6 +1299,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testFinishedPresentationReleasesStripGridPreeditAndPreviewIdempotently() {
         query(true, "khkh")
+        loadRemainingCandidatePages()
         lateinit var oldStrip: CandidateStrip
         lateinit var oldGrid: CandidateGrid
         lateinit var oldPreedit: TextView
@@ -1487,18 +1490,20 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         query(true, "khkh")
         lateinit var expectedTail: String
         onMainChecked {
-            val values = field<List<String>>("candidateTexts")
-            assertEquals("The full packaged four-code bucket reaches the service", 472, values.size)
-            assertEquals(values.size, values.distinct().size)
-            expectedTail = values.last()
-            assertEquals("The compact strip initially binds only one page", 40, row.childCount)
+            assertEquals("Only the first data page is queried",40,field<List<String>>("candidateTexts").size)
             field<View>("hideIcon").performClick()
         }
-        instrumentation.waitForIdleSync()
+        waitFor("all Wubi pages reachable by scrolling",30_000) {
+            val grid=field<CandidateGrid>("candidateGrid")
+            grid.setSelection(grid.adapter.count-1)
+            field<Any?>("candidatePager")==null && !field<Boolean>("candidatePageLoading")
+        }
         onMainChecked {
-            val grid = field<CandidateGrid>("candidateGrid")
-            assertEquals(472, grid.adapter.count)
-            grid.setSelection(471)
+            val values=field<List<String>>("candidateTexts")
+            assertEquals(472,values.size)
+            assertEquals(values.size,values.distinct().size)
+            expectedTail=values.last()
+            field<CandidateGrid>("candidateGrid").setSelection(471)
         }
         waitFor("last real mapped Wubi entry becomes visible") {
             val grid = field<CandidateGrid>("candidateGrid")
@@ -1834,6 +1839,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testExactCustomMatchesFormSecondPlaceBlockAndPromoteDuplicateText() {
         query(true, "ni")
+            loadRemainingCandidatePages()
         lateinit var baseline: List<String>
         onMainChecked { baseline = field<List<String>>("candidateTexts").toList() }
         assertTrue("Fixture needs several normal candidates", baseline.size > 3)
@@ -1851,6 +1857,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             store.addDictionary(duplicate, "ni")
             store.addDictionary(first, "n i")
             query(true, "ni")
+            loadRemainingCandidatePages()
             onMainChecked {
                 val actual = field<List<String>>("candidateTexts")
                 assertEquals(listOf(baseline.first(), first, second, duplicate), actual.take(4))
@@ -1888,8 +1895,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             store.importDictionary(words.joinToString("\n") { "$it\tqqqqqqqqqqqq" })
             query(true, "q")
             onMainChecked {
-                assertEquals(baseline.size + words.size, field<List<String>>("candidateTexts").size)
-                assertEquals(expected, field<List<String>>("candidateTexts"))
+                assertEquals(expected.take(40), field<List<String>>("candidateTexts"))
                 assertEquals("Initial binding must stay bounded despite all retained matches", 40, row.childCount)
             }
             waitFor("custom tail appended through ordinary horizontal scrolling") {
@@ -1951,6 +1957,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         val id = store.dictionary().single { it.word == word }.id
         try {
             query(true, "ni")
+            loadRemainingCandidatePages()
             onMainChecked { assertEquals(word, field<List<String>>("candidateTexts")[1]) }
             store.updateDictionary(id, word, "nihao")
             onMainChecked {
@@ -1958,6 +1965,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 assertTrue(connection.committed.isEmpty())
             }
             query(true, "ni")
+            loadRemainingCandidatePages()
             onMainChecked { assertEquals(word, field<List<String>>("candidateTexts").last()) }
             store.deleteDictionary(id)
             onMainChecked {
@@ -1965,6 +1973,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 assertTrue(connection.committed.isEmpty())
             }
             query(true, "ni")
+            loadRemainingCandidatePages()
             onMainChecked { assertFalse(word in field<List<String>>("candidateTexts")) }
         } finally {
             if (store.dictionary().any { it.id == id }) store.deleteDictionary(id)
@@ -2425,6 +2434,11 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         onMainChecked { invoke("space") }
         assertEquals("你",connection.before)
         query(true,"n")
+        assertEquals(40,field<List<String>>("candidateTexts").size)
+        waitFor("single letter tail is paged",30_000) {
+            strip.scrollTo(row.width,0)
+            field<Any?>("candidatePager")==null && !field<Boolean>("candidatePageLoading")
+        }
         assertTrue(field<List<String>>("candidateTexts").size>=381)
         val tail=field<List<String>>("candidateTexts").last()
         onMainChecked { assertEquals(true,invoke("choose",tail)) }
@@ -2489,6 +2503,51 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             assertEquals("。",connection.before)
         } finally {
             store.dictionary().filter { it.id !in previous && it.word==word }.forEach { store.deleteDictionary(it.id) }
+        }
+    }
+
+    fun testPinyinPredictionWaitNeverShowsToolbarAndRejectsOldWord() {
+        onMainChecked { SettingsStore(context).chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.PINYIN }
+        instrumentation.waitForIdleSync()
+        query(true,"zhong")
+        val release=gateWorker()
+        onMainChecked {
+            assertEquals(true,invoke("choose","中"))
+            assertEquals("",field<String>("code"))
+            assertTrue(field<List<String>>("candidateTexts").isEmpty())
+            assertEquals(true,invoke("showsCandidateMode"))
+            assertEquals(View.GONE,field<View>("toolbarGroup").visibility)
+            assertEquals(false,invoke("choose","中"))
+            invoke("renderHeader")
+            assertEquals(View.GONE,field<View>("toolbarGroup").visibility)
+        }
+        release.countDown()
+        awaitResults()
+        onMainChecked {
+            assertEquals(View.GONE,field<View>("toolbarGroup").visibility)
+            assertTrue(field<List<String>>("candidateTexts").any { it.startsWith("国") })
+            invoke("clearPending")
+            invoke("refreshCandidates")
+            assertEquals(View.VISIBLE,field<View>("toolbarGroup").visibility)
+        }
+    }
+
+    fun testEmptyPinyinPredictionRestoresToolbarAfterQuery() {
+        onMainChecked { SettingsStore(context).chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.PINYIN }
+        instrumentation.waitForIdleSync()
+        val release=gateWorker()
+        onMainChecked {
+            setField("chinese",true); setField("code","")
+            setField("pinyinContext","ASCII")
+            connection.before="ASCII"
+            invoke("refreshCandidates")
+            assertEquals(View.GONE,field<View>("toolbarGroup").visibility)
+        }
+        release.countDown()
+        waitFor("empty prediction completes") { field<Int>("candidateGeneration")==field<Int>("generation") }
+        onMainChecked {
+            assertTrue(field<List<String>>("candidateTexts").isEmpty())
+            assertEquals(View.VISIBLE,field<View>("toolbarGroup").visibility)
         }
     }
 
@@ -2792,6 +2851,13 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             }
         } finally {
             bitmap.recycle()
+        }
+    }
+
+    private fun loadRemainingCandidatePages() {
+        waitFor("remaining candidate pages", 30_000) {
+            with(io.secure.keyboard.ime.CandidateController) { service.session.loadMoreCandidates() }
+            field<Any?>("candidatePager") == null && !field<Boolean>("candidatePageLoading")
         }
     }
 

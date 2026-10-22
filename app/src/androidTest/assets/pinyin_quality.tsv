@@ -1,0 +1,13 @@
+# 固定质量基线：分类、编码、上下文、期望首选、繁体输出、可选已知问题基线；_ 表示空
+多音字	yinhang	_	银行	銀行
+多音字	xingzou	_	行走	行走
+多音字	chongqing	_	重庆	重慶
+多音字	zhangda	_	长大	長大
+拼音分界	xi'an	_	西安	西安
+拼音分界	xian	_	先	先
+短语	nihao	_	你好	你好
+短句	woaini	_	我爱你	我愛你
+简繁词组	fazhan	_	发展	發展
+简繁词组	toufa	_	头发	頭髮
+上下文	_	中华人民	共和国	共和國	币
+长句	jintiantianqihenhaowomenyiqiqugongyuansanbu	_	今天天气很好我们一起去公园散步	今天天氣很好我們一起去公園散步

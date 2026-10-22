@@ -14,9 +14,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -62,10 +59,11 @@ open class SettingsActivity : ComponentActivity() {
         if (uri != null) {
             val resolver = applicationContext.contentResolver
             val target = model
-            target.fileTask(success = { target.message = "数据还原完成" }) {
+            var plan: ContentStore.BackupPlan? = null
+            target.fileTask(success = { target.pendingBackup = plan }) {
                 try {
-                    target.content.restoreBackup(resolver.openInputStream(uri) ?: error("无法读取备份"))
-                } catch (_: Exception) { error("还原失败，请检查备份文件格式和容量；未完成还原。") }
+                    plan = target.content.prepareBackup(resolver.openInputStream(uri) ?: error("无法读取备份"))
+                } catch (_: Exception) { error("备份无法读取，请检查文件格式和容量。尚未修改数据。") }
             }
         }
     }
@@ -150,6 +148,17 @@ open class SettingsActivity : ComponentActivity() {
                 window.statusBarColor = background
                 io.secure.keyboard.ui.styleSystemBars(window, android.graphics.Color.luminance(background) < .5f, background)
             }
+            model.pendingBackup?.let { plan ->
+                Modal("还原预览", { if (!model.busy) model.pendingBackup = null }) {
+                    Text(plan.summary, fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceSecondary)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TextButton(text = "取消", enabled = !model.busy, modifier = Modifier.weight(1f), onClick = { model.pendingBackup = null })
+                        Button(enabled = !model.busy, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary(), onClick = {
+                            model.task(success = { model.pendingBackup = null; model.message = "数据还原完成" }) { model.content.restoreBackup(plan) }
+                        }) { Text("确认还原", color = MiuixTheme.colorScheme.onPrimary) }
+                    }
+                }
+            }
             Scaffold(topBar = {
                 TopAppBar(title = pageTitle(route), navigationIcon = {
                     IconButton(onClick = { back() }) { UiIcon("back", "返回") }
@@ -173,7 +182,7 @@ open class SettingsActivity : ComponentActivity() {
                 }
                 key(route) {
                     LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).imePadding(),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                        contentPadding = SettingsPagePadding,
                         verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         item {
                             when (route) {
@@ -193,14 +202,13 @@ open class SettingsActivity : ComponentActivity() {
                                     if (model.aiPresets.isEmpty()) Info("暂无自定义 AI")
                                 }
                                 "cleanup", "recovery" -> Group("本机内容") {
-                                    Info("备份包含自定义词库、常用语和自定义 AI，不含剪贴板和密钥。备份文件未加密，请妥善保存。")
+                                    Info("包含：中文和英文自定义词库、常用语、自定义 AI、主题、布局、工具栏、符号自动闭合、符号键盘、字母长按符号、内置 AI 提示词。")
+                                    Info("不含：API 密钥、剪贴板、会话记录、内置词库文件和语音模型。备份文件未加密。")
                                     Action("备份数据", !model.busy) {
                                         launch { backupPicker.launch("S-Key-backup-${java.time.LocalDate.now()}.json") }
                                     }
                                     Action("还原数据", !model.busy) {
-                                        ask("还原将替换自定义词库、常用语和自定义 AI。其他数据与设置不变。") {
-                                            launch { restorePicker.launch(arrayOf("application/json", "application/octet-stream", "text/*")) }
-                                        }
+                                        launch { restorePicker.launch(arrayOf("application/json", "application/octet-stream", "text/*")) }
                                     }
                                     Info("清理后保留主题、布局和输入设置。")
                                     Nav("清空全部用户内容", "剪贴板、常用语、自定义词库、最近表情和自定义 AI", "delete") {
@@ -271,9 +279,8 @@ open class SettingsActivity : ComponentActivity() {
                 }
             }
             confirm?.let { (text, action) -> Modal("确认操作", { confirm = null }) {
-                Info(text)
-                Action("取消") { confirm = null }
-                Action("确认", enabled = !model.busy) { confirm = null; action() }
+                Text(text, fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceSecondary)
+                SettingsDialogActions(cancel = { confirm = null }, confirm = { confirm = null; action() }, label = "确认", enabled = !model.busy)
             } }
             model.edit?.let { edit -> EditDialog(edit) }
             model.message?.let { message -> Modal("提示", { model.message = null }) {
@@ -441,6 +448,7 @@ open class SettingsActivity : ComponentActivity() {
         Spacer(Modifier.height(16.dp))
         Group("剪贴板设置") {
             Toggle("快捷粘贴", s.quickPaste) { s.quickPaste = it }
+            Nav("历史保留", "保留时间、条数与置顶内容", "clipboard") { openPage("clipboard") }
             Info("新复制的内容在下次打开键盘时显示一次，点击粘贴。")
         }
     }
@@ -607,10 +615,23 @@ open class SettingsActivity : ComponentActivity() {
         model.revision
         Group(pageTitle(route)) {
             if (route == "clipboard") {
-                Range("历史条数上限", model.settings.clipboardLimit, 1, 1000, "条") { value ->
-                    model.settings.clipboardLimit = value
+                listOf("none" to "不保存历史", "timed" to "定时清理", "forever" to "长期保留").forEach { (id, label) ->
+                    Choice(label, model.settings.clipboardRetention == id) {
+                        model.task { model.settings.clipboardRetention = id; model.content.trimClipboard() }
+                    }
                 }
-                Info("新超出上限时删除旧记录，优先保留置顶内容。不保存标记为敏感的内容。")
+                if (model.settings.clipboardRetention == "timed") {
+                    Range("保留时间", model.settings.clipboardRetentionHours, 1, 720, "小时") { value ->
+                        model.settings.clipboardRetentionHours = value
+                        model.task { model.content.trimClipboard() }
+                    }
+                }
+                Range("未置顶历史上限", model.settings.clipboardLimit, 1, 1000, "条") { value ->
+                    model.settings.clipboardLimit = value
+                    model.task { model.content.trimClipboard() }
+                }
+                Info("置顶内容单独保留，不参与自动清理。不保存历史时，已有未置顶记录会删除；快捷粘贴仍可使用。")
+                if (model.settings.clipboardRetention == "timed") Info("按复制时间清理。系统休眠可能延后执行，打开历史时会再次清理。")
                 Action("清空剪贴板历史") { ask("清空剪贴板历史？如果系统剪贴板内容也在历史中，将一并清空。") { model.task { model.content.clearClipboard() } } }
                 if (model.clipboard.isEmpty()) Info("还没有剪贴板记录")
             } else {
@@ -654,20 +675,7 @@ open class SettingsActivity : ComponentActivity() {
                     color = MiuixTheme.colorScheme.onSurfaceSecondary)
                 Spacer(Modifier.height(8.dp))
                 val canSave = !model.busy && edit.first.text.isNotBlank() && edit.second.text.isNotBlank()
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    for (save in listOf(false, true)) {
-                        val enabled = if (save) canSave else !model.busy
-                        Box(Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(14.dp))
-                            .background(if (save) MiuixTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else .35f)
-                                else MiuixTheme.colorScheme.onSurface.copy(alpha = .06f))
-                            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) {
-                                if (save) model.saveEdit() else model.edit = null
-                            }, contentAlignment = Alignment.Center) {
-                            Text(if (save) "保存" else "取消", fontSize = 16.sp, fontWeight = FontWeight.Medium,
-                                color = if (save) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.onSurface)
-                        }
-                    }
-                }
+                SettingsDialogActions(cancel = { model.edit = null }, confirm = { model.saveEdit() }, enabled = canSave, cancelEnabled = !model.busy)
             }
             return
         }
@@ -679,8 +687,8 @@ open class SettingsActivity : ComponentActivity() {
                 label = if (customAi) "自定义提示词" else "拼音 / 编码",
                 modifier = if (customAi) Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 260.dp) else Modifier.fillMaxWidth(), singleLine = !customAi)
             if (customAi) Info("${edit.first.text.length}/40 名称 · ${edit.second.text.length}/2000 提示词")
-            Action("保存", !model.busy && (!customAi || (edit.first.text.isNotBlank() && edit.second.text.isNotBlank()))) { model.saveEdit() }
-            Action("取消", !model.busy) { model.edit = null }
+            SettingsDialogActions(cancel = { model.edit = null }, confirm = { model.saveEdit() },
+                enabled = !model.busy && edit.first.text.isNotBlank(), cancelEnabled = !model.busy)
         }
     }
     @Composable private fun AiEditorField(title: String, placeholder: String, value: TextFieldValue,
@@ -690,21 +698,10 @@ open class SettingsActivity : ComponentActivity() {
                 Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = MiuixTheme.colorScheme.onSurface)
                 Text("${value.text.length}/$limit", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceSecondary)
             }
-            BasicTextField(value = value, onValueChange = { if (it.text.length <= limit) change(it) },
-                enabled = !model.busy, singleLine = !multiline,
-                textStyle = TextStyle(fontSize = 16.sp, lineHeight = 24.sp, color = MiuixTheme.colorScheme.onSurface),
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+            TextField(value = value, onValueChange = { if (it.text.length <= limit) change(it) },
+                enabled = !model.busy, singleLine = !multiline, label = placeholder,
                 modifier = Modifier.fillMaxWidth().semantics { contentDescription = title }
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(MiuixTheme.colorScheme.onSurface.copy(alpha = .045f))
-                    .border(1.dp, MiuixTheme.colorScheme.onSurface.copy(alpha = .09f), RoundedCornerShape(14.dp))
-                    .padding(14.dp).heightIn(min = if (multiline) 136.dp else 24.dp, max = if (multiline) 200.dp else 48.dp),
-                decorationBox = { inner ->
-                    Box(contentAlignment = Alignment.TopStart) {
-                        if (value.text.isEmpty()) Text(placeholder, fontSize = 16.sp, color = MiuixTheme.colorScheme.onSurfaceSecondary)
-                        inner()
-                    }
-                })
+                    .heightIn(min = if (multiline) 164.dp else 48.dp, max = if (multiline) 228.dp else 80.dp))
         }
     }
     @Composable private fun VoiceSettings() {
@@ -838,8 +835,8 @@ open class SettingsActivity : ComponentActivity() {
     @Composable private fun Modal(title: String, close: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
         Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Card(io.secure.keyboard.settings.settingsDialogModifier()) {
-                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(title, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                Column(settingsDialogContentModifier(), verticalArrangement = Arrangement.spacedBy(SettingsDialogSpacing)) {
+                    Text(title, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     content()
                 }
             }
@@ -851,7 +848,7 @@ open class SettingsActivity : ComponentActivity() {
             return
         }
         Icon(painter = painterResource(io.secure.keyboard.ui.KeyboardIcons.resource(kind)), contentDescription = description,
-            modifier = Modifier.size(24.dp), tint = hexColor(model.settings.themeTokens(model.settings.isDark(LocalConfiguration.current.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)).toolbarIcon))
+            modifier = Modifier.size(24.dp), tint = MiuixTheme.colorScheme.onSurface)
     }
     private fun pageTitle(route: String): String = when(route) {
         "symbol_keyboard" -> "符号键盘"

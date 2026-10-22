@@ -39,6 +39,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     fun sendDownUpKeyEvents(key: Int) = host.sendDownUpKeyEvents(key)
     internal val inputState = InputState()
     internal val pinyinComposition = io.secure.keyboard.engine.PinyinComposition()
+    internal var pinyinPredictionGeneration: Int? = null
     internal var pinyinCandidates = emptyList<io.secure.keyboard.engine.PinyinDecoder.Option>()
     internal var pinyinContext = ""
 
@@ -101,6 +102,8 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal val spacingTexts by inputState::spacingTexts
     internal val queuedKeys by inputState::queuedKeys
     internal var queueSaturationNotified by inputState::queueSaturationNotified
+    internal var candidatePager: io.secure.keyboard.engine.CandidatePager<io.secure.keyboard.engine.PinyinDecoder.Option>? = null
+    internal var candidatePageLoading = false
     internal var candidateTexts = listOf<String>()
     internal var candidateRuntimeRevision: String? = null
     internal var candidateQuery = ""
@@ -184,6 +187,15 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         if (settings.traditionalOutput && !secret) traditionalConverter.convert(value) else value
 
     internal val quickPasteState = QuickPasteState()
+    internal val quickPasteExpiry = object : Runnable {
+        override fun run() {
+            if (quickPasteState.expireIfNeeded()) {
+                if (active && headerInitialized) renderHeader()
+            } else if (active && quickPasteState.text != null) {
+                main.postDelayed(this, quickPasteState.remainingMillis)
+            }
+        }
+    }
 
     internal fun dismissQuickPasteOnInput() {
         if (quickPasteState.text == null) return
@@ -192,6 +204,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     }
 
     private fun prepareQuickPaste() {
+        main.removeCallbacks(quickPasteExpiry)
         if (secret || !settings.quickPaste) { quickPasteState.clear(); return }
         val clip = try { clips.primaryClip } catch (_: SecurityException) { null }
         val token = clip?.description?.timestamp ?: 0L
@@ -200,6 +213,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         quickPasteState.open(token, text, settings.quickPasteConsumedToken) {
             settings.quickPasteConsumedToken = it
         }
+        if (quickPasteState.text != null) main.postDelayed(quickPasteExpiry, quickPasteState.remainingMillis)
     }
 
     internal var toolbarSignature: Pair<String, List<String>>? = null

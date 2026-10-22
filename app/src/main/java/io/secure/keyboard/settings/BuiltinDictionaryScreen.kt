@@ -161,7 +161,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
         if(lib==null) {
             LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(horizontal=20.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
                 item {
-                    Card { Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+                    Card { Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(SettingsDialogSpacing)) {
                         if(model.busy) CircularProgressIndicator(modifier=Modifier.size(24.dp)) else DictionaryIcon(if(model.dirty) "edit" else "check",tint=colors.primary)
                         Column(Modifier.weight(1f)) {
                             Text(model.status,fontSize=16.sp,fontWeight=FontWeight.Medium)
@@ -177,7 +177,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                             if(files.isEmpty()) Text("暂无文件",modifier=Modifier.padding(20.dp),color=colors.onSurfaceSecondary)
                             files.forEachIndexed { index,file ->
                                 Row(Modifier.fillMaxWidth().clickable(enabled=!model.busy) { model.open(file) }.padding(horizontal=18.dp,vertical=18.dp),
-                                    verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+                                    verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(SettingsDialogSpacing)) {
                                     Box(Modifier.size(40.dp).background(colors.secondaryContainer,RoundedCornerShape(12.dp)),contentAlignment=Alignment.Center) { DictionaryIcon("phrases",tint=colors.primary) }
                                     Column(Modifier.weight(1f)) {
                                         Text(file.filename,fontSize=15.sp,fontWeight=FontWeight.Medium,maxLines=2,overflow=TextOverflow.Ellipsis)
@@ -199,7 +199,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                 }
             }
             Card(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=10.dp)) {
-                Row(Modifier.padding(10.dp),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.padding(10.dp),horizontalArrangement=Arrangement.spacedBy(SettingsActionSpacing)) {
                     TextButton(text="添加文件",enabled=!model.busy,onClick={model.showAdd=true},modifier=Modifier.weight(1f))
                     Button(colors=ButtonDefaults.buttonColorsPrimary(),onClick={model.compile()},enabled=!model.busy,modifier=Modifier.weight(1.4f)) { Text("编译并应用",color=colors.onPrimary) }
                 }
@@ -212,7 +212,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                     Text("${kindLabel(lib.kind)} · UTF-8 · ⇥ 为 Tab${if(model.unsaved) " · 未保存" else ""}",fontSize=12.sp,color=colors.onSurfaceSecondary)
                 }
             }
-            Row(Modifier.padding(horizontal=20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.padding(horizontal=20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(SettingsActionSpacing)) {
                 TextField(value=model.query,onValueChange={model.query=it},label="搜索文件内容",modifier=Modifier.weight(1f))
                 TextButton(text="查找",onClick={model.find()},enabled=!model.busy && model.query.isNotBlank(),
                     colors=ButtonDefaults.textButtonColorsPrimary(),minHeight=48.dp,cornerRadius=14.dp)
@@ -253,14 +253,14 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                         })
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.fillMaxWidth().padding(20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(SettingsDialogSpacing)) {
                 Text(model.status,modifier=Modifier.weight(1f),fontSize=12.sp,color=colors.onSurfaceSecondary,maxLines=3,overflow=TextOverflow.Ellipsis)
                 Button(colors=ButtonDefaults.buttonColorsPrimary(),onClick={model.save()},enabled=!model.busy && model.unsaved) { Text("保存文件",color=colors.onPrimary) }
             }
         }
     }
     @Composable fun modal(onDismiss: ()->Unit,content: @Composable ColumnScope.()->Unit) {
-        Dialog(onDismissRequest=onDismiss, properties=androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth=false)) { Card(settingsDialogModifier()) { Column(Modifier.padding(24.dp).imePadding().verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(14.dp),content=content) } }
+        Dialog(onDismissRequest=onDismiss, properties=androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth=false)) { Card(settingsDialogModifier()) { Column(settingsDialogContentModifier(),verticalArrangement=Arrangement.spacedBy(SettingsDialogSpacing),content=content) } }
     }
     if(model.showAdd) modal({model.showAdd=false}) {
         Text("添加词库文件",fontSize=20.sp,fontWeight=FontWeight.SemiBold)
@@ -277,9 +277,9 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
     }
     if(model.showMenu && lib!=null) modal({model.showMenu=false}) {
         Text("文件操作",fontSize=20.sp,fontWeight=FontWeight.SemiBold)
-        BasicComponent(title="重命名",onClick={model.showMenu=false;model.guard {model.rename=lib.filename}})
+        if (!model.repository.protectedFilename(lib.filename)) BasicComponent(title="重命名",onClick={model.showMenu=false;model.guard {model.rename=lib.filename}})
         BasicComponent(title="导出原始文件",onClick={model.showMenu=false;model.guard {model.pendingExport=lib.id;exporter.launch(lib.filename)}})
-        BasicComponent(title="删除文件",onClick={model.showMenu=false;model.confirmation="删除 ${lib.filename}？编译前仍使用旧版词库。" to {
+        if (!model.repository.protectedFilename(lib.filename)) BasicComponent(title="删除文件",onClick={model.showMenu=false;model.confirmation="删除 ${lib.filename}？编译前仍使用旧版词库。" to {
             model.selected=null;model.page=null;model.text="";model.run("文件已删除，请编译后生效") {model.repository.deleteLibrary(lib.id)}
         }})
     }
@@ -290,7 +290,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
     } }
     model.confirmation?.let { (message,confirm) -> modal({model.confirmation=null}) {
         Text("确认操作",fontSize=20.sp,fontWeight=FontWeight.SemiBold);Text(message,fontSize=15.sp)
-        Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement=Arrangement.spacedBy(SettingsActionSpacing)) {
             TextButton(text="取消",modifier=Modifier.weight(1f),onClick={model.confirmation=null})
             Button(colors=ButtonDefaults.buttonColorsPrimary(),onClick={model.confirmation=null;confirm()},modifier=Modifier.weight(1f)) {Text("确认",color=colors.onPrimary)}
         }

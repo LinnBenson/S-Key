@@ -255,6 +255,7 @@ internal object KeyboardViewController {
         candidateGroup = LinearLayout(this)
         candidateStrip =
             CandidateStrip(this, candidateColor, selectedCandidateColor,
+                loadMore = { with(CandidateController) { loadMoreCandidates() } },
                 selectionVersion = { generation.takeIf { candidateGeneration == it } },
                 feedback = { pressFeedback() },
                 textSizeSp = settings.candidateTextSize.toFloat(),
@@ -274,6 +275,7 @@ internal object KeyboardViewController {
         hideIcon = icon("hide", "收起键盘") {
             if (showsCandidateMode()) {
                 candidatesExpanded = !candidatesExpanded
+                if (candidatesExpanded) with(CandidateController) { loadMoreCandidates() }
                 renderHeader()
                 renderKeyboardBody()
             } else {
@@ -287,7 +289,7 @@ internal object KeyboardViewController {
     }
 
     internal fun KeyboardSession.showsCandidateModeImpl() = !secret && panel == "keys" &&
-        ((chinese && (code.isNotEmpty() || candidateTexts.isNotEmpty())) || (!chinese && candidateTexts.isNotEmpty()))
+        ((chinese && (code.isNotEmpty() || candidateTexts.isNotEmpty() || pinyinPredictionGeneration == generation)) || (!chinese && candidateTexts.isNotEmpty()))
 
     internal fun KeyboardSession.renderHeaderImpl() {
         if (!headerInitialized) return
@@ -316,6 +318,7 @@ internal object KeyboardViewController {
             candidatesExpanded -> "收起候选"
             else -> "展开候选"
         }
+        quickPasteState.expireIfNeeded()
         val paste = quickPasteState.text?.takeIf {
             active && !secret && settings.quickPaste && panel == "keys" && !translation.enabled
         }
@@ -356,6 +359,7 @@ internal object KeyboardViewController {
             )
             if (paste != null) {
                 val preview = button(paste.replace(Regex("[\\r\\n\\t\\u2028\\u2029]+"), " ")) {
+                    if (quickPasteState.expireIfNeeded()) { renderHeader(); return@button }
                     if (active && !secret && settings.quickPaste && panel == "keys" &&
                         !translation.enabled && quickPasteState.revision == pasteRevision) {
                         commitInputText(paste)
@@ -445,6 +449,7 @@ internal object KeyboardViewController {
 
     internal fun KeyboardSession.renderCandidateGridImpl() {
         val grid = candidateGrid ?: CandidateGrid(this, candidateColor, selectedCandidateColor, keyBg,
+            loadMore = { with(CandidateController) { loadMoreCandidates() } },
             feedback = { pressFeedback() },
             textSizeSp = settings.expandedCandidateTextSize.toFloat(),
             chooseWithFeedback = { value, feedback -> choose(value, feedback) },

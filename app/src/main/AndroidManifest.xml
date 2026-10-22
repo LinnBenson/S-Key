@@ -18,6 +18,7 @@
         <activity android:name=".MainActivity" android:theme="@style/Theme.SKey.Settings" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
         <activity android:name=".SettingsActivity" android:theme="@style/Theme.SKey.Settings" android:exported="false" />
         <activity android:name=".VoiceSetupActivity" android:theme="@style/Theme.SKey.Settings" android:exported="false" />
+        <service android:name=".data.ClipboardCleanupJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />
         <service android:name=".OfflineKeyboardService" android:label="S Key" android:permission="android.permission.BIND_INPUT_METHOD" android:exported="true"><intent-filter><action android:name="android.view.InputMethod"/></intent-filter><meta-data android:name="android.view.im" android:resource="@xml/input_method"/></service>
     </application>
 </manifest>

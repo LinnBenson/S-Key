@@ -29,6 +29,25 @@ class ContentStoreTest : AndroidTestCase() {
         super.tearDown()
     }
 
+    fun testSearchIndexInvalidatesAfterEditDeleteAndOtherLanguageWrites() {
+        store.addDictionary("中文一","ni")
+        store.addDictionary("中文二","nihao")
+        store.addDictionary("English","he",DictionaryKind.ENGLISH)
+        assertEquals(listOf("中文一","中文二"),store.matchingDictionary("N'I",DictionaryKind.CHINESE).map { it.word })
+        assertEquals(listOf("English"),store.matchingDictionary("H",DictionaryKind.ENGLISH).map { it.word })
+        val entry=store.dictionary().first()
+        store.updateDictionary(entry.id,"修改","hao")
+        assertEquals(listOf("中文二"),store.matchingDictionary("ni",DictionaryKind.CHINESE).map { it.word })
+        assertEquals(listOf("修改"),store.matchingDictionary("hao",DictionaryKind.CHINESE).map { it.word })
+        assertEquals(listOf("English"),store.matchingDictionary("h",DictionaryKind.ENGLISH).map { it.word })
+        store.deleteDictionary(entry.id)
+        assertTrue(store.matchingDictionary("hao",DictionaryKind.CHINESE).isEmpty())
+        store.clearDictionary()
+        assertTrue(store.matchingDictionary("ni",DictionaryKind.CHINESE).isEmpty())
+        store.clearDictionary(DictionaryKind.ENGLISH)
+        assertTrue(store.matchingDictionary("h",DictionaryKind.ENGLISH).isEmpty())
+    }
+
     fun testDeletionClearsOnlyMatchingSystemClip() {
         val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val original = manager.primaryClip

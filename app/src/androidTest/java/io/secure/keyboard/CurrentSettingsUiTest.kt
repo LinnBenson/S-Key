@@ -60,6 +60,42 @@ class CurrentSettingsUiTest : InstrumentationTestCase() {
         )
         for ((route, title) in routes) { open(route); await(title) }
     }
+    fun testEditorDialogsShareInsetsAndActionAlignment() {
+        val cases=listOf(
+            Triple("custom_ai",listOf("添加自定义 AI"),"添加自定义 AI"),
+            Triple("symbol_closure",listOf("添加规则"),"添加规则"),
+            Triple("builtin_ai_prompts",listOf("自定义 AI 统一提示词"),"自定义 AI 统一提示词"),
+            Triple("symbol_keyboard",listOf("字母长按","q"),"中文 · 字母 q")
+        )
+        var expectedLeft: Int?=null
+        var expectedRight: Int?=null
+        for((index,test) in cases.withIndex()) {
+            open(test.first);test.second.forEach(::click)
+            val cancel=await("取消")
+            val save=await("保存")
+            // Buttons may expose text children: ascend to their clickable semantic bounds.
+            fun button(node: AccessibilityNodeInfo): android.graphics.Rect {
+                var current=node
+                while(!current.isClickable && current.parent!=null) current=current.parent
+                return android.graphics.Rect().also { current.getBoundsInScreen(it) }
+            }
+            val l=button(cancel);val r=button(save)
+            assertTrue("Actions must share a baseline",kotlin.math.abs(l.centerY()-r.centerY())<=2)
+            assertTrue("Actions must be equally wide",kotlin.math.abs(l.width()-r.width())<=2)
+            expectedLeft?.let { assertTrue("Consistent left inset",kotlin.math.abs(it-l.left)<=2) }
+            expectedRight?.let { assertTrue("Consistent right inset",kotlin.math.abs(it-r.right)<=2) }
+            expectedLeft=l.left;expectedRight=r.right
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(600) // Let the dialog's window fade finish before visual evidence.
+            instrumentation.uiAutomation.takeScreenshot()?.let { bitmap ->
+                val file=java.io.File(instrumentation.targetContext.getExternalFilesDir(null),"settings-unified-$index.png")
+                file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }
+                bitmap.recycle()
+            }
+            click("取消")
+        }
+    }
+
     fun testLetterAlternatesEditorAndLanguageTabs() {
         open("symbol_keyboard")
         click("字母长按")
