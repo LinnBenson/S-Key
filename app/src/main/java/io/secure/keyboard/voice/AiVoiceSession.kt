@@ -3,9 +3,7 @@ package io.secure.keyboard.voice
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.AudioFormat
 import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -64,7 +62,8 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
                     if (current(id)) listener.onSegment(1, text)
                 }
             }, onFailure = { error ->
-                val message = if (error is IllegalStateException || error is IllegalArgumentException)
+                val message = if (error is SecurityException) "麦克风权限不可用，请重新允许"
+                else if (error is IllegalStateException || error is IllegalArgumentException)
                     error.message ?: "识别失败" else "语音连接失败或超时，请重试"
                 listener.onError(message)
             })
@@ -91,15 +90,11 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         var mic:AudioRecord?=null
         try {
             check(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED) { "请先允许麦克风权限" }
-            val minimum=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT)
-            check(minimum>0) { "设备不支持此录音格式" }
-            mic=AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,maxOf(minimum*2,6400))
-            val input=mic; recorder=input
-            check(input.state==AudioRecord.STATE_INITIALIZED) { "麦克风初始化失败" }
-            check(gate.startIfAllowed({current(id) && recording}) { input.startRecording() }) {
-                "录音尚未开始，请按住空格等待聆听提示后再说话"
-            }
-            check(input.recordingState==AudioRecord.RECORDSTATE_RECORDING) { "无法启动麦克风" }
+            val input = MicrophoneCapture.start(context, gate, { current(id) && recording }) { recorder = it }
+                ?: return null
+            mic = input
+            val status = MicrophoneStatus(input)
+            val signal = CaptureSignalHealth()
             emit(id) {
                 listener.onState(OfflineVoiceSession.State.LISTENING)
                 if(recording) timer=Runnable { if(current(id)) stop() }.also { main.postDelayed(it,60000) }
@@ -107,24 +102,29 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
             val deadline=SystemClock.elapsedRealtime()+60000
             val progress = AudioReadProgress(SystemClock.elapsedRealtime())
             while(current(id) && recording && count<pcm.size && SystemClock.elapsedRealtime()<deadline) {
+                status.checkAvailable()
                 val n=input.read(pcm,count,minOf(3200,pcm.size-count),AudioRecord.READ_NON_BLOCKING)
                 if(n<0) { if(!recording || !current(id)) break; error("录音中断，请重试") }
                 if (!current(id) || (n == 0 && !recording)) break
                 check(progress.accept(n, SystemClock.elapsedRealtime())) { "麦克风未返回录音数据，请关闭语音后重试" }
                 if (n == 0) { Thread.sleep(10); continue }
                 if(n>0) {
+                    check(signal.accept(pcm, count, n)) { "麦克风录音数据异常，请重试" }
                     val level=VoiceLevel.measure(pcm,count,n)
                     levels.offer(id, level)
                     count+=n
                 }
             }
+            status.checkAvailable()
             gate.stop { recording=false; runCatching { input.stop() }; recorder=null }
             input.release(); mic=null
             if(!current(id)) return null
+            check(signal.hasVariation) { "未采集到有效声音，请检查麦克风后重试" }
             check(count>=3200) { "录音太短，请重新说话" }
             emit(id) { listener.onState(OfflineVoiceSession.State.PROCESSING) }
             return prepareOutput(id,transcribe(id,pcm,count))
         } finally {
+            levels.clear()
             pcm.fill(0)
             gate.stop { recording=false; recorder=null; runCatching { mic?.stop() }; runCatching { mic?.release() } }
 

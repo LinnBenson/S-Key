@@ -3,9 +3,7 @@ package io.secure.keyboard.voice
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.AudioFormat
 import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -168,40 +166,13 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             val input = engine.createStream()
             stream = input
             if (generation.get() != id || !recording) return
-            val minimum =
-                AudioRecord.getMinBufferSize(
-                    16000,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                )
-            check(minimum > 0) { "设备不支持 16 kHz 单声道录音" }
-            // Permission can be revoked after begin() while the model is loading.
-            // Keep this check adjacent to the protected constructor for both lint and runtime
-            // safety.
-            if (
-                context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
-                    PackageManager.PERMISSION_GRANTED
-            ) {
-                throw SecurityException("麦克风权限已撤销，请在语音设置中重新允许")
-            }
-            val mic =
-                AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    16000,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    maxOf(minimum * 2, 6400),
-                )
+            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+                throw SecurityException("麦克风权限已撤销")
+            val mic = MicrophoneCapture.start(context, microphoneGate,
+                { generation.get() == id && recording }) { activeRecorder = it } ?: return
             recorder = mic
-            activeRecorder = mic
-            check(mic.state == AudioRecord.STATE_INITIALIZED) { "麦克风初始化失败" }
-            if (!microphoneGate.startIfAllowed(
-                    isAllowed = { generation.get() == id && recording },
-                    start = {
-                        mic.startRecording()
-                        check(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "无法启动麦克风" }
-                    },
-                )) return
+            val status = MicrophoneStatus(mic)
+            val signal = CaptureSignalHealth()
             emit(id) { if (recording) listener.onState(State.LISTENING) }
             val deadline = SystemClock.elapsedRealtime() + 60_000
             emit(id) {
@@ -217,12 +188,14 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             var segmentId = 0L
             while (recording && generation.get() == id && samples < 16000 * 60 &&
                 SystemClock.elapsedRealtime() < deadline) {
+                status.checkAvailable()
                 val count = mic.read(pcm, 0, pcm.size, AudioRecord.READ_NON_BLOCKING)
                 if (count <= 0 && !recording) break
                 check(count >= 0) { "麦克风读取失败" }
                 if (generation.get() != id) return
                 check(progress.accept(count, SystemClock.elapsedRealtime())) { "麦克风未返回录音数据，请关闭语音后重试" }
                 if (count == 0) { Thread.sleep(10); continue }
+                check(signal.accept(pcm, 0, count)) { "麦克风录音数据异常，请重试" }
                 val level = VoiceLevel.measure(pcm, 0, count)
                 levels.offer(id, level)
                 samples += count
@@ -251,6 +224,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                 // after stop(), then let the existing final flush finish the utterance.
                 progress.accept(count, SystemClock.elapsedRealtime())
             }
+            status.checkAvailable()
             microphoneGate.stop {
                 recording = false
                 try {
@@ -258,6 +232,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                 } catch (_: Exception) {}
             }
             if (generation.get() != id) return
+            check(signal.hasVariation) { "未采集到有效声音，请检查麦克风后重试" }
             emit(id) { listener.onState(State.PROCESSING) }
             // Flush final streaming chunk, including the model's right-context lookahead.
             input.acceptWaveform(FloatArray(8000), 16000)
@@ -276,6 +251,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
         } catch (e: LinkageError) {
             emit(id) { listener.onError("此设备无法加载离线识别引擎") }
         } finally {
+            levels.clear()
             pcm.fill(0)
             floats?.fill(0f)
             microphoneGate.stop {
