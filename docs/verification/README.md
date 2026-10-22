@@ -1,5 +1,7 @@
 # 验证记录索引
 
+新增专项：[纯拼音模糊音与 emoji](pinyin-fuzzy-emoji-2026-10-22.md)。
+
 新增专项：[AI 语音网络失败重试](ai-voice-network-retry-2026-10-22.md)。
 
 最新复查：[Bug、隐私与内存](bug-privacy-memory-followup-2026-10-22.md)。

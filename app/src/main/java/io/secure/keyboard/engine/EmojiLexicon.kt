@@ -29,4 +29,16 @@ class EmojiLexicon(reader: Reader) {
         if (emoji.isEmpty()) return words
         return leading + emoji + words.drop(3)
     }
+    /** Preserve the reading consumed by each matching word for segmented pinyin selection. */
+    fun appendToOptions(options: Sequence<PinyinDecoder.Option>): Sequence<PinyinDecoder.Option> = sequence {
+        val iterator = options.iterator()
+        val leading = ArrayList<PinyinDecoder.Option>(3)
+        repeat(3) { if (iterator.hasNext()) leading.add(iterator.next()) }
+        yieldAll(leading)
+        leading.forEach { option ->
+            byKeyword[option.text].orEmpty().forEach { emoji -> yield(option.copy(text = emoji)) }
+        }
+        while (iterator.hasNext()) yield(iterator.next())
+    }.distinctBy { it.text }
+
 }

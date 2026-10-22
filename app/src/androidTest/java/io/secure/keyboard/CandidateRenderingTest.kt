@@ -2453,6 +2453,26 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         assertFalse(field<List<String>>("candidateTexts").contains("你"))
     }
 
+    fun testPinyinEmojiMatchesWordsAndPreservesRemainingCode() {
+        onMainChecked { SettingsStore(context).chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.PINYIN }
+        instrumentation.waitForIdleSync()
+        typePending("kaixin")
+        onMainChecked {
+            assertTrue(field<List<String>>("candidateTexts").contains("😀"))
+            assertEquals(true, invoke("choose", "😀"))
+            assertEquals("😀", connection.before)
+            invoke("clearPending"); connection.before = ""
+        }
+        typePending("kaixinqzz")
+        onMainChecked {
+            assertTrue(field<List<String>>("candidateTexts").contains("😀"))
+            assertEquals(true, invoke("choose", "😀"))
+            assertEquals("qzz", field<String>("code"))
+            assertEquals("😀", field<io.secure.keyboard.engine.PinyinComposition>("pinyinComposition").text)
+            assertEquals("", connection.before)
+        }
+    }
+
     fun testPinyinSegmentsSentenceAndFourCodeIsolation() {
         onMainChecked {
             SettingsStore(context).chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.PINYIN

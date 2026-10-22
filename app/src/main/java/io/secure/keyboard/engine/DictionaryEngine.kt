@@ -172,16 +172,20 @@ class DictionaryEngine private constructor(
 
     fun decodePinyin(raw: String, context: String, custom: List<Pair<String, String>>, fuzzy: Boolean, pairs: Set<String>, cancelled: () -> Boolean = { false }, includeInitials: Boolean = true): List<PinyinDecoder.Option> {
         val decoder = PinyinDecoder(cancelled = cancelled, lookup = { token ->
-            val exact = (indexedPinyin?.lookup("exact", compact(token), 64) ?: pinyinExact[compact(token)].orEmpty()).filter {
-                !token.contains('\'') || it.code.replace(" ", "'") == token
-            }.take(24)
-            if (!fuzzy || pairs.isEmpty() || token.length > 6 || token.contains('\'')) exact else {
+            val segmented = token.contains('\'')
+            val syllables = token.split('\'').filter(String::isNotEmpty)
+            val exact = matchingPinyin("exact", compact(token), 24) {
+                !segmented || it.code.split(' ') == syllables
+            }
+            if (!fuzzy || pairs.isEmpty()) exact else {
                 val selected = pairs - "r_l"
-                val alternatives = (indexedPinyin?.lookup("fuzzy", fuzzyInputKey(token), 128)
-                    ?: fuzzyExact[fuzzyInputKey(token)].orEmpty()).asSequence().filter {
-                    fuzzyInputKey(it.code, selected) == fuzzyInputKey(token, selected) ||
-                        ("r_l" in pairs && matchesRL(token, it.code, selected))
-                }.take(24).toList()
+                val selectedKey = fuzzyInputKey(token, selected)
+                val selectedSyllables = syllables.map { fuzzySyllable(it, selected) }
+                val alternatives = matchingPinyin("fuzzy", fuzzyInputKey(token), 24) {
+                    compact(it.code) != compact(token) && ((fuzzyInputKey(it.code, selected) == selectedKey &&
+                        (!segmented || it.code.split(' ').map { part -> fuzzySyllable(part, selected) } == selectedSyllables)) ||
+                        ("r_l" in pairs && matchesRL(token, it.code, selected)))
+                }
                 (exact + alternatives).distinctBy { it.text }
             }
         }, predict = { contextText ->

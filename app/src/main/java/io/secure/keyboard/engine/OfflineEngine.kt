@@ -51,6 +51,9 @@ class OfflineEngine(context: Context) {
         }
     }
 
+    fun appendPinyinEmoji(options: Sequence<PinyinDecoder.Option>): Sequence<PinyinDecoder.Option> =
+        packagedEmoji?.appendToOptions(options) ?: options
+
     fun appendEmoji(words: List<String>): List<String> = packagedEmoji?.appendTo(words) ?: words
 
     fun exactWubi(code: String, limit: Int = 40): List<Candidate> =

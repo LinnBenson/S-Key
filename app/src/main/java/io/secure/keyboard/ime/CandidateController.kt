@@ -152,7 +152,8 @@ internal object CandidateController {
                     }.distinct() else ranked
                     words.map { io.secure.keyboard.engine.PinyinDecoder.Option(it,query.length) }
                 }
-            val pager = io.secure.keyboard.engine.CandidatePager(source.takeWhile { !destroyed && seq==generation })
+            val decorated = if (zh && mode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) engine.appendPinyinEmoji(source) else source
+            val pager = io.secure.keyboard.engine.CandidatePager(decorated.takeWhile { !destroyed && seq==generation })
             val decoded = pager.next()
             val results = decoded.map { it.text }
             if (destroyed || seq != generation) return@query

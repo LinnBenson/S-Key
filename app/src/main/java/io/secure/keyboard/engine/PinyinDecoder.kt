@@ -21,8 +21,8 @@ class PinyinDecoder(
         fun entries(token: String): List<DictionaryEngine.Entry> = cache.getOrPut(token) {
             val user = customByCode[token.replace("'", "")].orEmpty()
                 .map { DictionaryEngine.Entry(it.second, token, 1_000_000_000L) }
-            (user + lookup(token)).distinctBy { it.text }.take(12)
-        }
+            (user + lookup(token)).distinctBy { it.text }
+        }.take(12)
         fun bonus(previous: String, text: String): Double {
             if (previous.isEmpty()) return 0.0
             val key = previous.takeLast(4)
@@ -56,7 +56,10 @@ class PinyinDecoder(
         // Full sentences first, then longest selectable words; partial choices leave the remainder.
         val priorityExact = entries(raw).filter { it.priority!=Long.MAX_VALUE }
             .sortedBy { it.priority }.map { Option(it.text,raw.length) }
-        return (priorityExact + full + prefixes.sortedWith(compareByDescending<Pair<Option, Double>> { it.first.consumed }.thenByDescending { it.second }).map { it.first })
+        // Beam search stays bounded; full-reading alternatives remain selectable even
+        // when exact homophones fill the beam before fuzzy matches.
+        val direct = cache[raw].orEmpty().map { Option(it.text, raw.length) }
+        return (priorityExact + full + direct + prefixes.sortedWith(compareByDescending<Pair<Option, Double>> { it.first.consumed }.thenByDescending { it.second }).map { it.first })
             .distinctBy { it.text }.take(60)
     }
 
