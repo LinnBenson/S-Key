@@ -68,7 +68,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
                     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(3.dp)) {
                         if(r==2) key(if(letters) "⇧" else "=\\<",1.3f)
                         if(letters && r==1) Spacer(Modifier.weight(.45f))
-                        row.forEachIndexed { c,symbol -> key(if(letters) alphabet[r][c].toString() else symbol,editable=true,hint=if(letters) symbol else null) { rowIndex=r;columnIndex=c;draft=symbol;error="" } }
+                        row.forEachIndexed { c,symbol -> key(if(letters) alphabet[r][c].toString() else symbol,editable=true,hint=if(letters) { symbol.codePoints().findFirst().orElse(-1).let { if(it < 0) "" else String(Character.toChars(it)) } } else null) { rowIndex=r;columnIndex=c;draft=symbol;error="" } }
                         if(letters && r==1) Spacer(Modifier.weight(.45f))
                         if(r==2) key("⌫",1.3f)
                     }

@@ -549,7 +549,7 @@ internal object InputController {
     internal fun KeyboardSession.applySpaceImpl() {
         if (chinese && code.isNotEmpty()) {
             confirmChinese(null)
-        } else if (!chinese && candidateTexts.isNotEmpty() && choose(candidateTexts.first())) {
+        } else if (!chinese && settings.englishSpaceSelectsFirst && candidateTexts.isNotEmpty() && choose(candidateTexts.first())) {
             // English completion owns replacement and its single trailing space.
             return
         } else commit(" ")

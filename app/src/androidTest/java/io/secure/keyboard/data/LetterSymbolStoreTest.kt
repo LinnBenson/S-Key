@@ -16,9 +16,16 @@ class LetterSymbolStoreTest : AndroidTestCase() {
         prefs.edit().clear().commit()
         try {
             val store = LetterSymbolStore(isolated)
-            assertEquals("1", store.symbols(true, 'q'))
-            assertEquals("“”", store.symbols(true, 'k'))
-            assertEquals(")", store.symbols(false, 'k'))
+            assertEquals("1①❶１𝟭Ⅰ", store.symbols(true, 'q'))
+            for (letter in "qwertyuiop") {
+                val value = store.symbols(true, letter)
+                assertEquals(value, store.symbols(false, letter))
+                assertEquals(if (letter == 'p') 5 else 6, value.codePointCount(0, value.length))
+                store.save(true, letter, value)
+                assertEquals(value, store.symbols(true, letter))
+            }
+            assertEquals("（）", store.symbols(true, 'k'))
+            assertEquals("()", store.symbols(false, 'k'))
             store.save(true, 'k', "🙂《》")
             store.save(false, 'k', "")
             assertEquals("🙂《》", LetterSymbolStore(isolated).symbols(true, 'k'))
@@ -29,7 +36,7 @@ class LetterSymbolStoreTest : AndroidTestCase() {
                 assertEquals("🙂《》", store.symbols(true, 'k'))
             }
             store.restore(true)
-            assertEquals("“”", store.symbols(true, 'k'))
+            assertEquals("（）", store.symbols(true, 'k'))
             assertEquals("", store.symbols(false, 'k'))
         } finally { prefs.edit().clear().commit() }
     }

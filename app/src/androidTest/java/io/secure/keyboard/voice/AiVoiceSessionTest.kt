@@ -4,10 +4,8 @@ import android.test.AndroidTestCase
 import io.secure.keyboard.data.ApiConfiguration
 import io.secure.keyboard.data.ApiConfigurationStore
 import io.secure.keyboard.data.SettingsStore
-import java.net.URL
+import okhttp3.ResponseBody.Companion.toResponseBody
 import java.io.ByteArrayOutputStream
-import javax.net.ssl.HttpsURLConnection
-import java.security.cert.Certificate
 
 @Suppress("DEPRECATION")
 class AiVoiceSessionTest : AndroidTestCase() {
@@ -16,20 +14,34 @@ class AiVoiceSessionTest : AndroidTestCase() {
         override fun onPreview(text:String,isFinal:Boolean) {}
         override fun onError(message:String) {}
     }
-    private class Connection:HttpsURLConnection(URL("https://example.invalid/stt")) {
-        val sent=ByteArrayOutputStream()
-        var status=200
+    private class Connection {
+        val sent = ByteArrayOutputStream()
+        var status = 200
         var response = """{"text":"synthetic transcript"}"""
-        var disconnected=false
-        override fun connect() {}
-        override fun disconnect() { disconnected=true }
-        override fun usingProxy()=false
-        override fun getCipherSuite()="test"
-        override fun getLocalCertificates():Array<Certificate>?=null
-        override fun getServerCertificates():Array<Certificate> = emptyArray()
-        override fun getOutputStream()=sent
-        override fun getResponseCode()=status
-        override fun getInputStream()=response.byteInputStream()
+        var disconnected = false
+        lateinit var request: okhttp3.Request
+        fun call(value: okhttp3.Request): okhttp3.Call {
+            request = value
+            return object : okhttp3.Call {
+                private var executed = false
+                override fun request() = value
+                override fun execute(): okhttp3.Response {
+                    executed = true
+                    val buffer = okio.Buffer()
+                    value.body!!.writeTo(buffer)
+                    sent.write(buffer.readByteArray())
+                    return okhttp3.Response.Builder().request(value).protocol(okhttp3.Protocol.HTTP_1_1)
+                        .code(status).message("fixture")
+                        .body(response.toResponseBody()).build()
+                }
+                override fun cancel() { disconnected = true }
+                override fun isCanceled() = disconnected
+                override fun isExecuted() = executed
+                override fun timeout() = okio.Timeout()
+                override fun clone(): okhttp3.Call = call(value)
+                override fun enqueue(callback: okhttp3.Callback) { error("Unexpected async call") }
+            }
+        }
     }
     private fun transcribe(session:AiVoiceSession):String {
         val method=AiVoiceSession::class.java.getDeclaredMethod("transcribe",Long::class.javaPrimitiveType,ByteArray::class.java,Int::class.javaPrimitiveType)
@@ -59,7 +71,7 @@ class AiVoiceSessionTest : AndroidTestCase() {
 
     fun testEnglishOutputTranslatesBeforeCommit() {
         val conn = Connection().apply { response = """{"data":{"translations":[{"translatedText":"Hello"}]}}""" }
-        val session = AiVoiceSession(context, ApiConfiguration(voiceKey="synthetic-key", googleKey="synthetic-google"), listener, true) { conn }
+        val session = AiVoiceSession(context, ApiConfiguration(voiceKey="synthetic-key", googleKey="synthetic-google"), listener, true) { conn.call(it) }
         try {
             assertEquals("Hello", output(session, "這是語音輸入"))
             val body = conn.sent.toString("UTF-8")
@@ -96,7 +108,7 @@ class AiVoiceSessionTest : AndroidTestCase() {
 
     fun testEnglishTranslationFailureDoesNotReturnTranscript() {
         val conn = Connection().apply { status=403 }
-        val session = AiVoiceSession(context, ApiConfiguration(googleKey="synthetic-google"), listener, true) { conn }
+        val session = AiVoiceSession(context, ApiConfiguration(googleKey="synthetic-google"), listener, true) { conn.call(it) }
         try {
             try { output(session, "你好"); fail("Must not commit untranslated text") }
             catch (e: java.lang.reflect.InvocationTargetException) { assertTrue(e.cause is IllegalStateException) }
@@ -105,7 +117,7 @@ class AiVoiceSessionTest : AndroidTestCase() {
 
     fun testWavUploadAndResponseWithoutRealNetwork() {
         val conn=Connection()
-        val session=AiVoiceSession(context,ApiConfiguration(voiceKey="synthetic-key"),listener) { conn }
+        val session=AiVoiceSession(context,ApiConfiguration(voiceKey="synthetic-key"),listener) { conn.call(it) }
         try {
             assertEquals("synthetic transcript",transcribe(session))
             val bytes=conn.sent.toByteArray()
@@ -113,14 +125,14 @@ class AiVoiceSessionTest : AndroidTestCase() {
             assertTrue(body.indexOf("name=\"model\"")<body.indexOf("name=\"file\""))
             assertTrue(body.contains("grok-voice-transcribe-2.0"))
             assertTrue(body.contains("RIFF")); assertTrue(body.contains("WAVEfmt "))
-            assertEquals("Bearer synthetic-key",conn.getRequestProperty("Authorization"))
-            assertFalse(conn.instanceFollowRedirects)
+            assertEquals("Bearer synthetic-key",conn.request.header("Authorization"))
+            assertFalse(VoiceHttpRequest.client.followRedirects)
             assertTrue(conn.disconnected)
         } finally { session.release() }
     }
     fun testCancellationNeverWritesAudio() {
         val conn=Connection()
-        val session=AiVoiceSession(context,ApiConfiguration(voiceKey="synthetic-key"),listener) { conn }
+        val session=AiVoiceSession(context,ApiConfiguration(voiceKey="synthetic-key"),listener) { conn.call(it) }
         session.cancel()
         try { transcribe(session);fail("Canceled request uploaded") }
         catch(e:java.lang.reflect.InvocationTargetException) { assertTrue(e.cause is IllegalStateException) }
@@ -129,7 +141,7 @@ class AiVoiceSessionTest : AndroidTestCase() {
     }
     fun testAuthenticationFailureDoesNotExposeKey() {
         val conn=Connection().apply { status=401 }
-        val session=AiVoiceSession(context,ApiConfiguration(voiceKey="synthetic-key"),listener) { conn }
+        val session=AiVoiceSession(context,ApiConfiguration(voiceKey="synthetic-key"),listener) { conn.call(it) }
         try { transcribe(session);fail("401 accepted") }
         catch(e:java.lang.reflect.InvocationTargetException) {
             assertTrue(e.cause!!.message!!.contains("鉴权失败"))
@@ -190,6 +202,57 @@ class AiVoiceSessionTest : AndroidTestCase() {
         val slots = AiVoiceSession::class.java.getDeclaredField("captureSlots").apply { isAccessible=true }
             .get(null) as java.util.concurrent.Semaphore
         assertEquals("Canceled queued work returns both slots", 2, slots.availablePermits())
+    }
+
+    fun testFailureCleanupPrecedesImmediateRetryAndOldCallbackCannotCommit() {
+        val slots = AiVoiceSession::class.java.getDeclaredField("captureSlots").apply { isAccessible=true }
+            .get(null) as java.util.concurrent.Semaphore
+        val method = AiVoiceSession::class.java.getDeclaredMethod("runCapture", Long::class.javaPrimitiveType, kotlin.jvm.functions.Function0::class.java)
+            .apply { isAccessible = true }
+        val done = java.util.concurrent.CountDownLatch(1)
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val output = mutableListOf<String>()
+        val sessions = mutableListOf<AiVoiceSession>()
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        fun run(session: AiVoiceSession, action: () -> String?) {
+            assertTrue(slots.tryAcquire())
+            method.invoke(session, 0L, action)
+        }
+        handler.post {
+            try {
+                val retryListener = object : OfflineVoiceSession.Listener {
+                    override fun onState(state: OfflineVoiceSession.State) {
+                        if (state == OfflineVoiceSession.State.IDLE) done.countDown()
+                    }
+                    override fun onPreview(text: String, isFinal: Boolean) { output.add(text) }
+                    override fun onError(message: String) { failure.set(AssertionError(message)); done.countDown() }
+                }
+                lateinit var first: AiVoiceSession
+                val failedListener = object : OfflineVoiceSession.Listener {
+                    override fun onState(state: OfflineVoiceSession.State) { }
+                    override fun onPreview(text: String, isFinal: Boolean) { failure.set(AssertionError("Old result")) }
+                    override fun onError(message: String) {
+                        try {
+                            assertEquals("Failure must release capacity before reporting", 2, slots.availablePermits())
+                            assertFalse(AiVoiceSession::class.java.getDeclaredField("busy").apply { isAccessible=true }.getBoolean(first))
+                            first.release()
+                            val retry = AiVoiceSession(context, ApiConfiguration(), retryListener)
+                            sessions.add(retry)
+                            run(retry) { "new recording" }
+                        } catch (error: Throwable) { failure.set(error); done.countDown() }
+                    }
+                }
+                first = AiVoiceSession(context, ApiConfiguration(), failedListener)
+                sessions.add(first)
+                AiVoiceSession::class.java.getDeclaredField("busy").apply { isAccessible=true }.setBoolean(first, true)
+                run(first) { throw java.net.SocketTimeoutException("synthetic timeout") }
+            } catch (error: Throwable) { failure.set(error); done.countDown() }
+        }
+        assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        handler.post { sessions.forEach { it.release() } }
+        failure.get()?.let { throw it }
+        assertEquals(listOf("new recording"), output)
+        assertEquals(2, slots.availablePermits())
     }
 
     fun testWavHeaderHasBoundedPcmLayout() {

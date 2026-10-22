@@ -1,5 +1,7 @@
 # 验证记录索引
 
+新增专项：[AI 语音网络失败重试](ai-voice-network-retry-2026-10-22.md)。
+
 最新复查：[Bug、隐私与内存](bug-privacy-memory-followup-2026-10-22.md)。
 
 当前功能验证：[内置词库与核心职责拆分（2026-10-22）](builtin-dictionaries-2026-10-22/REPORT.md)。

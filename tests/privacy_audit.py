@@ -31,7 +31,12 @@ assert app.get(android+'usesCleartextTraffic') == 'false'
 assert 'commit(code)' not in service
 assert 'exactWubi(code' in service
 ai_voice = (root/'app/src/main/java/io/secure/keyboard/voice/AiVoiceSession.kt').read_text()
-assert 'pcm.fill(0)' in ai_voice and 'instanceFollowRedirects=false' in ai_voice
+assert 'pcm.fill(0)' in ai_voice
+voice_http = (root/'app/src/main/java/io/secure/keyboard/voice/VoiceHttpRequest.kt').read_text()
+assert '.followRedirects(false).followSslRedirects(false)' in voice_http
+assert '.retryOnConnectionFailure(false)' in voice_http and 'override fun isOneShot() = true' in voice_http
+assert '.callTimeout(45, TimeUnit.SECONDS)' in voice_http and '.writeTimeout(15, TimeUnit.SECONDS)' in voice_http
+assert 'active?.cancel()' in voice_http
 assert 'FileOutputStream' not in ai_voice and 'check(current(id))' in ai_voice
 voice = (root/'app/src/main/java/io/secure/keyboard/voice/OfflineVoiceSession.kt').read_text()
 guard = (root/'app/src/main/java/io/secure/keyboard/voice/VoiceCommitGuard.kt').read_text()

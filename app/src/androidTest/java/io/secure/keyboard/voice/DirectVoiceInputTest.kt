@@ -536,6 +536,7 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
             val settings = io.secure.keyboard.data.SettingsStore(context)
             val previous = settings.voiceMode
             setField("heldVoice", false)
+            setField("voiceState", OfflineVoiceSession.State.LISTENING)
             settings.voiceMode = "ai"
             try { invoke("renderBody") } finally { settings.voiceMode = previous }
             val texts = voiceButtons()
@@ -546,6 +547,29 @@ class DirectVoiceInputTest : InstrumentationTestCase() {
             val second = texts[1].layoutParams as LinearLayout.LayoutParams
             assertTrue(first.rightMargin > 0)
             assertEquals(first.weight, second.weight)
+        }
+    }
+
+    fun testAiNetworkFailureOffersRetryAndClearsSession() {
+        onMainChecked {
+            val settings = io.secure.keyboard.data.SettingsStore(context)
+            val previous = settings.voiceMode
+            try {
+                settings.voiceMode = "ai"
+                setField("heldVoice", false)
+                setField("usingAiVoice", true)
+                setField("voiceState", OfflineVoiceSession.State.PROCESSING)
+                invoke("renderBody")
+                val button = field<ViewGroup>("body").findViewWithTag<TextView>("voice-submit")
+                assertFalse(button.isEnabled)
+                syntheticListener().onError("语音连接失败或超时，请重试")
+                assertEquals("重新录音", button.text.toString())
+                assertTrue(button.isEnabled)
+                assertNull(field<VoiceCommitGuard?>("voiceGuard"))
+                assertNull(field<AiVoiceSession?>("aiVoice"))
+                assertEquals(OfflineVoiceSession.State.IDLE, field<OfflineVoiceSession.State>("voiceState"))
+                assertTrue(connection.commits.isEmpty())
+            } finally { settings.voiceMode = previous }
         }
     }
 

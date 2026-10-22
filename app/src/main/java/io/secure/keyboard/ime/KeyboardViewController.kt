@@ -879,18 +879,29 @@ internal object KeyboardViewController {
                 if (!secret) {
                     val r =
                         LinearLayout(this).apply {
+                            isBaselineAligned = false
+                            gravity = Gravity.CENTER_VERTICAL
                             setPadding(dp(4), dp(4), dp(4), dp(4))
                             background = shape(special)
                         }
                     popRow = r
-                    choices.forEach { s ->
+                    choices.forEachIndexed { index, s ->
                         r.addView(
-                            label(s, 22f).apply { background = shape(keyBg) },
-                            LinearLayout.LayoutParams(dp(44), dp(44)),
+                            PunctuationKeyLabel(this).apply {
+                                this.text = s
+                                textSize = 23f
+                                setTextColor(fg)
+                                setPadding(dp(6), dp(6), dp(6), dp(6))
+                                background = shape(if (index == 0) selectedKeyBg else keyBg)
+                                setTextColor(if (index == 0) selectedKeyText else fg)
+                            },
+                            LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+                                if (index < choices.lastIndex) rightMargin = dp(4)
+                            },
                         )
                     }
                     popup =
-                        PopupWindow(r, dp(choices.size * 44 + 8), dp(52), false).apply {
+                        PopupWindow(r, dp(choices.size * 44 + (choices.size - 1) * 4 + 8), dp(52), false).apply {
                             isTouchable = false
                             showAsDropDown(container, 0, -container.height - dp(54))
                         }
@@ -985,11 +996,15 @@ internal object KeyboardViewController {
                         val popupLocation = IntArray(2)
                         (popRow ?: container).getLocationOnScreen(popupLocation)
                         choice =
-                            ((e.rawX - popupLocation[0] - dp(4)) / dp(44))
+                            ((e.rawX - popupLocation[0] - dp(4) + dp(2)) / dp(48))
                                 .toInt()
                                 .coerceIn(0, choices.lastIndex)
-                        for (i in 0 until (popRow?.childCount ?: 0)) popRow?.getChildAt(i)?.alpha =
-                            if (i == choice) 1f else .5f
+                        for (i in 0 until (popRow?.childCount ?: 0)) {
+                            (popRow?.getChildAt(i) as? TextView)?.apply {
+                                background = shape(if (i == choice) selectedKeyBg else keyBg)
+                                setTextColor(if (i == choice) selectedKeyText else fg)
+                            }
+                        }
                     } else if (
                         abs(e.x - downX) > dp(70) ||
                             e.y < -dp(60) ||

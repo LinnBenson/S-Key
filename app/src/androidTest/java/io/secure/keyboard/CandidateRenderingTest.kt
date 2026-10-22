@@ -50,6 +50,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     private lateinit var connection: RecordingConnection
     private var originalToolbarPins = emptyList<String>()
     private var originalSpacing = false
+    private var originalSpaceSelect = false
     private var originalCompletion = true
     private var originalChinese = true
     private var originalMode = io.secure.keyboard.engine.ChineseInputMode.MIXED
@@ -109,6 +110,8 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         settings.autoChineseSpacing = false
         originalChinese = settings.lastChineseLanguage
         settings.lastChineseLanguage = true
+        originalSpaceSelect = settings.englishSpaceSelectsFirst
+        settings.englishSpaceSelectsFirst = false
         originalCompletion = settings.englishCompletion
         originalFourCode = settings.fourCodeAutoCommit
         originalKeySound = settings.keySound
@@ -136,6 +139,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     override fun tearDown() {
+        SettingsStore(context).englishSpaceSelectsFirst = originalSpaceSelect
         releases.forEach { it.countDown() }
         onMainChecked {
             if (::harness.isInitialized) harness.close()
@@ -2573,7 +2577,24 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         assertTrue(field<List<String>>("candidateTexts").contains("你"))
     }
 
+    fun testEnglishSpaceDisabledPreservesTypedWordDespiteCandidates() {
+        val host = attachActualHost()
+        onMainChecked {
+            host.editor.setText("hel"); host.editor.setSelection(3)
+            setField("chinese", false); invoke("refreshCandidates")
+        }
+        awaitResults()
+        onMainChecked {
+            assertFalse(SettingsStore(context).englishSpaceSelectsFirst)
+            assertTrue(field<List<String>>("candidateTexts").isNotEmpty())
+            invoke("space")
+        }
+        drainWorker()
+        onMainChecked { assertEquals("hel ", host.editor.text.toString()) }
+    }
+
     fun testEnglishSpaceSelectsFirstCandidateAndKeepsSingleSpace() {
+        SettingsStore(context).englishSpaceSelectsFirst = true
         val host = attachActualHost()
         for (before in listOf("hel", "hel world")) {
             resetActualHost(host)
@@ -2605,6 +2626,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     fun testEnglishSpacePreservesRapidFollowingKeys() {
+        SettingsStore(context).englishSpaceSelectsFirst = true
         val host = attachActualHost()
         onMainChecked {
             host.editor.setText("hel"); host.editor.setSelection(3)
@@ -2628,6 +2650,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     fun testEnglishSpaceCompletesOnlyAssistantDraft() {
+        SettingsStore(context).englishSpaceSelectsFirst = true
         query(false, "he")
         onMainChecked {
             invoke("openTool", "translate")

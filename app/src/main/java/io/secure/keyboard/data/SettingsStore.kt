@@ -276,6 +276,10 @@ class SettingsStore(context: Context) {
             prefs.edit().putBoolean("fourCodeAutoCommit", value).apply()
         }
 
+    var englishSpaceSelectsFirst: Boolean
+        get() = prefs.getBoolean("englishSpaceSelectsFirst", false)
+        set(value) { prefs.edit().putBoolean("englishSpaceSelectsFirst", value).apply() }
+
     var englishCompletion: Boolean
         get() = prefs.getBoolean("englishCompletion", true)
         set(value) {

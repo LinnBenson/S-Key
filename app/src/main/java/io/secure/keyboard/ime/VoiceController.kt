@@ -46,7 +46,13 @@ internal object VoiceController {
         col.addView(actions, LinearLayout.LayoutParams(-1, dp(44)))
         if(settings.voiceMode=="ai" && !heldVoice) {
             actions.addView(
-                button("识别语音") { if (!voiceStarting && voiceState == OfflineVoiceSession.State.LISTENING) aiVoice?.stop() },
+                button("识别语音") {
+                    if (!voiceStarting) when (voiceState) {
+                        OfflineVoiceSession.State.LISTENING -> aiVoice?.stop()
+                        OfflineVoiceSession.State.IDLE -> if (voiceGuard == null) startVoice()
+                        else -> Unit
+                    }
+                }.apply { tag = "voice-submit" },
                 LinearLayout.LayoutParams(0, -1, 1f).apply { rightMargin = dp(10) },
             )
         }
@@ -64,6 +70,11 @@ internal object VoiceController {
 
     internal fun KeyboardSession.updateVoiceLabelsImpl() {
         if (voiceState != OfflineVoiceSession.State.LISTENING) voiceWaveform?.reset()
+        if (bodyInitialized) body.findViewWithTag<TextView>("voice-submit")?.apply {
+            text = if (voiceState == OfflineVoiceSession.State.IDLE) "重新录音" else "识别语音"
+            isEnabled = !voiceStarting && (voiceState == OfflineVoiceSession.State.LISTENING ||
+                (voiceState == OfflineVoiceSession.State.IDLE && voiceGuard == null))
+        }
         voiceStatus?.text =
             if (heldVoiceWaitingKeys) "正在完成先前输入 · 松手取消"
             else when (voiceState) {

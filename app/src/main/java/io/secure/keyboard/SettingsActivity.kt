@@ -426,6 +426,7 @@ open class SettingsActivity : ComponentActivity() {
     @Composable private fun EnglishSettings() {
         model.revision
         Group("英文输入偏好") {
+            Toggle("空格选择首选词", model.settings.englishSpaceSelectsFirst) { model.settings.englishSpaceSelectsFirst = it }
             Toggle("英文单词补全", model.settings.englishCompletion) { model.settings.englishCompletion = it }
         }
     }
@@ -746,7 +747,7 @@ open class SettingsActivity : ComponentActivity() {
             }
         }
         Group("开源组件") {
-            Info("Miuix 0.5.1 · Apache-2.0\nMiuix Icons Regular / Material Symbols Rounded · Apache-2.0\nKotlin、AndroidX / Compose：随包保留各组件许可。\n词库及字体的来源与许可保留在源码 third_party 与应用 assets。")
+            Info("Miuix 0.5.1 · Apache-2.0\nMiuix Icons Regular / Material Symbols Rounded · Apache-2.0\nOkHttp 4.12.0、Okio 3.6.0 · Apache-2.0\nKotlin、AndroidX / Compose：随包保留各组件许可。\n词库及字体的来源与许可保留在源码 third_party 与应用 assets。")
             Info(notices)
         }
     }

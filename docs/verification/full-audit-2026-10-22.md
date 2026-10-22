@@ -53,3 +53,10 @@
 没有宣称“完整旧测试套件全绿”：旧 VoiceImportLifecycleTest 仍引用已移除的 importObserver/native View；旧主题测试仍访问已移除的 config 字段；ToolbarArtworkTest 假定旧“更多”页面视图结构。这些需要单独迁移。旧真实系统 IME 测试在模拟器等待键盘可访问节点时超时，尚不能作为真机可见性/反复唤起通过的证据。当前输入路径、面板回收和新设置界面已有独立测试覆盖，但不替代这一验证限制。
 
 对应临时日志：/tmp/skey-wide-audit/、/tmp/skey-audit-recheck/、/tmp/skey-audit-final-ui.log、/tmp/skey-audit-final-validation.log、/tmp/skey-python-audit.log、/tmp/skey-audit-release.log。
+
+
+## 默认长按符号顺序调整
+
+默认字母长按符号复用对应语言符号键盘第一页的默认顺序。Q–P 为 1–0；A–L 为 @、#、$、_、&、-、+、左右括号、/，括号集中在 K。Z–M 中文为 .、,、顿号、全角冒号、分号、叹号、问号；英文为 .、,、*、:、;、!、?。已有用户配置保留，恢复默认采用新顺序。
+
+第一排数字新增普通、带圈、黑底带圈、全角、无衬线粗体和大写罗马数字变体；0 无罗马数字，仅提供前五种。中英文默认相同。实际键帽与设置预览统一只显示第一个 Unicode 字符，长按滑选保留全部字符。

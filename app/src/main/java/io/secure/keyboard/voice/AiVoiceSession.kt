@@ -11,18 +11,16 @@ import android.os.Looper
 import android.os.SystemClock
 import io.secure.keyboard.data.ApiConfiguration
 import org.json.JSONObject
-import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
-import javax.net.ssl.HttpsURLConnection
 
 /** Bounded memory-only capture. Explicit stop uploads; cancel invalidates all callbacks. */
 internal class AiVoiceSession(context: Context, private val config: ApiConfiguration,
     private val listener: OfflineVoiceSession.Listener,
     private val translateToEnglish: Boolean = false,
-    private val connect: (URL) -> HttpsURLConnection = { it.openConnection() as HttpsURLConnection }) {
+    private val newCall: (okhttp3.Request) -> okhttp3.Call = VoiceHttpRequest.client::newCall) {
     private val context = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
@@ -31,8 +29,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
     @Volatile private var recording = false
     @Volatile private var released = false
     @Volatile private var recorder: AudioRecord? = null
-    @Volatile private var connection: HttpsURLConnection? = null
-    @Volatile private var translationCall: io.secure.keyboard.translation.GoogleTranslation.Call? = null
+    @Volatile private var request: VoiceHttpRequest? = null
     private val levels = LatestVoiceLevel({ main.postDelayed(it, 50L) }, { main.removeCallbacks(it) }) { id, level ->
         if (current(id) && recording) listener.onLevel(level)
     }
@@ -48,27 +45,47 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         val id = generation.incrementAndGet()
         listener.onState(OfflineVoiceSession.State.LOADING)
         try {
-            worker.execute { try { capture(id) } finally { captureSlots.release() } }
+            worker.execute { runCapture(id) { capture(id) } }
         } catch (_: java.util.concurrent.RejectedExecutionException) {
             captureSlots.release(); busy=false; recording=false
             if (current(id)) listener.onError("语音任务未启动，请重试")
         }
     }
+    private fun runCapture(id: Long, capture: () -> String?) {
+        val outcome = try { runCatching { capture() } } finally { captureSlots.release() }
+        // Permit and recorder cleanup precede callbacks, so retry cannot race old ownership.
+        main.post {
+            busy = false
+            if (!current(id)) return@post
+            timer?.let(main::removeCallbacks); timer = null
+            outcome.fold(onSuccess = { text ->
+                if (text != null) {
+                    listener.onPreview(text, true)
+                    if (current(id)) listener.onSegment(1, text)
+                }
+            }, onFailure = { error ->
+                val message = if (error is IllegalStateException || error is IllegalArgumentException)
+                    error.message ?: "识别失败" else "语音连接失败或超时，请重试"
+                listener.onError(message)
+            })
+            if (current(id)) listener.onState(OfflineVoiceSession.State.IDLE)
+        }
+    }
+
     fun stop() {
         levels.clear()
         gate.stop { recording = false; runCatching { recorder?.stop() } }
         timer?.let(main::removeCallbacks); timer=null
     }
     fun cancel() {
-        generation.incrementAndGet(); stop(); translationCall?.cancel()
-        val canceledConnection = connection; connection = null
-        canceledConnection?.let { c -> Thread({ runCatching { c.disconnect() } }, "voice-disconnect").apply { isDaemon=true }.start() }
+        generation.incrementAndGet(); stop()
+        request?.cancel()
     }
     fun release() { if(released) return; cancel(); released=true; levels.close(); worker.shutdown() }
     private fun current(id:Long) = !released && generation.get()==id
     private fun emit(id:Long, action:()->Unit) { main.post { if(current(id)) action() } }
-    private fun capture(id:Long) {
-        if (!current(id)) { main.post { busy=false }; return }
+    private fun capture(id:Long): String? {
+        if (!current(id)) return null
         val pcm = ByteArray(16000*2*60)
         var count=0
         var mic:AudioRecord?=null
@@ -103,18 +120,14 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
             }
             gate.stop { recording=false; runCatching { input.stop() }; recorder=null }
             input.release(); mic=null
-            if(!current(id)) return
+            if(!current(id)) return null
             check(count>=3200) { "录音太短，请重新说话" }
             emit(id) { listener.onState(OfflineVoiceSession.State.PROCESSING) }
-            val result=prepareOutput(id,transcribe(id,pcm,count))
-            emit(id) { listener.onPreview(result,true); listener.onSegment(1,result) }
-        } catch(e:Exception) {
-            val message=if(e is IllegalStateException || e is IllegalArgumentException) e.message ?: "识别失败" else "语音连接失败或超时，请重试"
-            emit(id) { listener.onError(message) }
+            return prepareOutput(id,transcribe(id,pcm,count))
         } finally {
             pcm.fill(0)
             gate.stop { recording=false; recorder=null; runCatching { mic?.stop() }; runCatching { mic?.release() } }
-            main.post { busy=false; if(current(id)) { timer?.let(main::removeCallbacks);timer=null;listener.onState(OfflineVoiceSession.State.IDLE) } }
+
         }
     }
     private fun prepareOutput(id: Long, transcript: String): String {
@@ -122,17 +135,42 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         val normalized = VoiceChineseNormalizer.simplify(context, transcript)
         check(current(id)) { "已取消" }
         if (!translateToEnglish) return normalized
-        val call = io.secure.keyboard.translation.GoogleTranslation.Call(connect)
-        translationCall = call
+        val c = config.validated()
+        require(c.googleKey.isNotBlank()) { "请先配置 Google 翻译密钥" }
+        val payload = io.secure.keyboard.translation.GoogleTranslation.requestBody(normalized, "auto", "en", c.googleModel)
+            .toString().toByteArray(Charsets.UTF_8)
         try {
-            check(current(id)) { "已取消" }
-            val result = call.execute(config, normalized, "auto", "en")
+            val body = send(id, c.googleUrl + "?key=" + java.net.URLEncoder.encode(c.googleKey, "UTF-8"),
+                emptyMap(), "application/json; charset=utf-8", payload.size.toLong(), { it.write(payload) }) { status ->
+                when (status) {
+                    401, 403 -> "Google 翻译鉴权失败，请检查密钥与权限"
+                    429 -> "翻译请求过于频繁或配额不足"
+                    else -> "翻译失败（HTTP $status），请稍后重试"
+                }
+            }
+            val value = JSONObject(body).getJSONObject("data").getJSONArray("translations")
+                .getJSONObject(0).opt("translatedText") as? String
+            check(!value.isNullOrBlank() && value.length <= 20000) { "翻译未返回有效文字" }
+            return value
+        } finally { payload.fill(0) }
+    }
+
+    private fun send(id: Long, url: String, headers: Map<String, String>, contentType: String,
+                     size: Long, write: (java.io.OutputStream) -> Unit, error: (Int) -> String): String {
+        check(current(id)) { "已取消" }
+        val call = VoiceHttpRequest(newCall)
+        request = call
+        try {
+            // Handles cancellation between the first check and publishing the request.
+            if (!current(id)) call.cancel()
+            val result = call.execute(url, headers, contentType, size, write, error)
             check(current(id)) { "已取消" }
             return result
-        } finally { translationCall = null }
+        } finally { call.cancel(); request = null }
     }
 
     private fun transcribe(id:Long, pcm:ByteArray, count:Int):String {
+        check(current(id)) { "已取消" }
         val c=config.validated()
         require(c.voiceKey.isNotBlank()) { "请配置语音 API 密钥" }
         val boundary="skey-voice-${java.util.UUID.randomUUID()}"
@@ -141,41 +179,28 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         val prefix=("--$boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n$model\r\n"+
             "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n").toByteArray()
         val suffix="\r\n--$boundary--\r\n".toByteArray()
-        val conn=connect(URL(c.voiceUrl))
-        connection=conn
-        try {
-            check(current(id)) { "已取消" }
-            conn.instanceFollowRedirects=false;conn.connectTimeout=15000;conn.readTimeout=60000
-            conn.requestMethod="POST";conn.doOutput=true
-            conn.setRequestProperty("Authorization","Bearer ${c.voiceKey}")
-            conn.setRequestProperty("Content-Type","multipart/form-data; boundary=$boundary")
-            conn.setFixedLengthStreamingMode(prefix.size+44+count+suffix.size)
-            conn.outputStream.use { out ->
-                out.write(prefix);out.write(wavHeader(count))
+        val body = send(id, c.voiceUrl, mapOf("Authorization" to "Bearer ${c.voiceKey}"),
+            "multipart/form-data; boundary=$boundary", (prefix.size+44+count+suffix.size).toLong(), { out ->
+                out.write(prefix); out.write(wavHeader(count))
                 var offset=0
-                while(offset<count) { check(current(id)) { "已取消" };val n=minOf(8192,count-offset);out.write(pcm,offset,n);offset+=n }
-                out.write(suffix)
-            }
-            val status=conn.responseCode
-            check(status==200) { when(status) {
-                401,403 -> "语音 API 鉴权失败，请检查密钥与权限"
-                400,404 -> "语音端点或模型不可用，请检查语音 API 配置"
-                429 -> "语音请求过于频繁或额度不足"
-                else -> "语音识别失败（HTTP $status）"
-            } }
-            val bytes=conn.inputStream.use { input ->
-                val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
-                while(true) { check(current(id)) { "已取消" };val n=input.read(buffer);if(n<0)break
-                    check(out.size()+n<=1024*1024) { "语音响应过大" };out.write(buffer,0,n) }
-                out.toByteArray()
-            }
-            return try {
-                (JSONObject(String(bytes,Charsets.UTF_8)).opt("text") as? String)?.trim().orEmpty().also {
-                    check(it.isNotEmpty() && it.length<=20000) { "未识别到有效文字，请重试" }
+                while(offset<count) {
+                    check(current(id)) { "已取消" }
+                    val n=minOf(8192,count-offset); out.write(pcm,offset,n); offset+=n
                 }
-            } finally { bytes.fill(0) }
-        } finally { connection=null;conn.disconnect() }
+                out.write(suffix)
+            }) { status ->
+                when(status) {
+                    401,403 -> "语音 API 鉴权失败，请检查密钥与权限"
+                    400,404 -> "语音端点或模型不可用，请检查语音 API 配置"
+                    429 -> "语音请求过于频繁或额度不足"
+                    else -> "语音识别失败（HTTP $status）"
+                }
+            }
+        return (JSONObject(body).opt("text") as? String)?.trim().orEmpty().also {
+            check(it.isNotEmpty() && it.length<=20000) { "未识别到有效文字，请重试" }
+        }
     }
+
     companion object {
         // A canceled socket may outlive its UI. Bound all sessions together, not each instance.
         private val captureSlots = java.util.concurrent.Semaphore(2)
