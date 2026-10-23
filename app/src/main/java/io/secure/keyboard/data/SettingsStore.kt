@@ -34,6 +34,10 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("voiceAutoTranslate", true)
         set(value) { prefs.edit().putBoolean("voiceAutoTranslate", value).apply() }
 
+    var editorPreview: Boolean
+        get() = prefs.getBoolean("editorPreview", false)
+        set(value) { prefs.edit().putBoolean("editorPreview", value).apply() }
+
     var autoChineseSpacing: Boolean
         get() = prefs.getBoolean("autoChineseSpacing", false)
         set(value) { prefs.edit().putBoolean("autoChineseSpacing", value).apply() }

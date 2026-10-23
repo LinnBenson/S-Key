@@ -466,6 +466,7 @@ open class SettingsActivity : ComponentActivity() {
         }
         Group("中文输入偏好") {
             Toggle("简繁转换", s.traditionalOutput) { s.traditionalOutput = it }
+            Toggle("输入框预览", s.editorPreview) { s.editorPreview = it }
             Toggle("自动插入空格", s.autoChineseSpacing) { s.autoChineseSpacing = it }
             Toggle("空格显示英语翻译", s.spaceEnglishGloss) { s.spaceEnglishGloss = it }
             if (s.chineseInputMethod == io.secure.keyboard.engine.ChineseInputMode.WUBI) {

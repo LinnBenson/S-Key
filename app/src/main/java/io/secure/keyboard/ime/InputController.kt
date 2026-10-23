@@ -26,6 +26,7 @@ internal object InputController {
 
     /** Successful ordered commits clear the code without discarding later queued keystrokes. */
     internal fun KeyboardSession.clearCompositionImpl() {
+        clearEditorPreview()
         generation++
         cancelCandidateQueries()
         code = ""
@@ -211,13 +212,19 @@ internal object InputController {
         if (aiCommandVoice != null || inlineOfflineVoice != null) cancelAiCommandVoice()
         if (translation.enabled) {
             activeAssistantEditor()?.let { editor ->
-                val start=minOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(0)
-                val end=maxOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(start)
-                val retainedLength = editor.length() - (end - start)
-                editor.text.replace(start,end,value)
-                // Editable.replace keeps selection spans; explicitly collapse after accepted text.
-                val insertedLength = (editor.length() - retainedLength).coerceAtLeast(0)
-                editor.setSelection((start + insertedLength).coerceAtMost(editor.length()))
+                syncingAssistantEditor = true
+                try {
+                    if (!clearEditorPreview()) return false
+                    val start=minOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(0)
+                    val end=maxOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(start)
+                    val retainedLength = editor.length() - (end - start)
+                    editor.text.replace(start,end,value)
+                    val insertedLength = (editor.length() - retainedLength).coerceAtLeast(0)
+                    editor.setSelection((start + insertedLength).coerceAtMost(editor.length()))
+                } finally { syncingAssistantEditor = false }
+                aiDraftEpoch++
+                if (aiMode) translation.editDraft(editor.text.toString()) else translation.edit(editor.text.toString())
+                updateTranslationPreview()
                 return true
             }
             if (aiMode) stopAiRequest()
@@ -233,6 +240,7 @@ internal object InputController {
                 variation !in listOf(android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
                     android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, android.text.InputType.TYPE_TEXT_VARIATION_URI)) {
                 if (spacingTexts.size >= 1024) return false
+                if (!clearEditorPreview()) return false
                 spacingTexts.addLast(InputState.SpacedText(value, glossary))
                 if (!spacingPending) commitNextSpacedText()
                 return true
@@ -240,7 +248,10 @@ internal object InputController {
         }
         val output = outputText(value)
         val accepted = currentInputConnection?.commitText(output, 1) == true
-        if (accepted) spaceGlossaryCommitted(output.length, glossary, committed = output)
+        if (accepted) {
+            editorPreview.committed(currentInputConnection)
+            spaceGlossaryCommitted(output.length, glossary, committed = output)
+        }
         return accepted
     }
 

@@ -21,7 +21,7 @@ internal object AssistantController {
         else translationTextView as? EditText
 
     internal fun KeyboardSession.syncAssistantTextImpl(view: TextView?, value: String) {
-        if (view == null || view.text.toString() == value) return
+        if (view == null || view.text.toString() == value || (view === previewEditor && code.isNotEmpty())) return
         syncingAssistantEditor = true
         try {
             val cursor=(view as? EditText)?.selectionStart ?: value.length
@@ -33,6 +33,14 @@ internal object AssistantController {
     internal fun KeyboardSession.assistantEditorImpl(): EditText = object: EditText(this) {
         override fun onSelectionChanged(start:Int,end:Int) {
             super.onSelectionChanged(start,end)
+            if (!syncingAssistantEditor && active && activeAssistantEditor() === this && previewEditor === this) {
+                // A local selection move ends preedit without deleting at the new cursor.
+                if (editorPreview.selectionChanged(start, end, -1, -1)) {
+                    previewEditor = null
+                    clearPending()
+                    if (aiMode) translation.editDraft(text.toString()) else translation.edit(text.toString())
+                }
+            }
             if(!syncingAssistantEditor && active && activeAssistantEditor()===this && !chinese) refreshCandidates()
         }
     }.apply {

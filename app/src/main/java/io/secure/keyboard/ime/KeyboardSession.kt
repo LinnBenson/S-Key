@@ -41,6 +41,34 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal val pinyinComposition = io.secure.keyboard.engine.PinyinComposition()
     internal var pinyinPredictionGeneration: Int? = null
     internal var pinyinCandidates = emptyList<io.secure.keyboard.engine.PinyinDecoder.Option>()
+    internal val editorPreview = EditorPreview()
+    internal var previewEditor: EditText? = null
+    private var previewConnection: android.view.inputmethod.BaseInputConnection? = null
+    internal fun clearEditorPreview(): Boolean {
+        val wasSyncing = syncingAssistantEditor
+        syncingAssistantEditor = true
+        return try { editorPreview.clear() } finally {
+            syncingAssistantEditor = wasSyncing
+            previewEditor = null; previewConnection = null
+        }
+    }
+    internal fun syncEditorPreview() {
+        val value = if (active && chinese && !secret && settings.editorPreview)
+            pinyinComposition.text + code else ""
+        if (value.isEmpty()) { clearEditorPreview(); return }
+        val local = activeAssistantEditor()
+        if (local !== previewEditor) clearEditorPreview()
+        if (local != null && previewConnection == null) {
+            previewEditor = local
+            previewConnection = object : android.view.inputmethod.BaseInputConnection(local, true) {
+                override fun getEditable(): android.text.Editable = local.editableText
+            }
+        }
+        val wasSyncing = syncingAssistantEditor
+        syncingAssistantEditor = true
+        try { editorPreview.update(if (translation.enabled) previewConnection else currentInputConnection, value) }
+        finally { syncingAssistantEditor = wasSyncing }
+    }
     internal var pinyinContext = ""
 
     internal val currentInputConnection get() = host.currentInputConnection
@@ -343,6 +371,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
                 if (!settings.quickPaste) quickPasteState.clear()
                 if (active) renderHeader()
             }
+            else if (key == "editorPreview") main.post { syncEditorPreview(); if (active) renderHeader() }
             else if (key == "spaceEnglishGloss" && !settings.spaceEnglishGloss) {
                 // Revoke this generation immediately, even if the switch is turned back on.
                 if (Looper.myLooper() == main.looper) releaseSpaceGlossary()
@@ -555,6 +584,10 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         candidatesStart: Int,
         candidatesEnd: Int,
     ) {
+        if (previewEditor == null && editorPreview.selectionChanged(newSelStart, newSelEnd, candidatesStart, candidatesEnd)) {
+            clearPending()
+            if (active) renderHeader()
+        }
         glossarySelectionStart = newSelStart
         glossarySelectionEnd = newSelEnd
         val moved = oldSelStart != newSelStart || oldSelEnd != newSelEnd

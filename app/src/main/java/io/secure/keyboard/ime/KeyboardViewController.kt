@@ -295,8 +295,10 @@ internal object KeyboardViewController {
         if (!headerInitialized) return
         val visibleCode = if (secret) "" else pinyinComposition.text + code
         if (preedit.text.toString() != visibleCode) preedit.text = visibleCode
-        val showCode = !secret && chinese && code.isNotEmpty()
-        val codeVisibility = if (showCode) View.VISIBLE else View.GONE
+        val showCode = !secret && chinese && !settings.editorPreview && code.isNotEmpty()
+        val reserveCode = !secret && chinese && !settings.editorPreview &&
+            (showCode || candidateTexts.isNotEmpty() || pinyinPredictionGeneration == generation)
+        val codeVisibility = if (showCode) View.VISIBLE else if (reserveCode) View.INVISIBLE else View.GONE
         if (preedit.visibility != codeVisibility) preedit.visibility = codeVisibility
         val hasCandidates = showsCandidateMode()
         if (candidatesExpanded && !hasCandidates) {
@@ -306,7 +308,7 @@ internal object KeyboardViewController {
         // Keep the complete top region fixed, so starting/canceling composition never moves keys.
         // Sum the separately rounded dimensions to preserve exact pixel equality at every density.
         val candidateHeight = (settings.candidateTextSize * resources.displayMetrics.scaledDensity * 1.4f).roundToInt() + dp(4)
-        val headerHeight = maxOf(dp(40), candidateHeight) + if (showCode) 0 else dp(18)
+        val headerHeight = maxOf(dp(40), candidateHeight) + if (reserveCode) 0 else dp(18)
         if (header.layoutParams.height != headerHeight)
             header.layoutParams = header.layoutParams.apply { height = headerHeight }
         val visibleCandidates = if (secret) emptyList() else candidateTexts

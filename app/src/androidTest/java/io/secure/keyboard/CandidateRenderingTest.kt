@@ -2805,6 +2805,82 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testEditorPreviewRepeatedUpdatesAndHideCleanup() {
+        val host=attachActualHost()
+        val settings=SettingsStore(context)
+        try {
+            onMainChecked { settings.editorPreview=true }
+            query(true,"w")
+            query(true,"wg")
+            assertEquals("wg",host.editor.text.toString())
+            onMainChecked { service.session.onFinishInputView(false) }
+            assertEquals("",host.editor.text.toString())
+            assertNull(service.session.previewEditor)
+        } finally { onMainChecked { settings.editorPreview=false } }
+    }
+
+    fun testPredictionKeepsKeyboardCodeRowHeight() {
+        onMainChecked { SettingsStore(context).editorPreview=false }
+        query(true,"k")
+        val codeRow=field<View>("preedit")
+        val headerHeight=field<View>("header").layoutParams.height
+        onMainChecked { assertEquals(View.VISIBLE,codeRow.visibility); invoke("choose","中") }
+        awaitResults()
+        onMainChecked {
+            assertEquals(View.INVISIBLE,codeRow.visibility)
+            assertEquals(headerHeight,field<View>("header").layoutParams.height)
+            SettingsStore(context).editorPreview=true
+        }
+        instrumentation.waitForIdleSync()
+        assertEquals(View.GONE,codeRow.visibility)
+        onMainChecked { SettingsStore(context).editorPreview=false }
+    }
+
+    fun testEditorPreviewInAssistantSourcesDoesNotChangeRequestDraft() {
+        val settings = SettingsStore(context)
+        try {
+            onMainChecked { settings.editorPreview = true }
+            for (tool in listOf("ai", "translate")) {
+                onMainChecked { invoke("clearPending"); invoke("openTool",tool) }
+                drainWorker()
+                instrumentation.waitForIdleSync()
+                query(true,"wgkq")
+                val chosen=field<List<String>>("candidateTexts").first()
+                onMainChecked {
+                    val editor=service.session.activeAssistantEditor()!!
+                    assertEquals("wgkq",editor.text.toString())
+                    assertEquals("",service.session.translation.text)
+                    invoke("space")
+                    assertEquals(chosen,editor.text.toString())
+                    assertEquals(chosen,service.session.translation.text)
+                    invoke("clearAssistantSource")
+                    invoke("openTool",tool)
+                }
+            }
+        } finally { onMainChecked { settings.editorPreview=false; invoke("clearPending") } }
+    }
+
+    fun testEditorPreviewCommitBackspaceDisableAndPassword() {
+        val host = attachActualHost()
+        val settings = SettingsStore(context)
+        try {
+            onMainChecked { settings.editorPreview = true; settings.autoChineseSpacing = false }
+            query(true,"wgkq")
+            val committed = field<List<String>>("candidateTexts").first()
+            onMainChecked { assertEquals("wgkq",host.editor.text.toString()); invoke("space") }
+            assertEquals(committed,host.editor.text.toString())
+            query(true,"ab")
+            onMainChecked { invoke("backspace") }
+            assertEquals(committed+"a",host.editor.text.toString())
+            onMainChecked { settings.editorPreview = false }
+            instrumentation.waitForIdleSync()
+            assertEquals(committed,host.editor.text.toString())
+            onMainChecked { invoke("clearPending"); settings.editorPreview = true; setField("secret",true) }
+            onMainChecked { setField("code","ab"); invoke("refreshCandidates") }
+            assertEquals(committed,host.editor.text.toString())
+        } finally { onMainChecked { settings.editorPreview = false; invoke("clearPending") } }
+    }
+
     fun testCandidateRefreshAndClearCancelPredictionSignal() {
         query(true,"k")
         val old=field<android.os.CancellationSignal>("predictionSignal")

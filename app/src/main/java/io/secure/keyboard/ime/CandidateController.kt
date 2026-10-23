@@ -69,6 +69,7 @@ internal object CandidateController {
     }
 
     internal fun KeyboardSession.refreshCandidatesImpl() {
+        syncEditorPreview()
         cancelCandidateQueries()
         candidatePager = null
         candidatePageLoading = false

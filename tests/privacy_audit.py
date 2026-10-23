@@ -11,8 +11,11 @@ app = manifest.find('application')
 assert app.get(android+'allowBackup') == 'false'
 assert app.get(android+'fullBackupContent') == 'false'
 source = '\n'.join(p.read_text() for p in (root/'app/src/main/java').rglob('*.kt'))
-for prohibited in ['setComposingText(', 'setComposingRegion(', 'SpeechRecognizer.', 'MediaRecorder()', 'Log.d(', 'Log.i(', 'Log.e(', 'println(']:
+for prohibited in ['setComposingRegion(', 'SpeechRecognizer.', 'MediaRecorder()', 'Log.d(', 'Log.i(', 'Log.e(', 'println(']:
     assert prohibited not in source, prohibited
+for path in (root/'app/src/main/java').rglob('*.kt'):
+    if 'setComposingText(' in path.read_text(): assert path.name == 'EditorPreview.kt'
+assert 'settings.editorPreview' in source and 'active && chinese && !secret && settings.editorPreview' in source
 assert 'debug = false' in source
 service = '\n'.join(p.read_text() for p in (root/'app/src/main/java/io/secure/keyboard/ime').glob('*.kt'))
 assert 'openConnection(' not in service
@@ -52,7 +55,7 @@ listener = service.split('internal fun KeyboardSession.voiceListenerImpl()', 1)[
 preview = listener.split('override fun onPreview(text: String, isFinal: Boolean)', 1)[1].split('override fun onSegment', 1)[0]
 assert 'commit' not in preview and 'queueVoiceSegment' not in preview
 assert '确认插入' not in service and 'button("开始")' not in service
-print('PASS: manifest/privacy, keyboard-only preedit, no input logs/platform recognizer, endpoint-only deduplicated voice with editor/session/cursor guards')
+print('PASS: manifest/privacy, opt-in editor preedit, no input logs/platform recognizer, endpoint-only deduplicated voice with editor/session/cursor guards')
 
 translation = (root/'app/src/main/java/io/secure/keyboard/translation/GoogleTranslation.kt').read_text()
 assert 'checkActive()' in translation and 'payload.fill(0)' in translation
