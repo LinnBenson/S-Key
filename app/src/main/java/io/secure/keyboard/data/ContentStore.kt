@@ -21,7 +21,7 @@ import org.json.JSONObject
 class ContentStore(context: Context) {
     data class ClipboardItem(val id: String, val text: String, val pinned: Boolean = false, val copiedAt: Long = 0L)
 
-    data class AiPreset(val id: String, val name: String, val prompt: String, val reasoningEffort: String = "low")
+    data class AiPreset(val id: String, val name: String, val prompt: String, val reasoningEffort: String = "low", val modelId: String = "")
 
     data class Phrase(val id: String, val text: String, val pinned: Boolean = false)
 
@@ -625,7 +625,8 @@ class ContentStore(context: Context) {
                         require(names.add(name.lowercase(java.util.Locale.ROOT)))
                         val effort = if (row.has("reasoningEffort")) string("reasoningEffort") else "low"
                         require(AiReasoning.valid(effort))
-                        item.put("name", name).put("prompt", prompt).put("reasoningEffort", effort)
+                        val model = io.secure.keyboard.ai.AiPromptStore.normalizeModel(if (row.has("modelId")) string("modelId") else "")
+                        item.put("name", name).put("prompt", prompt).put("reasoningEffort", effort).put("modelId", model)
                         characters += name.length.toLong() + prompt.length
                     }
                     else -> {
@@ -678,26 +679,27 @@ class ContentStore(context: Context) {
     fun customAiEpoch(): Long = aiPresetEpoch.get()
 
     fun aiPresets(): List<AiPreset> = objects("aiPresets").map {
-        AiPreset(it.getString("id"), it.getString("name"), it.getString("prompt"), it.optString("reasoningEffort", "low").takeIf(AiReasoning::valid) ?: "low")
+        AiPreset(it.getString("id"), it.getString("name"), it.getString("prompt"), it.optString("reasoningEffort", "low").takeIf(AiReasoning::valid) ?: "low", it.optString("modelId", ""))
     }
 
-    fun saveAiPreset(id: String?, name: String, prompt: String, reasoningEffort: String = "low") = mutate("aiPresets") { rows ->
+    fun saveAiPreset(id: String?, name: String, prompt: String, reasoningEffort: String = "low", modelId: String = "") = mutate("aiPresets") { rows ->
         val title = name.trim(); val instruction = prompt.trim()
+        val model = io.secure.keyboard.ai.AiPromptStore.normalizeModel(modelId)
         require(AiReasoning.valid(reasoningEffort)) { "请选择有效推理强度" }
         require(title.isNotBlank() && title.length <= 40) { "名称需为 1–40 个字符" }
         require(instruction.isNotBlank() && instruction.length <= MAX_AI_PROMPT_CHARACTERS) { "提示词需为 1–${MAX_AI_PROMPT_CHARACTERS} 个字符" }
         require(rows.none { it.getString("id") != id && it.getString("name").equals(title, ignoreCase = true) }) { "已有同名自定义 AI，请换个名称" }
         if (id == null) {
             require(rows.size < 100) { "最多保存 100 个自定义 AI" }
-            rows.add(JSONObject().put("id", UUID.randomUUID().toString()).put("name", title).put("prompt", instruction).put("reasoningEffort", reasoningEffort))
+            rows.add(JSONObject().put("id", UUID.randomUUID().toString()).put("name", title).put("prompt", instruction).put("reasoningEffort", reasoningEffort).put("modelId", model))
         } else {
             val row = rows.find { it.getString("id") == id }
             require(row != null) { "此自定义 AI 已删除，请重新添加" }
-            if(row.getString("prompt")!=instruction || row.optString("reasoningEffort", "low")!=reasoningEffort) {
+            if(row.getString("prompt")!=instruction || row.optString("reasoningEffort", "low")!=reasoningEffort || row.optString("modelId", "")!=model) {
                 val store=AiConversationStore(app)
                 if(store.load()?.type=="custom:$id") store.clear()
             }
-            row.put("name", title).put("prompt", instruction).put("reasoningEffort", reasoningEffort)
+            row.put("name", title).put("prompt", instruction).put("reasoningEffort", reasoningEffort).put("modelId", model)
         }
     }
 
@@ -757,7 +759,7 @@ class ContentStore(context: Context) {
             dictionary(DictionaryKind.CHINESE), dictionary(DictionaryKind.ENGLISH), recentEmoji(),
             objects("aiPresets").map {
                 AiPreset(it.getString("id"), it.getString("name"), it.getString("prompt"),
-                    it.optString("reasoningEffort", "low").takeIf(AiReasoning::valid) ?: "low")
+                    it.optString("reasoningEffort", "low").takeIf(AiReasoning::valid) ?: "low", it.optString("modelId", ""))
             },
             version(),
             if (settings.clipboardRetention == "timed") rows.filterNot { it.optBoolean("pinned") }

@@ -343,8 +343,7 @@ internal object KeyboardViewController {
                         if (aiMode) resetAiConversation()
                         clearAiConversation(); aiMode = false
                         aiCustom = ""; aiCustomReasoning = "low"
-                        aiCustomPresetName = ""
-                        aiEditingInstruction = false
+                        aiCustomPresetName = ""; aiCustomModel = ""; aiPresetLoadGeneration++
                         aiSelectionTarget.revoke()
                         translation.close()
                         panel = "keys"

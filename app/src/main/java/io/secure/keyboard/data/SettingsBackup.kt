@@ -16,7 +16,7 @@ internal class SettingsBackup(private val context: Context) {
         "symbols" to ("symbol_closure" to setOf("rules")),
         "symbolKeyboard" to ("settings" to setOf("symbol_keyboard_zh_1", "symbol_keyboard_zh_2", "symbol_keyboard_en_1", "symbol_keyboard_en_2")),
         "longPress" to ("settings" to (setOf("longPressSymbols", "longPressDelay") + listOf("zh", "en").flatMap { lang -> ('a'..'z').map { "letter_symbols_${lang}_$it" } })),
-        "prompts" to ("ai_builtin_prompts" to AiPromptStore.prompts.map { it.id }.toSet()),
+        "prompts" to ("ai_builtin_prompts" to AiPromptStore.prompts.flatMap { if (it.id in setOf("common", "custom_common")) listOf(it.id) else listOf(it.id, "model_${it.id}") }.toSet()),
     )
     fun snapshot(): JSONObject = JSONObject().also { root -> groups.forEach { (group, spec) ->
         val all = context.getSharedPreferences(spec.first, 0).all
@@ -42,7 +42,7 @@ internal class SettingsBackup(private val context: Context) {
                         require(value is String && value.length <= 100_000)
                         when {
                             key == EmojiShortcutStore.KEY -> { checkDepth(value); EmojiShortcutStore.decode(value) }
-                            group == "prompts" -> require(value.length <= 12000)
+                            group == "prompts" -> if (key.startsWith("model_")) AiPromptStore.normalizeModel(value) else require(value.length <= 12000)
                             key == "theme" -> require(value in setOf("light", "dark", "system"))
                             key == "symbolHints" -> require(value in SettingsStore.symbolHintModes)
                             key == "toolbarPins" -> {

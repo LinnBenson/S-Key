@@ -43,14 +43,12 @@ internal object PanelController {
             if (secret) { toast("密码输入框不支持 AI 助手"); return }
             val opening = !aiMode || !translation.enabled
             cancelTransient(); clearComposition(); stopAiRequest(); translation.close(); aiSelectionTarget.revoke()
-            clearAiConversation(); aiMode = opening; aiEditingInstruction = false; aiCustom = ""; aiCustomReasoning = "low"
-            aiCustomPresetName = ""
+            clearAiConversation(); aiMode = opening; aiCustom = ""; aiCustomReasoning = "low"
+            aiCustomPresetName = ""; aiCustomModel = ""; aiPresetLoadGeneration++
             if (opening) {
                 translation.enabled = true
-                aiModel = runCatching { aiConfiguration().grokModel }.getOrDefault("")
                 aiTask = getSharedPreferences("settings",MODE_PRIVATE).getString("aiTask","polish")?.takeIf { it in io.secure.keyboard.ai.AiWriting.tasks } ?: "polish"
                 aiTone = getSharedPreferences("settings",MODE_PRIVATE).getString("aiTone","自然") ?: "自然"
-                translation.target = settings.translationTarget
                 if(aiTask!="custom") restoreAiConversation()
             }
             panel="keys"; renderHeader(); renderBody()
@@ -58,7 +56,7 @@ internal object PanelController {
             return
         }
         if (aiMode) {
-            stopAiRequest(); clearAiConversation(); aiMode=false; aiCustom=""; aiCustomPresetName=""; aiEditingInstruction=false; aiSelectionTarget.revoke(); translation.close()
+            stopAiRequest(); clearAiConversation(); aiMode=false; aiCustom=""; aiCustomPresetName=""; aiCustomModel=""; aiPresetLoadGeneration++; aiSelectionTarget.revoke(); translation.close()
         }
         if (tool == "translate") {
             if (secret) { toast("密码输入框不支持翻译"); return }

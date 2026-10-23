@@ -2,8 +2,6 @@ package io.secure.keyboard.settings
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -23,6 +21,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
     var revision by remember { mutableIntStateOf(0) }
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var draft by rememberSaveable { mutableStateOf("") }
+    var modelDraft by rememberSaveable { mutableStateOf("") }
     var message by rememberSaveable { mutableStateOf("修改后下次生成生效，并重新开始会话。") }
     val colors = MiuixTheme.colorScheme
     LazyColumn(modifier.fillMaxSize(), contentPadding = SettingsPagePadding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -40,7 +39,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
                             value == prompt.default -> "默认"
                             value.isBlank() -> "已设为空"
                             else -> "已修改"
-                        }, onClick = { draft = store.read(prompt.id); selected = prompt.id })
+                        }, onClick = { draft = store.read(prompt.id); modelDraft = store.model(prompt.id); selected = prompt.id })
                     }
                 }
             }
@@ -54,17 +53,20 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
                     Text(definition.title, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     Text(when (id) {
                         "custom_common" -> "留空时只使用自定义指令。填写的内容会加在指令前，不使用普通 AI 通用要求。"
-                        "common" -> "用于润色、扩写、语气和翻译，不用于自定义 AI。"
-                        "translate" -> "{target} 会替换为当前选择的目标语言。"
+                        "common" -> "用于润色、扩写和语气，不用于翻译或自定义 AI。"
+                        "translate" -> "根据原文语言自动在美式英语与简体中文之间翻译。"
                         else -> "与普通 AI 通用提示词一起使用。"
                     }, fontSize = 13.sp, color = colors.onSurfaceSecondary)
+                    if (id != "common" && id != "custom_common") TextField(value = modelDraft,
+                        onValueChange = { if (it.length <= 256 && it.none { c -> c.isWhitespace() || c.isISOControl() }) modelDraft = it },
+                        label = "模型 ID（留空使用 AI 设置）", singleLine = true, modifier = Modifier.fillMaxWidth())
                     TextField(value = draft, onValueChange = { if (it.length <= 12000) draft = it },
                         label = if (id == "custom_common") "统一提示词（可留空）" else "提示词", modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 300.dp))
                     Text("${draft.length} / 12000", fontSize = 12.sp, color = colors.onSurfaceSecondary)
                     TextButton(text = "恢复默认", onClick = { draft = definition.default }, modifier = Modifier.fillMaxWidth())
                     Row(horizontalArrangement = Arrangement.spacedBy(SettingsActionSpacing)) {
                         TextButton(text = "取消", onClick = { selected = null }, modifier = Modifier.weight(1f))
-                        Button(onClick = { store.save(id, draft); revision++; selected = null; message = "已保存，下次生成生效" },
+                        Button(onClick = { store.save(id, draft, modelDraft.takeIf { id != "common" && id != "custom_common" }); revision++; selected = null; message = "已保存，下次生成生效" },
                             colors = ButtonDefaults.buttonColorsPrimary(), modifier = Modifier.weight(1f)) { Text("保存", color = colors.onPrimary) }
                     }
                 }

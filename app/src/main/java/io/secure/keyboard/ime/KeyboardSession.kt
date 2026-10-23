@@ -121,7 +121,6 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     // Independent bounded lanes: canceled socket teardown cannot block the next request.
     internal val translationWorker = requestExecutor(2)
     internal val aiWorker = requestExecutor(2)
-    internal val modelCatalogWorker = requestExecutor(1)
 
     fun requestExecutor(threads: Int) = with(KeyboardViewController) { requestExecutorImpl(threads) }
 
@@ -146,15 +145,13 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var aiCustomPresetId: String? = null
     internal var aiCustomPresetName = ""
     internal var aiCustomTab: TextView? = null
-    internal var aiEditingInstruction = false
-    internal var aiInstructionView: TextView? = null
     internal var aiCall: io.secure.keyboard.ai.AiWriting.Call? = null
     internal var aiCallFactory: () -> io.secure.keyboard.ai.AiWriting.Call = { io.secure.keyboard.ai.AiWriting.Call() }
     internal var aiConfiguration: () -> io.secure.keyboard.data.ApiConfiguration = { io.secure.keyboard.data.ApiConfigurationStore(this).load() }
     internal var aiTaskRunnable: Runnable? = null
     internal var aiPreviewDelivery: io.secure.keyboard.ai.LatestPreview? = null
-    internal var aiModels = emptyList<String>()
-    internal var aiModel = ""
+    internal var aiCustomModel = ""
+    internal var aiPresetLoadGeneration = 0
     internal var aiSelectionEpoch = 0
     internal val aiSelectionTarget = io.secure.keyboard.ai.AiSelectionTarget()
     internal val translationLanguages = linkedMapOf("auto" to "自动检测", "zh-CN" to "简体中文", "zh-TW" to "繁体中文",
@@ -469,7 +466,6 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         translation.close()
         translationWorker.shutdownNow()
         aiWorker.shutdownNow()
-        modelCatalogWorker.shutdownNow()
         destroyed = true
         active = false
         clipboardWrites.close()
@@ -700,7 +696,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
 
     fun showCustomAiPresets(anchor: View) = with(AssistantController) { showCustomAiPresetsImpl(anchor) }
 
-    fun showAiModels(anchor: View) = with(AssistantController) { showAiModelsImpl(anchor) }
+    fun effectiveAiConfiguration() = with(AssistantController) { effectiveAiConfigurationImpl() }
 
     fun aiType() = with(AssistantController) { aiTypeImpl() }
 

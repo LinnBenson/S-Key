@@ -280,7 +280,7 @@ open class SettingsActivity : ComponentActivity() {
                                     IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy && index < model.aiPresets.lastIndex,
                                         onClick = { model.task { model.content.moveAiPreset(preset.id, 1) } }) { UiIcon("arrow_down", "下移 ${preset.name}") }
                                     IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy, onClick = {
-                                        model.edit = ContentEdit("custom_ai", preset.id, TextFieldValue(preset.name), TextFieldValue(preset.prompt), preset.reasoningEffort)
+                                        model.edit = ContentEdit("custom_ai", preset.id, TextFieldValue(preset.name), TextFieldValue(preset.prompt), preset.reasoningEffort, preset.modelId)
                                     }) { UiIcon("edit", "编辑 ${preset.name}") }
                                     IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy, onClick = {
                                         ask("删除自定义 AI「${preset.name}」？") { model.task { model.content.deleteAiPreset(preset.id) } }
@@ -716,6 +716,9 @@ open class SettingsActivity : ComponentActivity() {
                     model.edit = edit.copy(first = it)
                 }
                 Spacer(Modifier.height(4.dp))
+                TextField(value = edit.modelId, onValueChange = { if (it.length <= 256) model.edit = edit.copy(modelId = it) },
+                    label = "模型 ID（留空使用 AI 设置）", singleLine = true, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
                 AiEditorField("提示词", "描述你希望 AI 如何处理原文…", edit.second, ContentStore.MAX_AI_PROMPT_CHARACTERS, true) {
                     model.edit = edit.copy(second = it)
                 }
@@ -742,13 +745,12 @@ open class SettingsActivity : ComponentActivity() {
             return
         }
         Modal(title, { if (!model.busy) model.edit = null }) {
-            TextField(value = edit.first, onValueChange = { if (!customAi || it.text.length <= 40) model.edit = edit.copy(first = it) },
-                label = if (customAi) "名称，例如：邮件润色" else if (edit.category == "phrases") "常用语" else "词语",
-                singleLine = customAi, modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp))
-            if (edit.category != "phrases") TextField(value = edit.second, onValueChange = { if (!customAi || it.text.length <= ContentStore.MAX_AI_PROMPT_CHARACTERS) model.edit = edit.copy(second = it) },
-                label = if (customAi) "自定义提示词" else "拼音 / 编码",
-                modifier = if (customAi) Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 260.dp) else Modifier.fillMaxWidth(), singleLine = !customAi)
-            if (customAi) Info("${edit.first.text.length}/40 名称 · ${edit.second.text.length}/${ContentStore.MAX_AI_PROMPT_CHARACTERS} 提示词")
+            TextField(value = edit.first, onValueChange = { model.edit = edit.copy(first = it) },
+                label = if (edit.category == "phrases") "常用语" else "词语",
+                modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp))
+            if (edit.category != "phrases") TextField(value = edit.second,
+                onValueChange = { model.edit = edit.copy(second = it) }, label = "拼音 / 编码",
+                modifier = Modifier.fillMaxWidth(), singleLine = true)
             SettingsDialogActions(cancel = { model.edit = null }, confirm = { model.saveEdit() },
                 enabled = !model.busy && edit.first.text.isNotBlank(), cancelEnabled = !model.busy)
         }

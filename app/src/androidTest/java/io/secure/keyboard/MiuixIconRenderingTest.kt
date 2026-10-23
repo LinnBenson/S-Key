@@ -17,7 +17,7 @@ class MiuixIconRenderingTest : InstrumentationTestCase() {
             val x = 160f + i * 320f
             canvas.drawText(('A'+i).toString(), x, 48f, paint)
             if (i < 2) {
-                val drawable = instrumentation.targetContext.getDrawable(if (i == 0) io.secure.keyboard.R.drawable.ic_keyboard_resize_diagonal else io.secure.keyboard.R.drawable.ic_keyboard_open_in_full)!!.mutate()
+                val drawable = instrumentation.targetContext.getDrawable(if (i == 0) io.secure.keyboard.R.drawable.ic_keyboard_resize_diagonal else io.secure.keyboard.R.drawable.ic_keyboard_keyboard)!!.mutate()
                 drawable.setTint(paint.color)
                 drawable.setBounds((x-44).toInt(), 90, (x+44).toInt(), 178)
                 drawable.draw(canvas)

@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.first
 
 /** Current edit survives rotation in memory; private text never enters saved-state bundles. */
 internal data class ContentEdit(val category: String, val id: String? = null,
-    val first: TextFieldValue = TextFieldValue(), val second: TextFieldValue = TextFieldValue(), val reasoningEffort: String = "low")
+    val first: TextFieldValue = TextFieldValue(), val second: TextFieldValue = TextFieldValue(), val reasoningEffort: String = "low", val modelId: String = "")
 
 internal class SettingsModel(app: Application) : AndroidViewModel(app) {
     val apiStore = ApiConfigurationStore(app)
@@ -91,7 +91,7 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
             val text = current.first.text
             require(text.isNotBlank()) { "内容不能为空" }
             when (current.category) {
-                "custom_ai" -> content.saveAiPreset(current.id, text, current.second.text, current.reasoningEffort)
+                "custom_ai" -> content.saveAiPreset(current.id, text, current.second.text, current.reasoningEffort, current.modelId)
                 "phrases" -> if (current.id == null) content.addPhrase(text) else content.updatePhrase(current.id, text)
                 "dictionary", "english_dictionary" -> {
                     val kind = if (current.category == "dictionary") DictionaryKind.CHINESE else DictionaryKind.ENGLISH

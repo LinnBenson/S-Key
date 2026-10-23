@@ -51,7 +51,7 @@ internal object InputController {
         contentQueries.clear()
         val releasePanel = panel != "keys" || translation.enabled
         stopAiRequest()
-        clearAiConversation(); aiMode = false; aiCustom = ""; aiCustomReasoning = "low"; aiCustomPresetName = ""; aiEditingInstruction = false; aiSelectionTarget.revoke()
+        clearAiConversation(); aiMode = false; aiCustom = ""; aiCustomReasoning = "low"; aiCustomPresetName = ""; aiCustomModel = ""; aiPresetLoadGeneration++; aiSelectionTarget.revoke()
         translation.close()
         releaseAssistantViews()
         if (assistantAreaInitialized) assistantArea.removeAllViews()
@@ -217,10 +217,6 @@ internal object InputController {
                 return true
             }
             if (aiMode) stopAiRequest()
-            if (aiMode && aiEditingInstruction) {
-                if (aiCustom.length + value.length > io.secure.keyboard.data.ContentStore.MAX_AI_PROMPT_CHARACTERS) { toast("指令最多${io.secure.keyboard.data.ContentStore.MAX_AI_PROMPT_CHARACTERS}字符"); return false }
-                aiCustom += value; resetAiConversation(); translation.invalidate(); updateTranslationPreview(); return true
-            }
             val accepted = translation.edit(translation.text + value)
             if (!accepted) toast("原文最多 5000 字符")
             updateTranslationPreview()
@@ -506,8 +502,7 @@ internal object InputController {
                 return
             }
         }
-        if (translation.enabled && translation.text.isEmpty() && code.isEmpty() &&
-            !(aiMode && aiEditingInstruction)) {
+        if (translation.enabled && translation.text.isEmpty() && code.isEmpty()) {
             val now = SystemClock.uptimeMillis()
             if (tap && assistantBackspaceTapAt != 0L &&
                 now - assistantBackspaceTapAt <= ViewConfiguration.getDoubleTapTimeout()) {
@@ -524,10 +519,6 @@ internal object InputController {
             refreshCandidates()
         } else if (translation.enabled) {
             if (aiMode) stopAiRequest()
-            if (aiMode && aiEditingInstruction) {
-                if (aiCustom.isNotEmpty()) { aiCustom = aiCustom.substring(0, aiCustom.offsetByCodePoints(aiCustom.length,-1)); resetAiConversation() }
-                translation.invalidate(); updateTranslationPreview(); return
-            }
             translation.backspace(); updateTranslationPreview(); refreshCandidates()
         } else {
             // Delegate selection and Unicode deletion to the host's standard Backspace handler.

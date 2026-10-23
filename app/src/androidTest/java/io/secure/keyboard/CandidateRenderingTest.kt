@@ -184,7 +184,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 if(session.enabled) retired.add(java.lang.ref.WeakReference(field<View>("translationResultView")))
                 service.onFinishInputView(false)
                 session.close()
-                for(name in listOf("translationTextView","translationResultView","translationAction","translationInsert","aiInstructionView","aiResultNavigation","aiCommandVoice"))
+                for(name in listOf("translationTextView","translationResultView","translationAction","translationInsert","aiResultNavigation","aiCommandVoice"))
                     assertNull("Closed panel retains $name",field<Any?>(name))
                 assertEquals("",session.text); assertEquals("",session.result)
                 assertEquals("",field<String>("aiCustom"))
@@ -270,9 +270,9 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testNewAiRequestDoesNotWaitForOldSocketOrOtherTools() {
         val release = CountDownLatch(1)
-        val started = CountDownLatch(3)
+        val started = CountDownLatch(2)
         try {
-            for (name in listOf("aiWorker", "translationWorker", "modelCatalogWorker")) {
+            for (name in listOf("aiWorker", "translationWorker")) {
                 field<java.util.concurrent.ThreadPoolExecutor>(name).execute {
                     started.countDown(); try { release.await(5, TimeUnit.SECONDS) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
                 }
@@ -281,12 +281,86 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             val next = CountDownLatch(1)
             field<java.util.concurrent.ThreadPoolExecutor>("aiWorker").execute { next.countDown() }
             assertTrue("Latest AI request waited behind unrelated/old request", next.await(2, TimeUnit.SECONDS))
-            for (name in listOf("aiWorker", "translationWorker", "modelCatalogWorker")) {
+            for (name in listOf("aiWorker", "translationWorker")) {
                 val executor = field<java.util.concurrent.ThreadPoolExecutor>(name)
                 assertTrue(executor.maximumPoolSize <= 2)
                 assertTrue(executor.allowsCoreThreadTimeOut())
             }
         } finally { release.countDown() }
+    }
+
+    fun testAiToneMenuRejectsRetiredClicksAndReleasesSixtyPopups() {
+        val retired = mutableListOf<java.lang.ref.WeakReference<View>>()
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val previousTone = prefs.getString("aiTone", null)
+        fun find(view: View, text: String): View? {
+            if (view is TextView && view.text.toString() == text) return view
+            if (view is ViewGroup) for (i in 0 until view.childCount) find(view.getChildAt(i), text)?.let { return it }
+            return null
+        }
+        try {
+            onMainChecked {
+                invoke("openTool", "ai")
+                setField("aiPresetLoadGeneration", field<Int>("aiPresetLoadGeneration") + 1)
+                setField("aiTask", "tone"); setField("aiTone", "自然"); invoke("renderBody")
+            }
+            repeat(60) { cycle ->
+                onMainChecked {
+                    find(field<View>("assistantArea"), "语气: 自然")!!.performClick()
+                    val window = field<android.widget.PopupWindow>("popup")
+                    val content = window.contentView
+                    retired.add(java.lang.ref.WeakReference(content))
+                    val formal = find(content, "正式")!!
+                    assertTrue(find(content, "自然")!!.isSelected)
+                    if (cycle % 2 == 0) {
+                        invoke("renderBody") // Anchor detached: menu must close and release its children.
+                        assertNull(field<android.widget.PopupWindow?>("popup"))
+                        formal.performClick()
+                        assertEquals("自然", field<String>("aiTone"))
+                    } else {
+                        formal.performClick()
+                        assertEquals("正式", field<String>("aiTone"))
+                        assertNull(field<android.widget.PopupWindow?>("popup"))
+                        setField("aiTone", "自然"); invoke("renderBody")
+                    }
+                }
+                instrumentation.waitForIdleSync()
+            }
+            val info = android.os.Debug.MemoryInfo().also { android.os.Debug.getMemoryInfo(it) }
+            instrumentation.sendStatus(0, android.os.Bundle().apply { putString("audit", "60 menus pssKiB=${info.totalPss}") })
+            repeat(6) { instrumentation.waitForIdleSync(); Runtime.getRuntime().gc(); System.runFinalization(); SystemClock.sleep(200) }
+            assertEquals("Dismissed popup content retained", 0, retired.count { it.get() != null })
+        } finally {
+            onMainChecked { invoke("cancelTransient") }
+            prefs.edit().apply { if (previousTone == null) remove("aiTone") else putString("aiTone", previousTone) }.commit()
+        }
+    }
+
+    fun testAiTabsHideEmptyCustomAndHaveNoOptionsRow() {
+        val folder = File(context.cacheDir, "empty-ai-tabs").apply { deleteRecursively(); mkdirs() }
+        val isolated = object : android.content.ContextWrapper(context) {
+            override fun getApplicationContext(): Context = this
+            override fun getNoBackupFilesDir() = folder
+        }
+        val original = field<ContentStore>("content")
+        try {
+            onMainChecked {
+                setField("content", ContentStore(isolated)); invoke("openTool", "ai")
+                setField("aiTask", "custom"); invoke("fillDefaultCustomAiPreset")
+            }
+            waitFor("Empty custom falls back") { field<String>("aiTask") == "polish" }
+            onMainChecked {
+                assertNull(field<TextView?>("aiCustomTab"))
+                fun texts(v: View): List<String> = (if (v is TextView) listOf(v.text.toString()) else emptyList()) +
+                    if (v is ViewGroup) (0 until v.childCount).flatMap { texts(v.getChildAt(it)) } else emptyList()
+                val labels = texts(field<View>("assistantArea"))
+                assertTrue(labels.any { it.startsWith("语气: ") })
+                assertFalse(labels.any { it == "自定义" || it.contains("选择 Grok 模型") || it.contains("输入自定义指令") })
+            }
+        } finally {
+            onMainChecked { invoke("cancelTransient"); setField("content", original) }
+            folder.deleteRecursively()
+        }
     }
 
     fun testNamedCustomAiSelectorOnlySelectsAndFillsPrompt() {
@@ -297,6 +371,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
         val original = field<io.secure.keyboard.data.ContentStore>("content")
         val store = io.secure.keyboard.data.ContentStore(isolated)
+        val previousPreset = SettingsStore(context).lastCustomAiPresetId
         fun find(view: View, description: String): View? {
             if (view.contentDescription?.toString() == description) return view
             if (view is ViewGroup) for (i in 0 until view.childCount) find(view.getChildAt(i), description)?.let { return it }
@@ -314,7 +389,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             }
             waitFor("First custom preset auto-filled") { field<String>("aiCustom") == "缩短到两句话" }
             onMainChecked {
-                find(field<View>("assistantArea"), "选择自定义 AI")!!.performClick()
+                field<TextView>("aiCustomTab").performClick()
             }
             waitFor("Named presets loaded") { field<android.widget.PopupWindow?>("popup")?.contentView?.let { find(it,"已选择自定义 AI：简短回复") } != null }
             instrumentation.waitForIdleSync()
@@ -336,13 +411,15 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                     if (v is ViewGroup) for (i in 0 until v.childCount) noDelete(v.getChildAt(i))
                 }
                 noDelete(view)
-                find(view, "已选择自定义 AI：简短回复")!!.performClick()
-                assertEquals("缩短到两句话", field<String>("aiCustom"))
-                assertFalse(field<Boolean>("aiEditingInstruction"))
+                find(view, "选择自定义 AI：邮件润色")!!.performClick()
+                assertEquals("保留原意并润色邮件", field<String>("aiCustom"))
                 assertNull(field<android.widget.PopupWindow?>("popup"))
                 assertTrue(connection.committed.isEmpty())
             }
+            onMainChecked { invoke("openTool", "ai"); invoke("openTool", "ai") }
+            waitFor("Last custom preset restored") { field<String>("aiCustomPresetName") == "邮件润色" }
         } finally {
+            SettingsStore(context).lastCustomAiPresetId = previousPreset
             onMainChecked { invoke("cancelTransient"); setField("content", original) }
             folder.deleteRecursively()
         }
@@ -611,15 +688,11 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
-    fun testAiDraftAndCustomInstructionStayOutOfHost() {
+    fun testAiDraftStaysOutOfHost() {
         onMainChecked {
             invoke("openTool", "ai"); setField("chinese", false)
             invoke("type", "hello")
             val session=field<io.secure.keyboard.translation.TranslationSession>("translation")
-            assertEquals("hello",session.text)
-            setField("aiTask","custom"); setField("aiEditingInstruction",true)
-            invoke("type","short😀"); invoke("backspace")
-            assertEquals("short",field<String>("aiCustom"))
             assertEquals("hello",session.text)
             assertTrue(connection.committed.isEmpty())
             val token=session.begin()
@@ -814,7 +887,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testSavedPromptsReachActualRequestWithoutCustomLeakage() {
         val promptPrefs=context.getSharedPreferences("ai_builtin_prompts",Context.MODE_PRIVATE)
-        val ids=listOf("common","custom_common","polish","correct","translate","tone_正式")
+        val ids=listOf("common","custom_common","polish","correct","translate","tone_正式", "model_polish", "model_correct", "model_translate", "model_tone_正式")
         val priorPrompts=ids.associateWith { promptPrefs.getString(it,null) }
         val prompts=io.secure.keyboard.ai.AiPromptStore(context)
         val conversations=io.secure.keyboard.data.AiConversationStore(context);val priorConversation=conversations.load()
@@ -865,8 +938,9 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             onMainChecked {
                 settings.aiAutoApply=false
                 setField("aiConfiguration",provider);setField("aiCallFactory",factory)
-                invoke("openTool","ai");setField("aiModel","test-model")
+                invoke("openTool","ai")
             }
+            onMainChecked { setField("aiPresetLoadGeneration", field<Int>("aiPresetLoadGeneration") + 1) }
             assertInitial(send(),"用户填写的独立指令")
             prompts.save("custom_common","统一要求 A")
             assertInitial(send(),"统一要求 A\n\n用户填写的独立指令")
@@ -882,13 +956,22 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             assertInitial(send(),"用户填写的独立指令")
             for((task,id) in listOf("polish" to "polish","correct" to "correct","tone" to "tone_正式","translate" to "translate")) {
                 prompts.save(id,"修改后的 $id 提示词")
+                prompts.saveModel(id, "override-$task")
                 val body=send(task)
+                assertEquals("override-$task", body.getString("model"))
                 val system=body.getJSONArray("input").getJSONObject(0).getString("content")
-                assertTrue(system.startsWith("普通 AI 隔离标记\n"))
+                if (task != "translate") assertTrue(system.startsWith("普通 AI 隔离标记\n"))
+                else assertEquals("修改后的 $id 提示词", system)
                 assertTrue(system.endsWith("修改后的 $id 提示词"))
                 assertFalse(system.contains("用户填写的独立指令"))
                 assertFalse(body.has("previous_response_id"))
             }
+            prompts.saveModel("polish", "")
+            assertEquals("test-model", send("polish").getString("model"))
+            onMainChecked { setField("aiCustomModel", "custom-override") }
+            assertEquals("custom-override", send().getString("model"))
+            onMainChecked { setField("aiCustomModel", "") }
+            assertEquals("test-model", send().getString("model"))
         } finally {
             onMainChecked { invoke("stopAiRequest");settings.aiAutoApply=auto }
             conversations.clear();if(priorConversation!=null) conversations.save(priorConversation)
@@ -936,7 +1019,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             onMainChecked {
                 settings.aiAutoApply=false
                 setField("aiConfiguration",provider);setField("aiCallFactory",factory)
-                invoke("openTool","ai");setField("aiTask","polish");setField("aiModel","test-model")
+                invoke("openTool","ai");setField("aiTask","polish")
             }
             send("original");finish(1)
             assertFalse(requests[0].has("previous_response_id"))
@@ -965,7 +1048,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 invoke("openTool","ai")
                 assertTrue(field<List<*>>("aiResults").isEmpty())
                 assertNotNull(store.load())
-                invoke("openTool","ai");setField("aiTask","polish");setField("aiModel","test-model")
+                invoke("openTool","ai");setField("aiTask","polish")
                 invoke("restoreAiConversation");invoke("updateAiPreview")
                 assertEquals("续聊 id3x",field<TextView>("assistantSourceTitle").text.toString())
             }

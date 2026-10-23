@@ -30,6 +30,21 @@ class BilingualContentStoreTest : AndroidTestCase() {
         super.tearDown()
     }
 
+    fun testPresetModelPersistsAndBlankResets() {
+        store.saveAiPreset(null, "模型测试", "指令", "high", " model-a ")
+        val item = store.aiPresets().single()
+        assertEquals("model-a", item.modelId)
+        assertEquals(item, ContentStore(sandbox).aiPresets().single())
+        assertEquals(item, store.settingsSnapshot().aiPresets.single())
+        val backup = java.io.ByteArrayOutputStream()
+        store.writeBackup(backup)
+        store.restoreBackup(backup.toByteArray().inputStream())
+        assertEquals(item.modelId, store.aiPresets().single().modelId)
+        store.saveAiPreset(item.id, item.name, item.prompt, item.reasoningEffort, "")
+        assertEquals("", store.aiPresets().single().modelId)
+        try { store.saveAiPreset(item.id, item.name, item.prompt, "low", "bad id"); fail("Invalid model accepted") }
+        catch (_: IllegalArgumentException) {}
+    }
     fun testNamedAiPresetsPersistAndSupportEditingAndOrdering() {
         store.saveAiPreset(null, "润色", "保留原意并润色")
         store.saveAiPreset(null, "简短", "缩短到两句话")

@@ -11,6 +11,12 @@ import javax.net.ssl.HttpsURLConnection
 
 @Suppress("DEPRECATION")
 class AiWritingTest : AndroidTestCase() {
+    fun testCustomTabTitleUsesFiveCharacterLimit() {
+        assertEquals("五个字符名", AiWriting.customTabTitle("五个字符名"))
+        assertEquals("超过五个…", AiWriting.customTabTitle("超过五个字符名"))
+        assertEquals("😀甲乙丙…", AiWriting.customTabTitle("😀甲乙丙丁戊"))
+        assertEquals("", AiWriting.customTabTitle(""))
+    }
     fun testDeepResponseIsRejectedAndNextRequestStillWorks() {
         val nested = "{\"ignored\":" + "[".repeat(10000) + "0" + "]".repeat(10000) + "}"
         try {
@@ -86,14 +92,14 @@ class AiWritingTest : AndroidTestCase() {
         }
     }
     fun testPayloadAndInstructions() {
-        val body=AiWriting.payload("chosen-model","original text",AiWriting.instruction("tone","礼貌","英语",""))
+        val body=AiWriting.payload("chosen-model","original text",AiWriting.instruction("tone","礼貌",""))
         assertEquals("chosen-model",body.getString("model"))
         assertEquals("low", body.getJSONObject("reasoning").getString("effort"))
         assertTrue(body.getBoolean("stream")); assertTrue(body.getBoolean("store"))
         assertFalse(body.has("previous_response_id")); assertFalse(body.has("messages"))
         assertTrue(body.getJSONArray("input").getJSONObject(0).getString("content").contains("礼貌"))
         assertEquals("original text",body.getJSONArray("input").getJSONObject(1).getString("content"))
-        assertEquals("summarize",AiWriting.instruction("custom","自然","英语"," summarize "))
+        assertEquals("summarize",AiWriting.instruction("custom","自然"," summarize "))
     }
     fun testCustomUsesOnlyUserPromptAndTranslationIgnoresTone() {
         val body=AiWriting.payload("model","source","my exact prompt",custom=true)
@@ -102,7 +108,7 @@ class AiWritingTest : AndroidTestCase() {
         val followup=AiWriting.payload("model","new requirement","my exact prompt",custom=true,previousResponseId="resp_parent")
         assertEquals(1,followup.getJSONArray("input").length())
         assertFalse(followup.toString().contains("my exact prompt"))
-        assertEquals(AiWriting.instruction("translate","粗鲁","英语",""),AiWriting.instruction("translate","礼貌","英语",""))
+        assertEquals(AiWriting.instruction("translate","粗鲁",""),AiWriting.instruction("translate","礼貌",""))
     }
     fun testCustomReasoningAppliesToInitialAndContinuationWithoutSharedPrompt() {
         for (effort in listOf("low", "medium", "high", "xhigh")) {
