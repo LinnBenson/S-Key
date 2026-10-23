@@ -2,7 +2,7 @@
 
 - Default sources fetched from pinned GitHub revisions; URLs, input/output hashes, entry counts and conversion changes are in `third_party/open_dictionaries/manifest.json`.
 - APK base TSV hashes match all three converted sources. Counts: Wubi 136916, Pinyin 65125, English 25000. Six protected names and same-name replacement remain supported.
-- WeType data removed from project/build inputs. Upstream attribution and applicable licenses are retained.
+- Bundled dictionaries match the current source manifest. Upstream attribution and applicable licenses are retained.
 - 261 JVM tests and four full-data/index Python checks passed. Eight device functional tests plus the corrected resource-reclamation test passed (nine device cases total).
 - Twelve successive apply cycles: every previous SQLite connection/file descriptor closed; old snapshot weak references cleared after GC; only the current snapshot is open after lookup. All three languages return new data and do not fall back to packaged words. Superseded compiled files are removed after readers close.
 - Controlled test process heap: Java 2.23 → 2.24 MiB; native 3.66 → 3.67 MiB. These are test-process observations, not a guarantee of zero Android/OS caching.

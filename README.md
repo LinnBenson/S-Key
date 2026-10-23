@@ -58,7 +58,7 @@
 
 三个高优先级文件默认只有注释，没有词条。六个默认文件**不能删除或重命名**，可以编辑、导出，以及通过导入同名文件覆盖内容。其他新增词库可以删除、重命名。
 
-默认数据来自固定版本的 Rime 五笔、Rime 简体拼音及 FrequencyWords / SCOWL 英文词频数据，未包含微信输入法提取词库。来源、转换过程、许可与 SHA-256 见[词库来源说明](third_party/open_dictionaries/README.md)。
+默认数据来自固定版本的 Rime 五笔、Rime 简体拼音及 FrequencyWords / SCOWL 英文词频数据。来源、转换过程、许可与 SHA-256 见[词库来源说明](third_party/open_dictionaries/README.md)。
 
 ### 编辑、导入与生效
 
