@@ -2,7 +2,7 @@ package io.secure.keyboard.engine
 
 import java.io.Reader
 
-/** Immutable bundled keywords only. Never retains queries or user content. */
+/** Immutable shortcut configuration. Never retains input queries or usage history. */
 class EmojiLexicon(reader: Reader) {
     private val byKeyword: Map<String, List<String>> = buildMap {
         reader.buffered().useLines { lines ->
@@ -40,5 +40,17 @@ class EmojiLexicon(reader: Reader) {
         }
         while (iterator.hasNext()) yield(iterator.next())
     }.distinctBy { it.text }
+
+    /** Direct shortcuts also work when the keyword is absent from the dictionaries. */
+    fun appendForKeyword(options: Sequence<PinyinDecoder.Option>, keyword: String): Sequence<PinyinDecoder.Option> {
+        val matches = byKeyword[keyword].orEmpty()
+        if (matches.isEmpty()) return options
+        return sequence {
+            val iterator = options.iterator()
+            repeat(3) { if (iterator.hasNext()) yield(iterator.next()) }
+            matches.forEach { yield(PinyinDecoder.Option(it, keyword.length)) }
+            while (iterator.hasNext()) yield(iterator.next())
+        }.distinctBy { it.text }
+    }
 
 }

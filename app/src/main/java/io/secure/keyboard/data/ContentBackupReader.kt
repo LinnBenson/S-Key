@@ -29,14 +29,14 @@ internal object ContentBackupReader {
                 val name = reader.nextName(); require(fields.add(name))
                 when (name) {
                     "format" -> { require(reader.peek() == JsonToken.STRING); require(reader.nextString() == "skey-content-backup"); root.put(name, "skey-content-backup") }
-                    "version" -> { require(reader.peek() == JsonToken.NUMBER); val version = reader.nextString(); require(version in setOf("1", "2")); root.put(name, version.toInt()) }
+                    "version" -> { require(reader.peek() == JsonToken.NUMBER); val version = reader.nextString(); require(version in setOf("1", "2", "3")); root.put(name, version.toInt()) }
                     "data" -> root.put(name, data(reader))
                     "settings" -> root.put(name, settings(reader))
                     else -> error("Unknown backup field")
                 }
             }
             reader.endObject()
-            require(fields == (setOf("format", "version", "data") + if(root.optInt("version")==2) setOf("settings") else emptySet<String>()) && reader.peek() == JsonToken.END_DOCUMENT)
+            require(fields == (setOf("format", "version", "data") + if(root.optInt("version")>=2) setOf("settings") else emptySet<String>()) && reader.peek() == JsonToken.END_DOCUMENT)
             root
         }
     }
@@ -84,7 +84,7 @@ internal object ContentBackupReader {
                     } else {
                         require(reader.peek() == JsonToken.STRING)
                         val value = reader.nextString()
-                        val max = when (field) { "id" -> 128; "name" -> 40; "prompt" -> 2000; "reasoningEffort" -> 6; "text" -> 1_000_000; else -> 4_000_000 }
+                        val max = when (field) { "id" -> 128; "name" -> 40; "prompt" -> ContentStore.MAX_AI_PROMPT_CHARACTERS; "reasoningEffort" -> 6; "text" -> 1_000_000; else -> 4_000_000 }
                         require(value.length <= max); row.put(field, value)
                     }
                 }

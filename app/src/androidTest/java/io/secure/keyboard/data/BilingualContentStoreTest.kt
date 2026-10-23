@@ -48,13 +48,23 @@ class BilingualContentStoreTest : AndroidTestCase() {
         store.addPhrase("保留常用语")
         store.saveAiPreset(null, "邮件", "润色邮件")
         val preset = store.aiPresets().single()
-        for ((name, prompt) in listOf("邮件" to "重复", "" to "提示词", "长".repeat(41) to "提示词", "名称" to "", "名称" to "长".repeat(2001))) {
+        for ((name, prompt) in listOf("邮件" to "重复", "" to "提示词", "长".repeat(41) to "提示词", "名称" to "", "名称" to "长".repeat(ContentStore.MAX_AI_PROMPT_CHARACTERS + 1))) {
             try { store.saveAiPreset(null, name, prompt); fail("Invalid preset accepted") } catch (_: IllegalArgumentException) {}
         }
         assertEquals(listOf(preset), store.aiPresets())
         store.deleteAiPreset(preset.id)
         assertTrue(store.aiPresets().isEmpty())
         assertEquals("保留常用语", store.phrases().single().text)
+    }
+
+    fun testLongAiPromptsRoundTripAtMaximumInventory() {
+        val prompt = "长".repeat(20_000)
+        repeat(100) { store.saveAiPreset(null, "指令$it", prompt) }
+        val output = java.io.ByteArrayOutputStream()
+        store.writeBackup(output)
+        store.restoreBackup(output.toByteArray().inputStream())
+        assertEquals(100, store.aiPresets().size)
+        assertTrue(store.aiPresets().all { it.prompt == prompt })
     }
 
     fun testClearAllRemovesAiPresetsAndStaleEditsCannotRecreateThem() {

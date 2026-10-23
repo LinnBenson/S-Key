@@ -20,6 +20,8 @@ class SettingsPolicyBackupTest : AndroidTestCase() {
         sandbox=object: ContextWrapper(context) {
             override fun getApplicationContext()=this
             override fun getNoBackupFilesDir()=root
+            override fun getCacheDir()=File(root,"cache").apply { mkdirs() }
+            override fun getExternalCacheDirs()=emptyArray<File>()
             override fun getSharedPreferences(name: String,mode: Int)=context.getSharedPreferences("$tag-$name",mode)
         }
     }
@@ -86,4 +88,101 @@ class SettingsPolicyBackupTest : AndroidTestCase() {
         val legacy=JSONObject(raw).put("version",1).apply { remove("settings") }
         s.theme="light";store.restoreBackup(legacy.toString().byteInputStream());assertEquals("light",s.theme)
     }
+    fun testEmojiShortcutsAndUiDesignRoundTripAndLegacyPreservation() {
+        val store = ContentStore(sandbox)
+        val settings = SettingsStore(sandbox)
+        val shortcuts = EmojiShortcutStore(sandbox)
+        shortcuts.save(null, "🧑‍💻", "程序员, coder,程序员")
+        shortcuts.delete("😀")
+        assertEquals(listOf("程序员", "coder"), shortcuts.entries().last().keywords)
+        assertTrue(shortcuts.lexicon().appendTo(listOf("coder")).contains("🧑‍💻"))
+        assertFalse(shortcuts.lexicon().appendTo(listOf("开心")).contains("😀"))
+        settings.keyBorderWidth = 3; settings.keyHorizontalGap = 12
+        settings.keyVerticalGap = 10; settings.keyCornerRadius = 22; settings.enterCornerRadius = 18
+        for (inner in listOf(false, true)) for (landscape in listOf(false, true)) {
+            settings.saveProfile(inner, landscape, settings.profile(inner, landscape).copy(heightDp = if(inner) 330 else 300))
+        }
+        val output = ByteArrayOutputStream(); store.writeBackup(output)
+        val backup = JSONObject(output.toString("UTF-8"))
+        assertEquals(3, backup.getInt("version"))
+        shortcuts.delete("🧑‍💻"); settings.resetUiDesign()
+        store.restoreBackup(backup.toString().byteInputStream())
+        assertTrue(shortcuts.lexicon().appendTo(listOf("程序员")).contains("🧑‍💻"))
+        assertEquals(3, settings.keyBorderWidth); assertEquals(12, settings.keyHorizontalGap)
+        assertEquals(10, settings.keyVerticalGap); assertEquals(22, settings.keyCornerRadius)
+        assertEquals(18, settings.enterCornerRadius)
+        for (inner in listOf(false, true)) for (landscape in listOf(false, true)) {
+            assertEquals(if(inner) 330 else 300, settings.profile(inner, landscape).heightDp)
+        }
+        val legacy = JSONObject(backup.toString()).put("version", 2)
+        legacy.getJSONObject("settings").remove("uiDesign")
+        legacy.getJSONObject("settings").remove("emojiShortcuts")
+        settings.keyBorderWidth = 2; shortcuts.delete("🧑‍💻")
+        store.restoreBackup(legacy.toString().byteInputStream())
+        assertEquals(2, settings.keyBorderWidth)
+        assertFalse(shortcuts.lexicon().appendTo(listOf("程序员")).contains("🧑‍💻"))
+        val invalid = JSONObject(backup.toString())
+        invalid.getJSONObject("settings").getJSONObject("uiDesign").put("keyDesign_radius", 31)
+        try { store.restoreBackup(invalid.toString().byteInputStream()); fail("Out of range geometry accepted") }
+        catch (_: IllegalArgumentException) {}
+        assertEquals(2, settings.keyBorderWidth)
+    }
+
+    fun testDeletingAllEmojiShortcutsDoesNotRestoreDefaults() {
+        val prefs = sandbox.getSharedPreferences("settings", 0)
+        val shortcuts = EmojiShortcutStore(sandbox)
+        assertTrue(shortcuts.entries().isNotEmpty())
+        prefs.edit().putString(EmojiShortcutStore.KEY, "[]").commit()
+        shortcuts.save(null, "❤️", "爱,喜欢")
+        shortcuts.delete("❤️")
+        assertTrue(EmojiShortcutStore(sandbox).entries().isEmpty())
+        assertEquals(listOf("爱"), shortcuts.lexicon().appendTo(listOf("爱")))
+        val store = ContentStore(sandbox); val output = ByteArrayOutputStream(); store.writeBackup(output)
+        prefs.edit().remove(EmojiShortcutStore.KEY).commit()
+        store.restoreBackup(output.toByteArray().inputStream())
+        assertTrue(shortcuts.entries().isEmpty())
+    }
+
+    fun testClearUserContentIncludesPinsButPreservesUnrelatedSettings() {
+        val store = ContentStore(sandbox); val settings = SettingsStore(sandbox)
+        store.addClipboard("pinned clip"); store.setClipboardPinned(store.clipboard().single().id, true)
+        store.addPhrase("pinned phrase"); store.setPhrasePinned(store.phrases().single().id, true)
+        store.addDictionary("测试", "ceshi")
+        store.addDictionary("example", "example", DictionaryKind.ENGLISH)
+        store.useEmoji("😀")
+        store.saveAiPreset(null, "keep AI", "keep prompt")
+        settings.keyCornerRadius = 30; settings.theme = "dark"
+        settings.saveProfile(false, false, settings.profile(false, false).copy(heightDp=350))
+        val prefs = sandbox.getSharedPreferences("settings", 0)
+        prefs.edit().putString("builtin_dictionary_revision", "keep-builtins").commit()
+        val shortcuts = EmojiShortcutStore(sandbox)
+        shortcuts.save(null, "🧑‍💻", "coder")
+        val epoch = store.emojiGeneration()
+        store.clearAll()
+        store.useEmoji("😂", epoch)
+        assertTrue(store.clipboard().isEmpty()); assertTrue(store.phrases().isEmpty())
+        assertTrue(store.dictionary().isEmpty())
+        assertTrue(store.dictionary(DictionaryKind.ENGLISH).isEmpty())
+        assertTrue(store.recentEmoji().isEmpty())
+        assertTrue(store.aiPresets().isEmpty())
+        assertEquals(30, settings.keyCornerRadius); assertEquals("dark", settings.theme)
+        assertEquals(350, settings.profile(false, false).heightDp)
+        assertEquals("keep-builtins", prefs.getString("builtin_dictionary_revision", null))
+        assertTrue(shortcuts.entries().any { it.emoji == "🧑‍💻" })
+    }
+
+    fun testDamagedShortcutConfigurationCannotDisableTypingAndRecoveryInvalidatesCache() {
+        val prefs = sandbox.getSharedPreferences("settings", 0)
+        val store = EmojiShortcutStore(sandbox)
+        prefs.edit().putString(EmojiShortcutStore.KEY, "broken-json").commit()
+        assertEquals(listOf("开心"), store.lexicon().appendTo(listOf("开心")))
+        assertEquals("broken-json", prefs.getString(EmojiShortcutStore.KEY, null))
+        store.reset()
+        assertTrue(store.lexicon().appendTo(listOf("开心")).contains("😀"))
+        store.delete("😀")
+        try { store.save("😀", "😀", "开心"); fail("Stale edit resurrected a deleted shortcut") }
+        catch (_: IllegalArgumentException) {}
+        assertFalse(store.entries().any { it.emoji == "😀" })
+    }
+
 }

@@ -305,6 +305,8 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
             )) {
                 config.lastChineseLanguage = false
                 startEditor(type)
+                // Numeric fields open on the symbol page, whose bottom row contains punctuation.
+                if (field<Boolean>("symbols")) key("ABC").performClick()
                 key("切换中文和英文").performClick()
                 assertLetterMode(true)
                 assertTrue("An explicit choice in a special field has normal preference semantics",

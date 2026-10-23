@@ -145,15 +145,16 @@ internal object CandidateController {
                         (base.filter { it.source==Source.WUBI }.map { it.text } + base.filter { it.source!=Source.WUBI }.map { it.text }).asSequence()
                     }
                     val ranked=io.secure.keyboard.engine.CandidateSources.merge(query,baseline,user,zh,{it.reading},{it.word})
-                    val words=if(zh) sequence {
+                    val words=sequence {
                         val leading=ranked.take(3).toList()
                         yieldAll(engine.appendEmoji(leading))
                         yieldAll(ranked.drop(3))
-                    }.distinct() else ranked
+                    }.distinct()
                     words.map { io.secure.keyboard.engine.PinyinDecoder.Option(it,query.length) }
                 }
             val decorated = if (zh && mode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) engine.appendPinyinEmoji(source) else source
-            val pager = io.secure.keyboard.engine.CandidatePager(decorated.takeWhile { !destroyed && seq==generation })
+            val shortcuts = engine.appendEmojiKeyword(decorated, query)
+            val pager = io.secure.keyboard.engine.CandidatePager(shortcuts.takeWhile { !destroyed && seq==generation })
             val decoded = pager.next()
             val results = decoded.map { it.text }
             if (destroyed || seq != generation) return@query

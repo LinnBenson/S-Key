@@ -62,6 +62,9 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal val worker = Executors.newSingleThreadExecutor()
     internal val candidateQueries = LatestTaskMailbox(worker)
     internal val clipboardWrites = BoundedTaskQueue(worker, 32, 262_144)
+    // Drain accepted tiny history writes on service destruction without retaining its views.
+    internal val emojiWorker = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L,
+        java.util.concurrent.TimeUnit.MILLISECONDS, java.util.concurrent.ArrayBlockingQueue(64))
     internal val contentQueries = LatestTaskMailbox(worker)
     @Volatile internal var destroyed = false
     internal val main = Handler(Looper.getMainLooper())
@@ -307,7 +310,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             else if (key == "toolbarPins" || key == "traditionalOutput") main.post {
                 if (active) { renderHeader(); if (panel == "more") renderBody() }
             }
-            else if (key == "fuzzyPairs" || key == "fuzzyPinyin" || key == "englishCompletion" || key == "builtin_dictionary_revision")
+            else if (key == "fuzzyPairs" || key == "fuzzyPinyin" || key == "englishCompletion" || key == "builtin_dictionary_revision" || key == "emojiShortcuts")
                 main.post { if (active) refreshCandidates() }
         }
     internal lateinit var profile: SettingsStore.LayoutProfile
@@ -464,6 +467,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         destroyed = true
         active = false
         clipboardWrites.close()
+        emojiWorker.shutdown()
         contentQueries.close()
         candidateQueries.close()
         voiceSelectionChecks.close()

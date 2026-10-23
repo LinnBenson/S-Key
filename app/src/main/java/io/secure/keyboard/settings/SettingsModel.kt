@@ -23,7 +23,7 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
     fun fetchApiModels() {
         val snapshot = apiDraft
         var result = emptyList<String>()
-        task(success = {
+        task(refreshContent = false, success = {
             if (apiDraft.grokUrl == snapshot.grokUrl && apiDraft.grokKey == snapshot.grokKey) {
                 apiModels = result
                 message = if (result.isEmpty()) "此密钥未返回可用模型" else "已获取 ${result.size} 个模型，请选择后保存"
@@ -55,32 +55,30 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
     init { prefs.registerOnSharedPreferenceChangeListener(listener); loadApi(); refresh() }
     override fun onCleared() { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
 
+    private var contentSnapshot: ContentStore.SettingsSnapshot? = null
+
     private suspend fun loadContent() {
-        val snapshot = withContext(Dispatchers.IO) {
-            Snapshot(content.clipboardForDisplay(), content.phrasesForDisplay(),
-                content.dictionary(), content.dictionary(DictionaryKind.ENGLISH), content.recentEmoji(), content.aiPresets())
-        }
-        clipboard = snapshot.clips; phrases = snapshot.phrases
+        val snapshot = withContext(Dispatchers.IO) { content.settingsSnapshot(contentSnapshot) }
+        contentSnapshot = snapshot
+        clipboard = snapshot.clipboard; phrases = snapshot.phrases
         chinese = snapshot.chinese; english = snapshot.english; emoji = snapshot.emoji; aiPresets = snapshot.aiPresets
     }
-    private data class Snapshot(val clips: List<ContentStore.ClipboardItem>, val phrases: List<ContentStore.Phrase>,
-        val chinese: List<ContentStore.DictionaryEntry>, val english: List<ContentStore.DictionaryEntry>, val emoji: List<String>, val aiPresets: List<ContentStore.AiPreset>)
 
     /** Picker results must not disappear when onResume is refreshing the content lists. */
-    fun fileTask(success: (() -> Unit)? = null, work: () -> Unit) {
+    fun fileTask(refreshContent: Boolean = false, success: (() -> Unit)? = null, work: () -> Unit) {
         viewModelScope.launch {
             snapshotFlow { busy }.first { !it }
-            task(success, work)
+            task(refreshContent, success, work)
         }
     }
     fun refresh() = task { }
-    fun task(success: (() -> Unit)? = null, work: () -> Unit) {
+    fun task(refreshContent: Boolean = true, success: (() -> Unit)? = null, work: () -> Unit) {
         if (busy) return
         busy = true
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { work() }
-                loadContent()
+                if (refreshContent) loadContent()
                 success?.invoke()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { message = e.message ?: "操作失败，请重试" }

@@ -140,8 +140,11 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
         val pcm = ShortArray(1600)
         var floats: FloatArray? = null
         try {
+            // Cancel before disk hashing, and between chunks, rather than finishing a large
+            // obsolete read after the user has released the key or changed editors.
+            if (generation.get() != id || !recording) return
             val repository = ModelRepository(context)
-            repository.verifyInstalled()
+            if (!repository.verifyInstalled { generation.get() == id && recording }) return
             if (generation.get() != id || !recording) return
             val engine =
                 OnlineRecognizer(

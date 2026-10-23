@@ -35,6 +35,14 @@ class CurrentSettingsUiTest : InstrumentationTestCase() {
         }
         throw AssertionError("Missing accessible label: $label")
     }
+    private fun awaitMissing(label: String) {
+        val end = SystemClock.uptimeMillis() + 8000
+        while (SystemClock.uptimeMillis() < end) {
+            if (find(label) == null) return
+            SystemClock.sleep(100)
+        }
+        throw AssertionError("Unexpected accessible label: $label")
+    }
     private fun click(label: String) {
         var node: AccessibilityNodeInfo? = await(label)
         while (node != null) {
@@ -43,6 +51,69 @@ class CurrentSettingsUiTest : InstrumentationTestCase() {
         }
         throw AssertionError("Not clickable: $label")
     }
+    fun testEmojiShortcutAddEditAndDelete() {
+        val prefs = instrumentation.targetContext.getSharedPreferences("settings", 0)
+        val key = io.secure.keyboard.data.EmojiShortcutStore.KEY
+        val previous = prefs.getString(key, null)
+        try {
+            prefs.edit().putString(key, "[]").commit()
+            open("emoji_shortcuts"); click("添加快捷表情")
+            fun fill(index: Int, value: String) {
+                val inputs = ArrayList<AccessibilityNodeInfo>()
+                fun visit(node: AccessibilityNodeInfo?) {
+                    node ?: return
+                    if (node.isEditable) inputs.add(node)
+                    for (child in 0 until node.childCount) visit(node.getChild(child))
+                }
+                visit(instrumentation.uiAutomation.rootInActiveWindow)
+                assertEquals(2, inputs.size)
+                assertTrue(inputs[index].performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,
+                    android.os.Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }))
+                instrumentation.waitForIdleSync()
+            }
+            await("保存"); fill(0, "🧑‍🔬"); fill(1, "科学家, science,科学家"); click("保存")
+            await("科学家,science")
+            click("🧑‍🔬"); await("删除快捷表情")
+            fill(1, "实验,lab"); click("保存"); await("实验,lab")
+            val store = io.secure.keyboard.data.EmojiShortcutStore(instrumentation.targetContext)
+            assertEquals(listOf("实验", "lab"), store.entries().single().keywords)
+            click("🧑‍🔬"); click("删除快捷表情"); await("暂无快捷表情")
+            assertTrue(store.entries().isEmpty())
+        } finally {
+            prefs.edit().apply { if (previous == null) remove(key) else putString(key, previous) }.commit()
+        }
+    }
+
+    fun testShortcutCorruptionRecoveryAndSearch() {
+        val prefs = instrumentation.targetContext.getSharedPreferences("settings", 0)
+        val key = io.secure.keyboard.data.EmojiShortcutStore.KEY
+        val previous = prefs.getString(key, null)
+        try {
+            prefs.edit().putString(key, "broken-json").commit()
+            open("emoji_shortcuts"); click("恢复默认快捷表情"); click("取消")
+            assertEquals("broken-json", prefs.getString(key, null))
+            click("恢复默认快捷表情"); click("恢复默认"); await("开心,高兴,笑脸")
+            fun search(value: String) {
+                fun editable(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+                    node ?: return null
+                    if (node.isEditable) return node
+                    for (child in 0 until node.childCount) editable(node.getChild(child))?.let { return it }
+                    return null
+                }
+                val input = requireNotNull(editable(instrumentation.uiAutomation.rootInActiveWindow))
+                assertTrue(input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,
+                    android.os.Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }))
+                instrumentation.waitForIdleSync()
+            }
+            search("笑哭"); await("😂"); awaitMissing("😀")
+            search("👍"); await("点赞,赞"); awaitMissing("😂")
+            search("no-such-keyword"); await("没有匹配的表情")
+            search(""); await("开心,高兴,笑脸")
+        } finally {
+            prefs.edit().apply { if (previous == null) remove(key) else putString(key, previous) }.commit()
+        }
+    }
+
     fun testAllCurrentSettingsRoutesOpen() {
         val routes = mapOf(
             "dashboard" to "S Key", "home" to "偏好设置", "input" to "输入方式",
@@ -52,7 +123,7 @@ class CurrentSettingsUiTest : InstrumentationTestCase() {
             "clipboard" to "剪贴板", "phrases" to "常用语", "dictionary" to "中文自定义词库",
             "english_dictionary" to "英文自定义词库", "emoji" to "最近表情",
             "builtin_dictionaries" to "内置词库", "builtin_ai_prompts" to "内置 AI 提示词",
-            "symbol_keyboard" to "符号键盘", "symbol_closure" to "符号自动闭合",
+            "emoji_shortcuts" to "快捷 emoji 表情", "symbol_keyboard" to "符号键盘", "symbol_closure" to "符号自动闭合",
             "theme_light" to "自定义白色主题", "theme_dark" to "自定义黑色主题",
             "input_english" to "英文设置", "profile_outer_portrait" to "外屏 · 竖屏",
             "profile_outer_landscape" to "外屏 · 横屏", "profile_inner_portrait" to "内屏 · 竖屏",
@@ -63,6 +134,7 @@ class CurrentSettingsUiTest : InstrumentationTestCase() {
     fun testEditorDialogsShareInsetsAndActionAlignment() {
         val cases=listOf(
             Triple("custom_ai",listOf("添加自定义 AI"),"添加自定义 AI"),
+            Triple("emoji_shortcuts",listOf("添加快捷表情"),"添加快捷表情"),
             Triple("symbol_closure",listOf("添加规则"),"添加规则"),
             Triple("builtin_ai_prompts",listOf("自定义 AI 统一提示词"),"自定义 AI 统一提示词"),
             Triple("symbol_keyboard",listOf("字母长按","q"),"中文 · 字母 q")

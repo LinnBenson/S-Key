@@ -5,11 +5,11 @@ import android.content.Context
 /** Read-only packaged tables shared across service lifecycles. Call load() off the UI thread. */
 class OfflineEngine(context: Context) {
     private val app = context.applicationContext
-    private val assets = app.assets
+    private val shortcuts = io.secure.keyboard.data.EmojiShortcutStore(app)
     // Repository migration/cleanup can copy SQLite assets; defer it to load()'s worker.
     private val repository by lazy { io.secure.keyboard.dictionaries.DictionaryRepository(app) }
     private val prefs = app.getSharedPreferences("settings",0)
-    val revision: String get() = prefs.getString("builtin_dictionary_revision", "default-v2")!!
+    val revision: String get() = prefs.getString("builtin_dictionary_revision", "default-v2")!! + ":emoji:" + shortcuts.revision
     val isLoaded: Boolean
         get() = packagedDictionary != null
 
@@ -29,14 +29,12 @@ class OfflineEngine(context: Context) {
                 val mixed = fallback?.let { DictionaryEngine(replacement.wubi, it.mixedPinyin, replacement.english) }
                     ?: replacement.mixedEngine
                 // Prepare every fallible resource before publishing or closing the old snapshot.
-                val emoji = packagedEmoji ?: assets.open("dictionaries/emoji_keywords.tsv")
-                    .reader(Charsets.UTF_8).use { EmojiLexicon(it) }
+                shortcuts.lexicon()
                 val previous = compiled
                 val previousFallback = legacyFallback
                 compiled = replacement
                 legacyFallback = fallback
                 mixedDictionary = mixed
-                packagedEmoji = emoji
                 packagedDictionary = replacement.engine
                 loadedPath = file.path
                 loadedVersion = version
@@ -52,9 +50,12 @@ class OfflineEngine(context: Context) {
     }
 
     fun appendPinyinEmoji(options: Sequence<PinyinDecoder.Option>): Sequence<PinyinDecoder.Option> =
-        packagedEmoji?.appendToOptions(options) ?: options
+        shortcuts.lexicon().appendToOptions(options)
 
-    fun appendEmoji(words: List<String>): List<String> = packagedEmoji?.appendTo(words) ?: words
+    fun appendEmojiKeyword(options: Sequence<PinyinDecoder.Option>, keyword: String): Sequence<PinyinDecoder.Option> =
+        shortcuts.lexicon().appendForKeyword(options, keyword)
+
+    fun appendEmoji(words: List<String>): List<String> = shortcuts.lexicon().appendTo(words)
 
     fun exactWubi(code: String, limit: Int = 40): List<Candidate> =
         withDictionary { it.exactWubi(code, limit) }
@@ -111,7 +112,6 @@ class OfflineEngine(context: Context) {
         private val initializationLock = Any()
         // Only immutable bundled dictionary tables live here. Never editor text, a query,
         // candidates, user frequencies, imported words, Context, or a learning/history model.
-        @Volatile private var packagedEmoji: EmojiLexicon? = null
         @Volatile private var packagedDictionary: DictionaryEngine? = null
     }
 }

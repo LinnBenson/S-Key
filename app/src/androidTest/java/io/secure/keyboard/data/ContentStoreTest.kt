@@ -298,6 +298,103 @@ class ContentStoreTest : AndroidTestCase() {
         assertTrue(store.phrases().isEmpty())
     }
 
+    fun testLegacyEmojiMigrationAndIndependentWritesPreserveContentAndBackup() {
+        store.addPhrase("keep phrase")
+        store.addDictionary("词条", "ci")
+        val file = File(sandbox.noBackupFilesDir, "content/content.json")
+        val legacy = org.json.JSONObject(file.readText()).put("emoji", org.json.JSONArray(listOf("🙂", "😀", "🙂")))
+        file.writeText(legacy.toString())
+        assertEquals(listOf("🙂", "😀"), store.recentEmoji())
+        assertFalse(org.json.JSONObject(file.readText()).has("emoji"))
+        val original = file.readBytes()
+        store.useEmoji("😎")
+        assertTrue("Emoji writes must not rewrite the shared content file", original.contentEquals(file.readBytes()))
+        assertEquals(listOf("😎", "🙂", "😀"), ContentStore(sandbox).recentEmoji())
+        val backup = java.io.ByteArrayOutputStream().also { store.writeBackup(it) }.toByteArray()
+        store.restoreBackup(backup.inputStream())
+        assertEquals(listOf("😎", "🙂", "😀"), store.recentEmoji())
+        assertEquals("keep phrase", store.phrases().single().text)
+        assertEquals("词条", store.dictionary().single().word)
+    }
+
+    fun testEmojiClearRevokesPendingWritesAcrossInstancesAndFullErase() {
+        val generation = store.emojiGeneration()
+        store.useEmoji("🙂", generation)
+        val other = ContentStore(sandbox)
+        other.clearEmoji()
+        store.useEmoji("😎", generation)
+        assertTrue(store.recentEmoji().isEmpty())
+        val next = store.emojiGeneration()
+        store.useEmoji("😀", next)
+        other.clearAll()
+        store.useEmoji("😎", next)
+        assertTrue(store.recentEmoji().isEmpty())
+        assertFalse(File(sandbox.noBackupFilesDir, "content/content.json").exists())
+    }
+
+    fun testFailedEmojiMigrationPreservesLegacyAndCanRetry() {
+        store.addPhrase("preserved")
+        val file = File(sandbox.noBackupFilesDir, "content/content.json")
+        file.writeText(org.json.JSONObject(file.readText()).put("emoji", org.json.JSONArray(listOf("🙂"))).toString())
+        val before = file.readBytes()
+        val obstruction = File(sandbox.noBackupFilesDir, "recent-emoji").apply { writeText("blocked") }
+        try { store.recentEmoji(); fail("Migration must fail safely") } catch (_: ContentStore.ContentReadException) {}
+        assertTrue(before.contentEquals(file.readBytes()))
+        assertTrue(obstruction.delete())
+        assertEquals(listOf("🙂"), store.recentEmoji())
+    }
+
+    fun testInterruptedMigrationRetriesRemovingLegacyHistory() {
+        store.addPhrase("keep")
+        val file = File(sandbox.noBackupFilesDir, "content/content.json")
+        file.writeText(org.json.JSONObject(file.readText()).put("emoji", org.json.JSONArray(listOf("🙂"))).toString())
+        val obstruction = File(file.parentFile, "content.tmp").apply { mkdirs() }
+        File(obstruction, "block").writeText("block")
+        try { store.recentEmoji(); fail("Expected interrupted migration") } catch (_: ContentStore.ContentReadException) {}
+        assertTrue(org.json.JSONObject(file.readText()).has("emoji"))
+        obstruction.deleteRecursively()
+        assertEquals(listOf("🙂"), store.recentEmoji())
+        assertFalse(org.json.JSONObject(file.readText()).has("emoji"))
+        store.clearEmoji()
+        assertTrue(ContentStore(sandbox).recentEmoji().isEmpty())
+    }
+
+    fun testSettingsSnapshotReusesUnchangedDataAndInvalidatesEditsAndExpiry() {
+        store.addPhrase("original")
+        val first = store.settingsSnapshot()
+        assertSame(first, store.settingsSnapshot(first))
+        ContentStore(sandbox).useEmoji("🙂")
+        val second = store.settingsSnapshot(first)
+        assertNotSame(first, second)
+        assertEquals(listOf("🙂"), second.emoji)
+        ContentStore(sandbox).addPhrase("new")
+        val third = store.settingsSnapshot(second)
+        assertEquals(2, third.phrases.size)
+        assertNotSame(third, store.settingsSnapshot(third.copy(expiresAt = 0)))
+        store.clearAll()
+        val cleared = store.settingsSnapshot(third)
+        assertTrue(cleared.phrases.isEmpty())
+        assertTrue(cleared.emoji.isEmpty())
+    }
+
+    fun testSettingsSnapshotKeepsOrderingAndRetentionSemantics() {
+        store.addClipboard("old"); store.setClipboardPinned(store.clipboard().single().id, true)
+        store.addClipboard("fresh")
+        store.addPhrase("first"); store.addPhrase("pin")
+        store.setPhrasePinned(store.phrases().last().id, true)
+        store.addDictionary("中文", "zhong"); store.addDictionary("hello", "hello", DictionaryKind.ENGLISH)
+        store.saveAiPreset(null, "AI", "instruction", "high"); store.useEmoji("🙂")
+        config.clipboardRetention = "none"
+        val snapshot = store.settingsSnapshot()
+        assertEquals(store.clipboardForDisplay(), snapshot.clipboard)
+        assertEquals(store.phrasesForDisplay(), snapshot.phrases)
+        assertEquals(store.dictionary(), snapshot.chinese)
+        assertEquals(store.dictionary(DictionaryKind.ENGLISH), snapshot.english)
+        assertEquals(store.aiPresets(), snapshot.aiPresets)
+        assertEquals(store.recentEmoji(), snapshot.emoji)
+        assertEquals(listOf("old"), snapshot.clipboard.map { it.text })
+    }
+
     fun testRecentEmojiIsUniqueRecencyBoundedTo50() {
         repeat(55) { store.useEmoji("emoji$it") }
         assertEquals(50, store.recentEmoji().size)

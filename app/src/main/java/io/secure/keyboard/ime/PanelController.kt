@@ -417,7 +417,7 @@ internal object PanelController {
 
     internal fun KeyboardSession.renderEmojiImpl() {
         val groups =
-            listOf("Recent" to readContent(emptyList<String>()) { content.recentEmoji() }) +
+            listOf("Recent" to emptyList<String>()) +
                 emojiGroups
         val selectedCategory = emojiCategory.coerceIn(0, (groups.size - 1).coerceAtLeast(0))
         val savedScroll = emojiCategoryScroll
@@ -511,7 +511,20 @@ internal object PanelController {
                 verticalSpacing = dp(2)
             }
         column.addView(grid, LinearLayout.LayoutParams(-1, 0, 1f))
-        val items = groups.getOrNull(selectedCategory)?.second ?: emptyList()
+        var items = groups.getOrNull(selectedCategory)?.second ?: emptyList()
+        if (selectedCategory == 0 && !secret) {
+            val epoch = content.emojiGeneration()
+            contentQueries.submit {
+                val recent = readContent(emptyList<String>()) { content.recentEmoji() }
+                main.post {
+                    if (!destroyed && !secret && panel == "emoji" && body.indexOfChild(column) >= 0 &&
+                        epoch == content.emojiGeneration()) {
+                        items = recent
+                        (grid.adapter as BaseAdapter).notifyDataSetChanged()
+                    }
+                }
+            }
+        }
         grid.adapter =
             object : BaseAdapter() {
                 override fun getCount() = items.size
@@ -531,8 +544,28 @@ internal object PanelController {
         grid.setOnItemClickListener { _, _, position, _ ->
             val emoji = items.getOrNull(position) ?: return@setOnItemClickListener
             emojiFeedback.click()
-            commit(emoji)
-            readContent(Unit) { content.useEmoji(emoji) }
+            pinyinContext = ""
+            val committed = commitInputText(emoji)
+            refreshCandidates()
+            if (committed && !secret) {
+                val epoch = content.emojiGeneration()
+                val store = content
+                val owner = java.lang.ref.WeakReference(this)
+                val handler = main
+                try {
+                    emojiWorker.execute {
+                        val failed = runCatching { store.useEmoji(emoji, epoch) }.isFailure
+                        handler.post {
+                            val session = owner.get() ?: return@post
+                            if (!session.destroyed) {
+                                if (failed) session.reportContentError()
+                                else if (!session.secret && session.panel == "emoji" && session.emojiCategory == 0 &&
+                                    epoch == store.emojiGeneration()) session.renderBody()
+                            }
+                        }
+                    }
+                } catch (_: java.util.concurrent.RejectedExecutionException) { reportContentError() }
+            }
         }
         var down = 0f
         var startY = 0f

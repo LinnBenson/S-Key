@@ -64,4 +64,14 @@ class EmojiLexiconTest {
         }
         assertEquals(listOf("开心"), engine.exactWubi("gany").map { it.text })
     }
+    @Test fun directCustomKeywordWorksWithoutDictionaryAndConsumesWholeCode() {
+        val lex = EmojiLexicon("🧑‍💻\tmyemoji\t程序员\n".reader())
+        val result = lex.appendForKeyword(emptySequence(), "myemoji").single()
+        assertEquals("🧑‍💻", result.text)
+        assertEquals(PinyinDecoder.Option("🧑‍💻", 7), result)
+        assertTrue(lex.appendForKeyword(emptySequence(), "myem").none())
+        val words = sequenceOf("第一", "第二", "第三", "🧑‍💻", "末尾").map { PinyinDecoder.Option(it, 7) }
+        assertEquals(listOf("第一", "第二", "第三", "🧑‍💻", "末尾"), lex.appendForKeyword(words, "myemoji").map { it.text }.toList())
+    }
+
 }

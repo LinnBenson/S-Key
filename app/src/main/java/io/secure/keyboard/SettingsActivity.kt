@@ -184,6 +184,10 @@ open class SettingsActivity : ComponentActivity() {
                     IconButton(onClick = { back() }) { UiIcon("back", "返回") }
                 })
             }) { padding ->
+                if (route == "emoji_shortcuts") {
+                    EmojiShortcutScreen(Modifier.padding(padding))
+                    return@Scaffold
+                }
                 if (route == "symbol_keyboard") {
                     SymbolKeyboardScreen(Modifier.padding(padding))
                     return@Scaffold
@@ -222,7 +226,7 @@ open class SettingsActivity : ComponentActivity() {
                                     if (model.aiPresets.isEmpty()) Info("暂无自定义 AI")
                                 }
                                 "cleanup", "recovery" -> Group("本机内容") {
-                                    Info("包含：中文和英文自定义词库、常用语、自定义 AI、主题、布局、工具栏、符号自动闭合、符号键盘、字母长按符号、内置 AI 提示词。")
+                                    Info("包含：中文和英文自定义词库、常用语、自定义 AI、主题颜色、主题 UI 设计、4 个布局配置、工具栏、符号自动闭合、符号键盘、字母长按符号、内置 AI 提示词、快捷 emoji 表情。")
                                     Info("不含：API 密钥、剪贴板、会话记录、内置词库文件和语音模型。备份文件未加密。")
                                     Action("备份数据", !model.busy) {
                                         launch { backupPicker.launch("S-Key-backup-${java.time.LocalDate.now()}.json") }
@@ -230,9 +234,9 @@ open class SettingsActivity : ComponentActivity() {
                                     Action("还原数据", !model.busy) {
                                         launch { restorePicker.launch(arrayOf("application/json", "application/octet-stream", "text/*")) }
                                     }
-                                    Info("清理后保留主题、布局和输入设置。")
-                                    Nav("清空全部用户内容", "剪贴板、常用语、自定义词库、最近表情和自定义 AI", "delete") {
-                                        ask("确定清空全部用户内容？此操作无法撤销。") { model.task { model.content.clearAll() } }
+                                    Info("清理后保留内置词库、主题颜色、主题 UI 设计、布局、输入设置和快捷表情配置。")
+                                    Nav("清除用户内容数据", "自定义词库、常用语与剪贴板（含置顶）、最近表情、自定义 AI", "delete") {
+                                        ask("确定清除用户内容数据？中文和英文自定义词库、常用语（含置顶）、剪贴板（含置顶）、最近表情、自定义 AI 和 AI 会话将删除。内置词库、主题 UI 设计及其它设置保留。此操作无法撤销。") { model.task { model.content.clearAll() } }
                                     }
                                 }
                                 "emoji" -> Group("最近表情") {
@@ -345,6 +349,7 @@ open class SettingsActivity : ComponentActivity() {
             Nav("内置 AI 提示词", "助手指令与自定义 AI 通用指令", "ai") { openPage("builtin_ai_prompts") }
             Nav("符号自动闭合", "输入符号、闭合符号与光标回移", "keyboard") { openPage("symbol_closure") }
             Nav("符号键盘", "中英文符号页与字母长按", "keyboard") { openPage("symbol_keyboard") }
+            Nav("快捷 emoji 表情", "表情与快捷输入关键词", "emoji") { openPage("emoji_shortcuts") }
         }
         Group("本机内容") {
             Nav("剪贴板", "${model.clipboard.size} 条", "clipboard") { openPage("clipboard") }
@@ -435,11 +440,11 @@ open class SettingsActivity : ComponentActivity() {
             Toggle("显示密钥", showKeys) { showKeys = it }
             Action("保存 API 配置", !model.busy) {
                 val snapshot = model.apiDraft
-                model.task(success = { model.message = "API 配置已保存" }) { model.apiStore.save(snapshot) }
+                model.task(refreshContent = false, success = { model.message = "API 配置已保存" }) { model.apiStore.save(snapshot) }
             }
             Action("重新载入已保存配置", !model.busy) { model.loadApi(); model.apiModels = emptyList() }
             Action("清除已保存的 API 配置", !model.busy) {
-                model.task(success = { model.apiDraft = ApiConfiguration(); model.apiModels = emptyList(); model.message = "API 配置已清除" }) { model.apiStore.clear() }
+                model.task(refreshContent = false, success = { model.apiDraft = ApiConfiguration(); model.apiModels = emptyList(); model.message = "API 配置已清除" }) { model.apiStore.clear() }
             }
             Info("密钥在本机加密保存。点击翻译或生成时才发送原文和指令；获取模型列表不发送输入内容。AI 语音在收音结束后上传录音，音频不保存在本机。")
         }
@@ -696,7 +701,7 @@ open class SettingsActivity : ComponentActivity() {
                     model.edit = edit.copy(first = it)
                 }
                 Spacer(Modifier.height(4.dp))
-                AiEditorField("提示词", "描述你希望 AI 如何处理原文…", edit.second, 2000, true) {
+                AiEditorField("提示词", "描述你希望 AI 如何处理原文…", edit.second, ContentStore.MAX_AI_PROMPT_CHARACTERS, true) {
                     model.edit = edit.copy(second = it)
                 }
                 Spacer(Modifier.height(8.dp))
@@ -725,10 +730,10 @@ open class SettingsActivity : ComponentActivity() {
             TextField(value = edit.first, onValueChange = { if (!customAi || it.text.length <= 40) model.edit = edit.copy(first = it) },
                 label = if (customAi) "名称，例如：邮件润色" else if (edit.category == "phrases") "常用语" else "词语",
                 singleLine = customAi, modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp))
-            if (edit.category != "phrases") TextField(value = edit.second, onValueChange = { if (!customAi || it.text.length <= 2000) model.edit = edit.copy(second = it) },
+            if (edit.category != "phrases") TextField(value = edit.second, onValueChange = { if (!customAi || it.text.length <= ContentStore.MAX_AI_PROMPT_CHARACTERS) model.edit = edit.copy(second = it) },
                 label = if (customAi) "自定义提示词" else "拼音 / 编码",
                 modifier = if (customAi) Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 260.dp) else Modifier.fillMaxWidth(), singleLine = !customAi)
-            if (customAi) Info("${edit.first.text.length}/40 名称 · ${edit.second.text.length}/2000 提示词")
+            if (customAi) Info("${edit.first.text.length}/40 名称 · ${edit.second.text.length}/${ContentStore.MAX_AI_PROMPT_CHARACTERS} 提示词")
             SettingsDialogActions(cancel = { model.edit = null }, confirm = { model.saveEdit() },
                 enabled = !model.busy && edit.first.text.isNotBlank(), cancelEnabled = !model.busy)
         }
@@ -922,6 +927,7 @@ open class SettingsActivity : ComponentActivity() {
         "custom_ai" -> "自定义 AI"
         "dictionary" -> "中文自定义词库"
         "english_dictionary" -> "英文自定义词库"
+        "emoji_shortcuts" -> "快捷 emoji 表情"
         "emoji" -> "最近表情"
         "ai" -> "AI 助手"
         "translate" -> "翻译"

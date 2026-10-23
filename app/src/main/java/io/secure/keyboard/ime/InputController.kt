@@ -218,7 +218,7 @@ internal object InputController {
             }
             if (aiMode) stopAiRequest()
             if (aiMode && aiEditingInstruction) {
-                if (aiCustom.length + value.length > 2000) { toast("指令最多2000字符"); return false }
+                if (aiCustom.length + value.length > io.secure.keyboard.data.ContentStore.MAX_AI_PROMPT_CHARACTERS) { toast("指令最多${io.secure.keyboard.data.ContentStore.MAX_AI_PROMPT_CHARACTERS}字符"); return false }
                 aiCustom += value; resetAiConversation(); translation.invalidate(); updateTranslationPreview(); return true
             }
             val accepted = translation.edit(translation.text + value)

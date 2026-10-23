@@ -27,13 +27,22 @@ class OfflineVoiceInstrumentationTest : AndroidTestCase() {
         get() = File(context.filesDir, "voice-fixtures")
 
     private fun checkFixtures() {
+        // Optional local test-only asset source; production APKs never contain these fixtures.
+        if (!File(fixtureDir, "model.int8.onnx").exists()) {
+            val assets = context.createPackageContext(context.packageName + ".test", 0).assets
+            if (assets.list("")?.contains("model.int8.onnx") == true) {
+                check(fixtureDir.isDirectory || fixtureDir.mkdirs())
+                for (name in listOf("model.int8.onnx", "tokens.txt", "0.wav"))
+                    assets.open(name).use { input -> File(fixtureDir, name).outputStream().use { input.copyTo(it) } }
+            }
+        }
         for ((name, sha) in
             listOf(
                 "model.int8.onnx" to ModelRepository.MODEL_SHA,
                 "tokens.txt" to ModelRepository.TOKENS_SHA,
             )) {
             val file = File(fixtureDir, name)
-            assertTrue("Push fixtures first: tests/push_voice_fixtures.sh", file.isFile)
+            assertTrue("Push fixtures first: ${file.absolutePath}", file.isFile)
             val digest = MessageDigest.getInstance("SHA-256")
             file.inputStream().use { input ->
                 val bytes = ByteArray(65536)
@@ -71,6 +80,28 @@ class OfflineVoiceInstrumentationTest : AndroidTestCase() {
                     decodingMethod = "greedy_search",
                 )
         )
+
+    /** Synthetic/public fixtures only: measure validation and native creation separately. */
+    fun testStartupTimingWithPublicFixtures() {
+        val validation = mutableListOf<Long>()
+        val creation = mutableListOf<Long>()
+        val streamCreation = mutableListOf<Long>()
+        repeat(5) {
+            var start = System.nanoTime()
+            checkFixtures()
+            validation.add((System.nanoTime() - start) / 1_000_000)
+            start = System.nanoTime()
+            val engine = recognizer(true)
+            creation.add((System.nanoTime() - start) / 1_000_000)
+            try {
+                start = System.nanoTime()
+                val stream = engine.createStream()
+                streamCreation.add((System.nanoTime() - start) / 1_000_000)
+                stream.release()
+            } finally { engine.release() }
+        }
+        android.util.Log.i("SKeyStartupBenchmark", "validationMs=$validation createMs=$creation streamMs=$streamCreation")
+    }
 
     /** Packaging-only regression: one known utterance, no repeated lifecycle or silence work. */
     fun testNativePackagingSingleUtterance() {

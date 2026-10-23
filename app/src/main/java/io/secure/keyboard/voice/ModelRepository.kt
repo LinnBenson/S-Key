@@ -23,10 +23,11 @@ class ModelRepository(private val context: Context) {
             tokensFile.length() == TOKENS_SIZE &&
             File(root, "verified").isFile
 
-    fun verifyInstalled() {
+    fun verifyInstalled(isCurrent: () -> Boolean = { true }): Boolean {
+        if (!isCurrent()) return false
         check(isInstalled()) { "请先导入离线普通话模型" }
-        verify(modelFile, MODEL_SIZE, MODEL_SHA)
-        verify(tokensFile, TOKENS_SIZE, TOKENS_SHA)
+        return verify(modelFile, MODEL_SIZE, MODEL_SHA, isCurrent) &&
+            verify(tokensFile, TOKENS_SIZE, TOKENS_SHA, isCurrent)
     }
 
     /** Same lock as import: never delete the live staging directory. No user files are touched. */
@@ -116,18 +117,21 @@ class ModelRepository(private val context: Context) {
         check(count == size && digest.digest().hex() == hash) { "模型校验失败：文件损坏或版本不匹配" }
     }
 
-    private fun verify(file: File, size: Long, hash: String) {
+    private fun verify(file: File, size: Long, hash: String, isCurrent: () -> Boolean): Boolean {
         check(file.length() == size) { "模型大小不匹配" }
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val bytes = ByteArray(64 * 1024)
             while (true) {
+                if (!isCurrent()) return false
                 val n = input.read(bytes)
                 if (n < 0) break
                 digest.update(bytes, 0, n)
             }
         }
+        if (!isCurrent()) return false
         check(digest.digest().hex() == hash) { "模型校验失败，请重新安装模型" }
+        return true
     }
 
     private fun ByteArray.hex() = joinToString("") { "%02x".format(it.toInt() and 255) }

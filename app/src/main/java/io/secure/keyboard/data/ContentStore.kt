@@ -5,6 +5,7 @@ import android.os.Build
 import android.content.ClipboardManager
 import android.content.Context
 import android.util.JsonWriter
+import android.util.AtomicFile
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -30,6 +31,11 @@ class ContentStore(context: Context) {
     private val settings = SettingsStore(app)
     private val dir = File(app.noBackupFilesDir, "content").apply { mkdirs() }
     private val file = File(dir, "content.json")
+    private val emojiDir = File(app.noBackupFilesDir, "recent-emoji")
+    private val emojiFile = AtomicFile(File(emojiDir, "history.json"))
+    private val emojiMigrationDone = File(emojiDir, "legacy-removed")
+    private val emojiEpoch = emojiEpochs.computeIfAbsent(file.canonicalPath) { AtomicLong(0L) }
+    fun emojiGeneration(): Long = emojiEpoch.get()
     private val aiPresetEpoch = aiPresetEpochs.computeIfAbsent(file.canonicalPath) { AtomicLong(0L) }
     private data class DictionaryCacheKey(val path: String, val kind: DictionaryKind)
 
@@ -103,7 +109,7 @@ class ContentStore(context: Context) {
 
     class ContentReadException(cause: Exception) :
         IllegalStateException(
-            "本机内容无法读取，已停止保存以免覆盖原数据。请重试；如需重新使用，可在设置中明确清空全部用户内容。布局与设置不会受影响。",
+            "本机内容无法读取，已停止保存以免覆盖原数据。请重试；如需重新使用，可在设置中清除用户内容数据。布局与设置不会受影响。",
             cause,
         )
 
@@ -167,6 +173,7 @@ class ContentStore(context: Context) {
             val preserved = if (externallyChanged) emptyMap() else existing.filterValues { it != null }
             if (externallyChanged) invalidateDictionarySnapshots()
             dir.mkdirs()
+            if (emojiFile.baseFile.exists()) root.remove("emoji")
             val tmp = File(dir, "content.tmp")
             tmp.outputStream().use { output ->
                 // Stream JSON to avoid a second full JSON string and UTF-8 byte array.
@@ -244,8 +251,11 @@ class ContentStore(context: Context) {
             }
             // Legacy oversized data stays readable/editable: allow reductions and metadata edits.
             if (key != "clipboard") {
-                val limit = if (DictionaryKind.entries.any { it.storageKey == key })
-                    MAX_DICTIONARY_CHARACTERS else MAX_PHRASE_CHARACTERS
+                val limit = when {
+                    DictionaryKind.entries.any { it.storageKey == key } -> MAX_DICTIONARY_CHARACTERS
+                    key == "aiPresets" -> MAX_AI_PRESET_CHARACTERS
+                    else -> MAX_PHRASE_CHARACTERS
+                }
                 require(contentCharacters(list) <= maxOf(limit.toLong(), oldCharacters)) {
                     "本类内容已达到字符容量上限，请缩短内容或删除部分条目后重试。此次操作未保存。"
                 }
@@ -574,7 +584,7 @@ class ContentStore(context: Context) {
         val root = read()
         val data = JSONObject()
         BACKUP_KEYS.forEach { data.put(it, array(root, it)) }
-        val envelope = JSONObject().put("format", "skey-content-backup").put("version", 2)
+        val envelope = JSONObject().put("format", "skey-content-backup").put("version", 3)
             .put("data", data).put("settings", SettingsBackup(app).snapshot())
         val writer = JsonWriter(output.bufferedWriter(Charsets.UTF_8))
         writeJson(writer, envelope)
@@ -587,7 +597,7 @@ class ContentStore(context: Context) {
 
     fun prepareBackup(input: java.io.InputStream): BackupPlan {
         val backup = ContentBackupReader.read(input)
-        require(backup.getString("format") == "skey-content-backup" && backup.getInt("version") in 1..2)
+        require(backup.getString("format") == "skey-content-backup" && backup.getInt("version") in 1..3)
         val data = backup.getJSONObject("data")
         val clean = JSONObject()
         for (key in BACKUP_KEYS) {
@@ -611,7 +621,7 @@ class ContentStore(context: Context) {
                     }
                     key == "aiPresets" -> {
                         val name = string("name"); val prompt = string("prompt")
-                        require(name.isNotBlank() && name.length <= 40 && prompt.isNotBlank() && prompt.length <= 2000)
+                        require(name.isNotBlank() && name.length <= 40 && prompt.isNotBlank() && prompt.length <= MAX_AI_PROMPT_CHARACTERS)
                         require(names.add(name.lowercase(java.util.Locale.ROOT)))
                         val effort = if (row.has("reasoningEffort")) string("reasoningEffort") else "low"
                         require(AiReasoning.valid(effort))
@@ -625,7 +635,11 @@ class ContentStore(context: Context) {
                         characters += value.length
                     }
                 }
-                require(characters <= if (kind != null) MAX_DICTIONARY_CHARACTERS else MAX_PHRASE_CHARACTERS)
+                require(characters <= when {
+                    kind != null -> MAX_DICTIONARY_CHARACTERS
+                    key == "aiPresets" -> MAX_AI_PRESET_CHARACTERS
+                    else -> MAX_PHRASE_CHARACTERS
+                })
                 checked.put(item)
             }
             clean.put(key, checked)
@@ -671,7 +685,7 @@ class ContentStore(context: Context) {
         val title = name.trim(); val instruction = prompt.trim()
         require(AiReasoning.valid(reasoningEffort)) { "请选择有效推理强度" }
         require(title.isNotBlank() && title.length <= 40) { "名称需为 1–40 个字符" }
-        require(instruction.isNotBlank() && instruction.length <= 2000) { "提示词需为 1–2000 个字符" }
+        require(instruction.isNotBlank() && instruction.length <= MAX_AI_PROMPT_CHARACTERS) { "提示词需为 1–${MAX_AI_PROMPT_CHARACTERS} 个字符" }
         require(rows.none { it.getString("id") != id && it.getString("name").equals(title, ignoreCase = true) }) { "已有同名自定义 AI，请换个名称" }
         if (id == null) {
             require(rows.size < 100) { "最多保存 100 个自定义 AI" }
@@ -701,22 +715,100 @@ class ContentStore(context: Context) {
         }
     }
 
-    fun recentEmoji(): List<String> =
-        synchronized(lock) {
-            val a = array(read(), "emoji")
-            (0 until a.length()).map { a.getString(it) }
-        }
+    data class SettingsSnapshot(
+        val clipboard: List<ClipboardItem>, val phrases: List<Phrase>,
+        val chinese: List<DictionaryEntry>, val english: List<DictionaryEntry>,
+        val emoji: List<String>, val aiPresets: List<AiPreset>,
+        internal val version: Any, internal val expiresAt: Long,
+    )
 
-    fun useEmoji(emoji: String) =
-        synchronized(lock) {
-            val root = read()
-            val a = array(root, "emoji")
-            val values =
-                (0 until a.length()).map { a.getString(it) }.filter { it != emoji }.toMutableList()
-            values.add(0, emoji)
-            root.put("emoji", JSONArray(values.take(50)))
-            write(root)
+    /** One shared-file parse for settings, rather than one parse per category. */
+    fun settingsSnapshot(previous: SettingsSnapshot? = null): SettingsSnapshot = synchronized(lock) {
+        fun version(): Any = listOf(file.canonicalPath, dictionaryStamp(),
+            if (emojiFile.baseFile.exists()) Files.readAttributes(emojiFile.baseFile.toPath(), BasicFileAttributes::class.java).let {
+                listOf(it.size(), it.lastModifiedTime().toString(), it.fileKey())
+            } else null,
+            File(emojiDir, "history.json.bak").exists(),
+            settings.clipboardRetention, settings.clipboardRetentionHours, settings.clipboardLimit)
+        val now = System.currentTimeMillis()
+        if (previous != null && previous.version == version() && now < previous.expiresAt)
+            return@synchronized previous
+        val root = read()
+        val clips = array(root, "clipboard")
+        val rows = (0 until clips.length()).map { clips.getJSONObject(it) }.toMutableList()
+        val before = clips.toString()
+        deduplicateClipboard(rows)
+        pruneClipboard(rows, System.currentTimeMillis())
+        val after = JSONArray(rows)
+        if (before != after.toString()) { root.put("clipboard", after); write(root) }
+        scheduleClipboardCleanup(rows)
+        fun objects(key: String): List<JSONObject> {
+            val values = array(root, key)
+            return (0 until values.length()).map { values.getJSONObject(it) }
         }
+        fun dictionary(kind: DictionaryKind) = objects(kind.storageKey).map {
+            DictionaryEntry(it.getString("id"), it.getString("word"), it.getString("reading"))
+        }
+        SettingsSnapshot(
+            rows.map { ClipboardItem(it.getString("id"), it.getString("text"), it.optBoolean("pinned"), it.optLong("copiedAt")) }
+                .asReversed().sortedByDescending { it.pinned },
+            objects("phrases").map { Phrase(it.getString("id"), it.getString("text"), it.optBoolean("pinned")) }
+                .sortedByDescending { it.pinned },
+            dictionary(DictionaryKind.CHINESE), dictionary(DictionaryKind.ENGLISH), recentEmoji(),
+            objects("aiPresets").map {
+                AiPreset(it.getString("id"), it.getString("name"), it.getString("prompt"),
+                    it.optString("reasoningEffort", "low").takeIf(AiReasoning::valid) ?: "low")
+            },
+            version(),
+            if (settings.clipboardRetention == "timed") rows.filterNot { it.optBoolean("pinned") }
+                .minOfOrNull { it.optLong("copiedAt") + settings.clipboardRetentionHours * 3_600_000L } ?: Long.MAX_VALUE
+            else Long.MAX_VALUE,
+        )
+    }
+
+    /** Separate bounded history. Legacy content is migrated only after a durable new copy. */
+    fun recentEmoji(): List<String> = synchronized(lock) {
+        try {
+            if (emojiFile.baseFile.exists() || File(emojiDir, "history.json.bak").exists()) {
+                val rows = JSONArray(emojiFile.openRead().bufferedReader().use { it.readText() })
+                if (!emojiMigrationDone.exists()) {
+                    val legacy = read()
+                    if (legacy.has("emoji")) { legacy.remove("emoji"); write(legacy) }
+                    markEmojiMigrated()
+                }
+                return@synchronized (0 until rows.length()).map { rows.getString(it) }.distinct().take(50)
+            }
+            val root = read()
+            val rows = array(root, "emoji")
+            val values = (0 until rows.length()).map { rows.getString(it) }.distinct().take(50)
+            writeEmoji(values)
+            if (root.has("emoji")) { root.remove("emoji"); write(root) }
+            markEmojiMigrated()
+            values
+        } catch (error: ContentReadException) { throw error }
+        catch (error: Exception) { throw ContentReadException(error) }
+    }
+
+    private fun markEmojiMigrated() {
+        check(emojiMigrationDone.exists() || emojiMigrationDone.createNewFile()) { "无法完成表情记录迁移" }
+    }
+
+    private fun writeEmoji(values: List<String>) {
+        check(emojiDir.isDirectory || emojiDir.mkdirs()) { "无法保存最近表情" }
+        val output = emojiFile.startWrite()
+        try {
+            output.write(JSONArray(values).toString().toByteArray(Charsets.UTF_8))
+            emojiFile.finishWrite(output)
+        } catch (error: Exception) { emojiFile.failWrite(output); throw error }
+    }
+
+    /** A clear revokes writes already queued by any keyboard instance. */
+    fun useEmoji(emoji: String, expectedGeneration: Long? = null) = synchronized(lock) {
+        if (expectedGeneration != null && expectedGeneration != emojiEpoch.get()) return@synchronized
+        val previous = recentEmoji()
+        val values = (listOf(emoji) + previous.filter { it != emoji }).take(50)
+        if (values != previous) writeEmoji(values)
+    }
 
     private fun removeCategory(key: String) =
         synchronized(lock) {
@@ -735,11 +827,20 @@ class ContentStore(context: Context) {
             removeCategory(kind.storageKey)
         }
 
-    fun clearEmoji() = removeCategory("emoji")
+    fun clearEmoji() = synchronized(lock) {
+        emojiEpoch.incrementAndGet()
+        // Remove legacy history first, so deleting the new file can never resurrect it.
+        val root = read()
+        if (root.has("emoji")) { root.remove("emoji"); write(root) }
+        writeEmoji(emptyList())
+        markEmojiMigrated()
+        purgeCaches()
+    }
 
     fun clearAll() =
         synchronized(lock) {
             clipboardEpoch.incrementAndGet()
+            emojiEpoch.incrementAndGet()
             // Explicit full erasure must also recover a corrupt content file.
             val removedClips = try { clipboard().map { it.text }.toSet() }
                 catch (_: ContentReadException) { emptySet() }
@@ -750,6 +851,7 @@ class ContentStore(context: Context) {
             invalidateDictionarySnapshots()
             suppressCurrentClipboard()
             filesIn(dir).forEach { deleteVerified(it) }
+            deleteVerified(emojiDir)
             clearSystemClipboardIfMatching(removedClips)
             purgeCaches()
         }
@@ -775,10 +877,13 @@ class ContentStore(context: Context) {
         const val MAX_CLIPBOARD_ITEM_CHARACTERS = 65_536
         const val MAX_CLIPBOARD_CHARACTERS = 1_000_000
         const val MAX_PHRASE_ENTRIES = 10_000
+        const val MAX_AI_PROMPT_CHARACTERS = 20_000
+        private const val MAX_AI_PRESET_CHARACTERS = 100 * (MAX_AI_PROMPT_CHARACTERS + 40)
         const val MAX_PHRASE_CHARACTERS = 1_000_000
         const val MAX_DICTIONARY_CHARACTERS = 4_000_000
         const val MAX_DICTIONARY_ENTRIES = 10_000
         private const val DICTIONARY_LIMIT_MESSAGE = "用户词库最多保存 10000 条。此次操作未写入任何词条，请减少导入数量或先删除部分词条。"
+        private val emojiEpochs = ConcurrentHashMap<String, AtomicLong>()
         private val aiPresetEpochs = ConcurrentHashMap<String, AtomicLong>()
         private val lock = Any()
         private val clipboardEpoch = AtomicLong(0L)

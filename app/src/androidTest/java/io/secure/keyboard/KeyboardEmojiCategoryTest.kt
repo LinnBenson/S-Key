@@ -47,12 +47,15 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
             startService(Intent(context, OfflineKeyboardService::class.java))
             return service
         }
-        fun close() = tearDown()
+        private var closed = false
+        fun close() { if (!closed) { closed = true; tearDown() } }
     }
 
     private class RecordingConnection(view: View) : BaseInputConnection(view, true) {
+        var accepts = true
         val committed = mutableListOf<String>()
         override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
+            if (!accepts) return false
             committed.add(text.toString())
             return true
         }
@@ -203,12 +206,67 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
             val item = requireNotNull(grid.getChildAt(0))
             grid.performItemClick(item, 0, grid.adapter.getItemId(0))
             assertEquals(listOf(expected.first()), connection.committed)
-            assertEquals(listOf(expected.first()), store.recentEmoji())
-            categories.getChildAt(0).performClick()
-            layoutBody(600)
-            assertEquals(1, grid.adapter.count)
-            assertEquals(expected.first(), grid.adapter.getItem(0))
         }
+        awaitHistory { store.recentEmoji().isNotEmpty() }
+        instrumentation.runOnMainSync { categories.getChildAt(0).performClick(); layoutBody(600) }
+        awaitHistory {
+            var ready = false
+            instrumentation.runOnMainSync { ready = grid.adapter.count == 1 }
+            ready
+        }
+        instrumentation.runOnMainSync { assertEquals(connection.committed.single(), grid.adapter.getItem(0)) }
+    }
+
+    fun testPasswordEmojiInsertionDoesNotRecordHistoryOrTouchDiskOnClick() {
+        store.useEmoji("😎")
+        instrumentation.runOnMainSync {
+            setField("secret", true)
+            setField("emojiCategory", 1)
+            showEmoji(600)
+            val old = android.os.StrictMode.getThreadPolicy()
+            android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.Builder().detectDiskReads().detectDiskWrites().penaltyDeath().build())
+            try { grid.performItemClick(grid.getChildAt(0), 0, grid.adapter.getItemId(0)) }
+            finally { android.os.StrictMode.setThreadPolicy(old) }
+            assertEquals(listOf("😀"), connection.committed)
+        }
+        field<java.util.concurrent.ExecutorService>("worker").submit(object : Runnable { override fun run() {} }).get(10, java.util.concurrent.TimeUnit.SECONDS)
+        assertEquals(listOf("😎"), store.recentEmoji())
+    }
+
+    fun testRejectedEmojiDoesNotRecordHistory() {
+        instrumentation.runOnMainSync {
+            connection.accepts = false
+            setField("emojiCategory", 1)
+            showEmoji(600)
+            grid.performItemClick(grid.getChildAt(0), 0, grid.adapter.getItemId(0))
+        }
+        field<java.util.concurrent.ExecutorService>("worker").submit(object : Runnable { override fun run() {} }).get(10, java.util.concurrent.TimeUnit.SECONDS)
+        assertTrue(store.recentEmoji().isEmpty())
+    }
+
+    fun testAcceptedHistoryWriteDrainsAfterServiceDestruction() {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val writer = field<java.util.concurrent.ExecutorService>("emojiWorker")
+        writer.execute(object : Runnable { override fun run() { gate.await(10, java.util.concurrent.TimeUnit.SECONDS) } })
+        try {
+            instrumentation.runOnMainSync {
+                setField("emojiCategory", 1)
+                showEmoji(600)
+                grid.performItemClick(grid.getChildAt(0), 0, grid.adapter.getItemId(0))
+                harness.close()
+            }
+        } finally { gate.countDown() }
+        assertTrue(writer.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS))
+        assertEquals(listOf("😀"), store.recentEmoji())
+    }
+
+    private fun awaitHistory(condition: () -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (condition()) return
+            SystemClock.sleep(20)
+        }
+        fail("Emoji history did not settle")
     }
 
     private fun assertSingleIconRow() {

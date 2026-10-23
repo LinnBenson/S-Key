@@ -29,11 +29,16 @@ class ServiceOwnershipDiagnosticTest : InstrumentationTestCase() {
         try { probe.stop(); fixture.close() } finally { super.tearDown() }
     }
 
-    fun testPairedSlowHostThousandRefreshesNoForcedGc() = pairedSlowHost(false)
-    fun testPairedSlowHostThousandRefreshesForcedGcOwnershipOnly() = pairedSlowHost(true)
+    fun testPairedSlowHostThousandRefreshesNoForcedGc() { pairedSlowHost(false) }
+    fun testPairedSlowHostThousandRefreshesForcedGcOwnershipOnly() {
+        val retired = pairedSlowHost(true)
+        // Let the producer's interpreter/JIT stack slots unwind before checking collectibility.
+        probe.observeWeakReferences("released_hosts_after_producer_return", retired, true)
+        assertTrue("Retired host connections remain reachable", retired.all { it.get() == null })
+    }
 
     /** Same real executor, same blocked InputConnection and same 1,000 refresh stimulus on B/C. */
-    private fun pairedSlowHost(forcedGc: Boolean) {
+    private fun pairedSlowHost(forcedGc: Boolean): List<WeakReference<*>> {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
         val retired = mutableListOf<WeakReference<*>>()
@@ -78,11 +83,12 @@ class ServiceOwnershipDiagnosticTest : InstrumentationTestCase() {
                 .put("obsoleteHostReadCount", obsoleteReadCounters.sumOf { it.get() }), forcedGc = forcedGc)
             if (forcedGc) probe.observeWeakReferences("released_old_host_collectibility", retired, true)
         } finally { release.countDown() }
+        return retired
     }
 
     private fun mailboxSnapshot(): Any? {
         val field = fixture.service.session.javaClass.declaredFields.firstOrNull { it.name == "candidateQueries" } ?: return null
-        val mailbox = field.apply { isAccessible = true }.get(fixture.service)
+        val mailbox = field.apply { isAccessible = true }.get(fixture.service.session)
         return mailbox.javaClass.getDeclaredMethod("snapshot").apply { isAccessible = true }.invoke(mailbox)
     }
 
@@ -165,12 +171,22 @@ class ServiceOwnershipDiagnosticTest : InstrumentationTestCase() {
                 fixture.replaceHost(restartView = false)
                 fixture.set("panel", panel)
                 fixture.invoke("renderBody")
+                // onStartInputView replaces the root after the fixture's initial attachment.
+                val currentRoot = fixture.field<ViewGroup>("root")
+                (currentRoot.parent as? ViewGroup)?.removeView(currentRoot)
+                fixture.activity.setContentView(currentRoot)
             }
-            instrumentation.waitForIdleSync()
+            fixture.await("Asynchronous content adapter has visible rows") {
+                fun loaded(view: View): Boolean =
+                    (view is android.widget.ListView && view.adapter?.count == 10 && view.childCount > 0) ||
+                        (view is ViewGroup && (0 until view.childCount).any { loaded(view.getChildAt(it)) })
+                loaded(fixture.field<ViewGroup>("body"))
+            }
             probe.stage = "${panel}_visible"
             val visible = contentPresentationOwnership()
-            assertEquals("All ten synthetic rows must actually be presented", 10, visible.getInt("contentEntryRowCount"))
-            assertEquals("Full synthetic strings must be owned while visible", 40_960, visible.getInt("strongFullTextUtf16CodeUnits"))
+            assertEquals("All ten synthetic rows must be available through the virtual list", 10, visible.getInt("logicalRowCount"))
+            assertTrue(visible.getInt("contentEntryRowCount") in 1..10)
+            assertEquals("Each visible row must own its full synthetic text", 4096 * visible.getInt("contentEntryRowCount"), visible.getInt("strongFullTextUtf16CodeUnits"))
             probe.sample("content_rows_visible", extra = visible)
             instrumentation.checkedMain {
                 fixture.service.onFinishInputView(false)
@@ -197,10 +213,12 @@ class ServiceOwnershipDiagnosticTest : InstrumentationTestCase() {
         instrumentation.checkedMain {
             val body = fixture.field<ViewGroup>("body")
             val fullText = ContentEntryRow::class.java.getDeclaredField("fullText").apply { isAccessible = true }
+            var logicalRows = 0
             var rowCount = 0
             var fullTextUnits = 0
             var nonemptyFullTextFields = 0
             fun inspect(view: View) {
+                if (view is android.widget.ListView) logicalRows += view.adapter?.count ?: 0
                 if (view is ContentEntryRow) {
                     rowCount++
                     val text = fullText.get(view) as String
@@ -210,7 +228,7 @@ class ServiceOwnershipDiagnosticTest : InstrumentationTestCase() {
                 if (view is ViewGroup) for (index in 0 until view.childCount) inspect(view.getChildAt(index))
             }
             inspect(body)
-            result = JSONObject().put("bodyDirectChildCount", body.childCount)
+            result = JSONObject().put("logicalRowCount", logicalRows).put("bodyDirectChildCount", body.childCount)
                 .put("contentEntryRowCount", rowCount).put("nonemptyStrongFullTextFieldCount", nonemptyFullTextFields)
                 .put("strongFullTextUtf16CodeUnits", fullTextUnits)
                 .put("ownershipPath", "OfflineKeyboardService.body -> descendant ContentEntryRow.fullText")
