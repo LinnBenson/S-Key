@@ -50,11 +50,13 @@ class CompiledDictionary(file: File) : AutoCloseable {
             val columns = if(kind=="exact") "text,code,weight,priority" else "text,code,weight"
             return rows("SELECT $columns FROM words WHERE kind='$namespace' AND kind IN ('pinyin','mixed_pinyin','pinyin_initial') AND $column=? ORDER BY $ranking LIMIT ? OFFSET ?", arrayOf(key, limit.toString(),offset.toString()))
         }
-        override fun predictions(context: String): List<String> {
+        override fun predictions(context: String): List<String> = predictions(context, null)
+        override fun predictions(context: String, signal: android.os.CancellationSignal?): List<String> {
             for (length in minOf(context.length, 8) downTo 1) {
+                signal?.throwIfCanceled()
                 val prefix = context.takeLast(length)
                 if (prefix.any { !Character.isIdeographic(it.code) }) continue
-                val results = db.rawQuery("SELECT text FROM words WHERE kind='$namespace' AND kind IN ('pinyin','mixed_pinyin') AND text>? AND text<? ORDER BY weight DESC LIMIT 12", arrayOf(prefix, prefix + "\uffff")).use { c ->
+                val results = db.rawQuery("SELECT text FROM words WHERE kind='$namespace' AND kind IN ('pinyin','mixed_pinyin') AND text>? AND text<? ORDER BY weight DESC LIMIT 12", arrayOf(prefix, prefix + "\uffff"), signal).use { c ->
                     buildList { while(c.moveToNext()) c.getString(0).removePrefix(prefix).takeIf { it.isNotEmpty() }?.let { add(it) } }
                 }
                 if (results.isNotEmpty()) return results

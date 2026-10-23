@@ -2805,6 +2805,29 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testCandidateRefreshAndClearCancelPredictionSignal() {
+        query(true,"k")
+        val old=field<android.os.CancellationSignal>("predictionSignal")
+        onMainChecked { invoke("refreshCandidates") }
+        assertTrue(old.isCanceled)
+        val next=field<android.os.CancellationSignal>("predictionSignal")
+        onMainChecked { invoke("clearPending") }
+        assertTrue(next.isCanceled)
+    }
+
+    fun testWubiContextPredictionAndChainedCommit() {
+        onMainChecked { SettingsStore(context).wubiPinyinInput = false
+            SettingsStore(context).chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.WUBI }
+        instrumentation.waitForIdleSync()
+        query(true,"k")
+        onMainChecked { assertEquals(true,invoke("choose","中")) }
+        awaitResults()
+        assertTrue(field<List<String>>("candidateTexts").any { it.startsWith("国") })
+        val prediction=field<List<String>>("candidateTexts").first()
+        onMainChecked { assertEquals(true,invoke("choose",prediction)) }
+        assertEquals("中"+prediction,connection.before)
+    }
+
     fun testPinyinContextPredictionAndModeToolbar() {
         onMainChecked { SettingsStore(context).wubiPinyinInput = false }
         onMainChecked { SettingsStore(context).chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.PINYIN }

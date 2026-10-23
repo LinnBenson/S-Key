@@ -12,5 +12,6 @@ interface PinyinLookup {
     fun lookup(kind: String, key: String, limit: Int): List<DictionaryEngine.Entry> = index(kind)[key].orEmpty().take(limit)
     fun lookupPage(kind: String, key: String, offset: Int, limit: Int): List<DictionaryEngine.Entry> = index(kind)[key].orEmpty().drop(offset).take(limit)
     fun predictions(context: String): List<String> = emptyList()
+    fun predictions(context: String, signal: android.os.CancellationSignal?): List<String> = predictions(context)
 }
 interface EnglishLookup { fun complete(prefix: String, limit: Int): List<String> }

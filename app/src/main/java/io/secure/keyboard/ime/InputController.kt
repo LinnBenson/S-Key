@@ -27,7 +27,7 @@ internal object InputController {
     /** Successful ordered commits clear the code without discarding later queued keystrokes. */
     internal fun KeyboardSession.clearCompositionImpl() {
         generation++
-        candidateQueries.clear()
+        cancelCandidateQueries()
         code = ""
         pinyinComposition.clear()
         clearCandidates()
@@ -124,10 +124,12 @@ internal object InputController {
                 refreshCandidates()
                 return true
             }
-            if (code.isEmpty()) return false
+            if (code.isEmpty() && pinyinContext.isEmpty()) return false
             feedback()
             if (!commitInputText(value, glossary = true)) return false
+            pinyinContext = (pinyinContext + value).takeLast(16)
             clearComposition()
+            refreshCandidates()
         } else {
             if (candidateQuery.isEmpty() || !settings.englishCompletion) return false
             val expected = candidateQuery
@@ -143,7 +145,7 @@ internal object InputController {
             }
             val seq = ++generation
             englishConfirmation = seq
-            candidateQueries.clear()
+            cancelCandidateQueries()
             worker.execute {
                 val prefix = englishPrefix(ic)
                 val following = try { ic.getTextAfterCursor(1, 0)?.toString() }
@@ -388,8 +390,9 @@ internal object InputController {
                     // A detached or temporarily unavailable host may reject the edit.
                     // Retain composition and candidates so the user can retry explicitly.
                     if (commitInputText(it.text, glossary = true)) {
+                        pinyinContext = (pinyinContext + it.text).takeLast(16)
                         clearComposition()
-                        renderHeader()
+                        refreshCandidates()
                     }
                 }
             }

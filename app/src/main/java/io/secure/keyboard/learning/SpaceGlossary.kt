@@ -103,6 +103,10 @@ internal class SpaceGlossary(
     internal fun awaitReleased(timeoutMs: Long) = executor.awaitTermination(timeoutMs, TimeUnit.MILLISECONDS)
 
     class SqliteBackend(context: Context) : Backend {
+        companion object {
+            private val filesLock = Any()
+            private val openPaths = mutableMapOf<String, Int>()
+        }
         private val app = context.applicationContext
         private var db: SQLiteDatabase? = null
         override fun lookup(word: String, signal: CancellationSignal): String? {
@@ -141,8 +145,24 @@ internal class SpaceGlossary(
                 } finally { temporary.delete() }
             }
             signal.throwIfCanceled()
-            return SQLiteDatabase.openDatabase(target.path, null, SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS)
+            return synchronized(filesLock) {
+                signal.throwIfCanceled()
+                val opened = SQLiteDatabase.openDatabase(target.path, null, SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS)
+                openPaths[target.path] = (openPaths[target.path] ?: 0) + 1
+                dir.listFiles().orEmpty().filter {
+                    it.name.matches(Regex("[0-9a-f]{64}\\.db")) && it != target && it.path !in openPaths
+                }.forEach { it.delete() }
+                opened
+            }
         }
-        override fun close() { db?.close(); db = null }
+        override fun close() = synchronized(filesLock) {
+            db?.let {
+                val path = it.path
+                it.close()
+                val remaining = (openPaths[path] ?: 1) - 1
+                if (remaining == 0) openPaths.remove(path) else openPaths[path] = remaining
+            }
+            db = null
+        }
     }
 }

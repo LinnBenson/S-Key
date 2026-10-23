@@ -5,24 +5,51 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'third_party/cc_cedict'
 OUT = ROOT / 'app/build/generated/spaceGlossary/learning'
 
+def split_senses(sense):
+    depth = 0
+    start = 0
+    for i, char in enumerate(sense):
+        if char == '(': depth += 1
+        elif char == ')': depth = max(0, depth - 1)
+        elif char == ';' and depth == 0:
+            yield sense[start:i].strip()
+            start = i + 1
+    yield sense[start:].strip()
+
 def entries(text):
-    choices = {}
+    records = {}
     for line in text.splitlines():
-        if not line or line.startswith('#'): continue
         match = re.fullmatch(r'(\S+) (\S+) \[([^]]+)\] /(.+)/', line)
         if not match: continue
         traditional, simplified, _, meanings = match.groups()
         if not (2 <= len(simplified) <= 12 and all('\u3400' <= c <= '\u9fff' for c in simplified)): continue
-        # Preserve source sense order; never turn a descriptive sentence into a single word.
-        for sense in meanings.split('/'):
-            for gloss in sense.split(';'):
+        for word in (simplified, traditional):
+            records.setdefault(word, []).extend((sense, any(c.isupper() for c in match[3])) for sense in meanings.split('/'))
+
+    def resolve(word, visited):
+        if word in visited or len(visited) >= 8: return None
+        redirects = []
+        # Prefer ordinary readings over proper-name readings marked by capitalized pinyin.
+        # Preserve source sense order, including sentence-initial capital letters.
+        for sense, _ in sorted(records.get(word, []), key=lambda item: item[1]):
+            sense = sense.strip()
+            redirect = re.match(r'(?:see|variant of|old variant of|same as) (.+)', sense, re.I)
+            if redirect and not re.search(r'[\u3400-\u9fff]', redirect[1]): redirect = None
+            if redirect:
+                redirects.extend(re.findall(r'[\u3400-\u9fff]+', redirect[1]))
+                continue
+            if re.match(r'(?:CL:|surname\b|also (?:pr\.|pronounced|written)|abbr\.|used (?:in|as)|Taiwan pr\.)', sense, re.I): continue
+            # Keep complete definitions and meaningful qualifiers. UI handles truncation.
+            for gloss in split_senses(sense):
                 gloss = gloss.strip()
-                if re.fullmatch(r'[a-z]+(?:[\x27-][a-z]+)*(?: [a-z]+(?:[\x27-][a-z]+)*){0,3}', gloss) and len(gloss) <= 48 and not gloss.startswith(('see ', 'variant of ', 'surname ', 'also ', 'abbr ', 'used ', 'a kind of ')):
-                    for word in (simplified, traditional): choices.setdefault(word, gloss)
-                    break
-            else: continue
-            break
-    return choices
+                if re.search(r'[A-Za-z]', gloss) and not re.search(r'[\u3400-\u9fff]|\[[^]]*\]', gloss):
+                    return gloss
+        for target in redirects:
+            result = resolve(target, visited | {word})
+            if result: return result
+        return None
+
+    return {word: gloss for word in records if (gloss := resolve(word, set()))}
 
 def main():
     raw = (SOURCE/'cedict.txt.gz').read_bytes()

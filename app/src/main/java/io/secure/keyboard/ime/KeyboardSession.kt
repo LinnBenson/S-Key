@@ -61,6 +61,11 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal lateinit var engine: OfflineEngine
     internal val worker = Executors.newSingleThreadExecutor()
     internal val candidateQueries = LatestTaskMailbox(worker)
+    internal var predictionSignal: CancellationSignal? = null
+    internal fun cancelCandidateQueries() {
+        predictionSignal?.cancel(); predictionSignal = null
+        candidateQueries.clear()
+    }
     internal val clipboardWrites = BoundedTaskQueue(worker, 32, 262_144)
     // Drain accepted tiny history writes on service destruction without retaining its views.
     internal val emojiWorker = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L,
@@ -353,7 +358,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             }
             else if (key == "builtin_dictionary_revision") main.post {
                 generation++
-                candidateQueries.clear()
+                cancelCandidateQueries()
                 clearCandidates()
                 if (active) { renderHeader(); refreshCandidates() }
             }
@@ -526,6 +531,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         clipboardWrites.close()
         emojiWorker.shutdown()
         contentQueries.close()
+        cancelCandidateQueries()
         candidateQueries.close()
         voiceSelectionChecks.close()
         releaseFinishedInputPresentation()
@@ -572,7 +578,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             voiceGuard?.selectionChanged(oldSelStart, oldSelEnd, newSelStart, newSelEnd) == false) {
             stopVoiceForEditorChange()
         }
-        if (active && !secret && (!chinese || (moved && settings.chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN))) refreshCandidates()
+        if (active && !secret && (!chinese || (moved && (settings.chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN || pinyinContext.isNotEmpty())))) refreshCandidates()
     }
 
     fun cancelTransient() = with(KeyboardViewController) { cancelTransientImpl() }

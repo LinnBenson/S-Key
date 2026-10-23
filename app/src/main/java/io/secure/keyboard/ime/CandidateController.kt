@@ -69,6 +69,7 @@ internal object CandidateController {
     }
 
     internal fun KeyboardSession.refreshCandidatesImpl() {
+        cancelCandidateQueries()
         candidatePager = null
         candidatePageLoading = false
         val seq = ++generation
@@ -88,17 +89,18 @@ internal object CandidateController {
         if (candidateDictionaryKind?.let { candidateDictionaryRevision != content.dictionaryRevision(it) } == true)
             clearCandidates()
         if (
-            (translation.enabled && !zh && localEditor==null) || (zh && localCode.isEmpty() && (mode != io.secure.keyboard.engine.ChineseInputMode.PINYIN || localContext.isEmpty())) || !loaded || secret || (!zh && !settings.englishCompletion)
+            (translation.enabled && !zh && localEditor==null) || (zh && localCode.isEmpty() && localContext.isEmpty()) || !loaded || secret || (!zh && !settings.englishCompletion)
         ) {
-            candidateQueries.clear()
+            cancelCandidateQueries()
             clearCandidates()
             renderHeader()
             return
         }
         pinyinPredictionGeneration = seq.takeIf {
-            zh && mode == io.secure.keyboard.engine.ChineseInputMode.PINYIN && localCode.isEmpty() && localContext.isNotEmpty()
+            zh && localCode.isEmpty() && localContext.isNotEmpty()
         }
         renderHeader()
+        val querySignal = CancellationSignal().also { predictionSignal = it }
         val fuzzy = settings.fuzzyPinyin
         val fuzzyPairs = settings.fuzzyPairs
         val candidatePaint = candidateStrip.normalPaintSnapshot()
@@ -116,11 +118,16 @@ internal object CandidateController {
                 else content.matchingDictionary(query,kind)
             }
             val source: Sequence<io.secure.keyboard.engine.PinyinDecoder.Option> =
-                if (zh && mode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) {
+                if (zh && query.isEmpty()) {
                     val surrounding = assistantContext ?: try {
                         connection?.getTextBeforeCursor(16, 0)?.toString().orEmpty()
                     } catch (_: RuntimeException) { "" }
-                    val decoded = engine.decodePinyinWithoutInitials(query, surrounding + selectedPinyin, user.map { it.reading to it.word }, fuzzy, fuzzyPairs) { destroyed || seq != generation }
+                    engine.decodePinyinWithoutInitials("", surrounding, emptyList(), false, emptySet(), querySignal) { destroyed || seq != generation }.asSequence()
+                } else if (zh && mode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) {
+                    val surrounding = assistantContext ?: try {
+                        connection?.getTextBeforeCursor(16, 0)?.toString().orEmpty()
+                    } catch (_: RuntimeException) { "" }
+                    val decoded = engine.decodePinyinWithoutInitials(query, surrounding + selectedPinyin, user.map { it.reading to it.word }, fuzzy, fuzzyPairs, querySignal) { destroyed || seq != generation }
                     if(query.length==1) sequence {
                         // Exact high-priority and custom entries precede the paged initials table.
                         yieldAll(engine.wordPages("priority_pinyin",query,runtimeRevision).map { io.secure.keyboard.engine.PinyinDecoder.Option(it,1) })

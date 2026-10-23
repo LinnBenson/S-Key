@@ -172,7 +172,7 @@ class DictionaryEngine private constructor(
         return result.values.toList()
     }
 
-    fun decodePinyin(raw: String, context: String, custom: List<Pair<String, String>>, fuzzy: Boolean, pairs: Set<String>, cancelled: () -> Boolean = { false }, includeInitials: Boolean = true): List<PinyinDecoder.Option> {
+    fun decodePinyin(raw: String, context: String, custom: List<Pair<String, String>>, fuzzy: Boolean, pairs: Set<String>, cancelled: () -> Boolean = { false }, includeInitials: Boolean = true, predictionSignal: android.os.CancellationSignal? = null): List<PinyinDecoder.Option> {
         val decoder = PinyinDecoder(cancelled = cancelled, lookup = { token ->
             val segmented = token.contains('\'')
             val syllables = token.split('\'').filter(String::isNotEmpty)
@@ -191,7 +191,7 @@ class DictionaryEngine private constructor(
                 (exact + alternatives + extendedFuzzyEntries(token, pairs, 24, cancelled)).distinctBy { it.text }
             }
         }, predict = { contextText ->
-            indexedPinyin?.predictions(contextText) ?: pinyinExact.values.asSequence().flatten()
+            indexedPinyin?.predictions(contextText, predictionSignal) ?: pinyinExact.values.asSequence().flatten()
                 .filter { it.text.startsWith(contextText) && it.text.length > contextText.length }
                 .sortedByDescending { it.weight }.take(12).map { it.text.removePrefix(contextText) }.toList()
         })

@@ -88,8 +88,8 @@ class OfflineEngine(context: Context) {
             offset += page.size
         }
     }
-    internal fun decodePinyinWithoutInitials(raw: String, context: String, custom: List<Pair<String,String>>, fuzzy: Boolean, pairs: Set<String>, cancelled: () -> Boolean) =
-        withDictionary { it.decodePinyin(raw,context,custom,fuzzy,pairs,cancelled,includeInitials=false) }
+    internal fun decodePinyinWithoutInitials(raw: String, context: String, custom: List<Pair<String,String>>, fuzzy: Boolean, pairs: Set<String>, predictionSignal: android.os.CancellationSignal? = null, cancelled: () -> Boolean) =
+        withDictionary { it.decodePinyin(raw,context,custom,fuzzy,pairs,cancelled,includeInitials=false,predictionSignal=predictionSignal) }
 
     private fun <T> withDictionary(block: (DictionaryEngine)->T): T = synchronized(initializationLock) {
         load()

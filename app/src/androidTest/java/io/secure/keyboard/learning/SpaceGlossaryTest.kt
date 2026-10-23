@@ -13,6 +13,23 @@ class SpaceGlossaryTest : InstrumentationTestCase() {
     private val main = Handler(Looper.getMainLooper())
     private fun ui(action: () -> Unit) = instrumentation.runOnMainSync(action)
 
+    fun testObsoleteDatabaseCleanupPreservesUnrelatedFiles() {
+        val root = java.io.File(instrumentation.targetContext.cacheDir, "gloss-clean-${System.nanoTime()}").apply { mkdirs() }
+        val context = object : android.content.ContextWrapper(instrumentation.targetContext) {
+            override fun getApplicationContext(): android.content.Context = this
+            override fun getNoBackupFilesDir() = root
+        }
+        val dir = java.io.File(root, "space-glossary").apply { mkdirs() }
+        val old = java.io.File(dir, "0".repeat(64)+".db").apply { writeText("obsolete") }
+        val other = java.io.File(dir, "keep.txt").apply { writeText("unrelated") }
+        try {
+            SpaceGlossary.SqliteBackend(context).use { assertEquals("apple", it.lookup("苹果", CancellationSignal())) }
+            assertFalse(old.exists())
+            assertTrue(other.exists())
+            assertEquals(1, dir.listFiles()!!.count { it.extension == "db" })
+        } finally { root.deleteRecursively() }
+    }
+
     fun testCursorSuffixOrderBoundariesAndSplitWords() {
         val examples = listOf(
             Triple("好我在的", "在的", listOf("好我在的", "我在的", "在的")),

@@ -17,6 +17,15 @@ class BuiltinDictionaryTest : AndroidTestCase() {
     }
     override fun tearDown() { directory.deleteRecursively(); super.tearDown() }
 
+    fun testPredictionCancellationDoesNotCloseSharedDatabase() {
+        CompiledDictionary(repository.defaultRuntime()).use { db ->
+            val signal = android.os.CancellationSignal().apply { cancel() }
+            try { db.pinyin.predictions("中", signal); fail("Canceled query ran") }
+            catch (_: android.os.OperationCanceledException) { }
+            assertTrue(db.pinyin.predictions("中", android.os.CancellationSignal()).isNotEmpty())
+        }
+    }
+
     // Isolate compiler fixtures directly; public APIs must never bypass protected files.
     private fun emptyFixture(keep: Set<String> = emptySet()) {
         repository.libraries()
