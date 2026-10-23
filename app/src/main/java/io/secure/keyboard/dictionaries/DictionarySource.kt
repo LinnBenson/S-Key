@@ -31,6 +31,7 @@ object DictionarySource {
         Page(skipped,count,text.toString(),r.read()!=-1,version)
     }
     fun replace(file: File,page: Page,text: String,output: File) {
+        require(Charsets.UTF_8.newEncoder().canEncode(text)) { "编辑内容包含无效 Unicode 字符" }
         require(text.lineSequence().all { it.length<=8192 }) { "单行不能超过 8192 个字符" }
         require(text.length<=256_000) { "单次编辑内容过大，请分段保存" }
         reader(file.inputStream()).use { r -> output.writer().buffered().use { w ->
@@ -63,12 +64,14 @@ object DictionarySource {
         return count
     }
     fun parse(file: File,kind: String,filename: String,emit: (String,String,Long)->Unit) = reader(file.inputStream()).use { r ->
+        require(file.length()<=64L*1024*1024) { "$filename：词库文件不能超过 64 MiB" }
         val yaml=filename.endsWith(".yaml",true) || filename.endsWith(".yml",true)
         require(kind in listOf("wubi","pinyin","english")) { "未知词库类型" }
         var started=!yaml; var lineNumber=0
         val header=StringBuilder()
         var stemColumn=false
         while(true) {
+            check(!Thread.currentThread().isInterrupted) { "词库校验已取消" }
             val raw=r.rawLine() ?: break; lineNumber++
             val line=raw.trimEnd('\n','\r').removePrefix("\uFEFF")
             if(!started) {
@@ -98,9 +101,7 @@ object DictionarySource {
                 if(parts.size==4) require(parts[3].length in 1..4 && parts[3].all { it in 'a'..'z' }) { "stem 须为 1–4 个小写字母" }
                 val text=parts[0]; val code=if(kind=="english") text else parts[1]
                 val weightText=if(kind=="english") parts[1] else parts.getOrNull(2) ?: "0"
-                // Preserve the pinned Rime baseline's documented legacy fallback exactly.
-                val weight=weightText.toLongOrNull() ?: if(text=="χ" && code=="zzxx" && weightText=="450.5") 0L else error("词频必须为整数")
-                if(kind=="pinyin" && filename=="pinyin_initials.dict.yaml") require(code.length==1 && code[0] in 'a'..'z') { "单字母词库编码必须是一个小写字母" }
+                val weight=weightText.toLongOrNull() ?: error("词频必须为整数且不能超出范围")
                 DictionaryCompiler.validate(kind,text,code,weight)
                 emit(text,code,weight)
             } catch(e: Exception) { throw IllegalArgumentException("$filename 第 $lineNumber 行：${e.message}",e) }

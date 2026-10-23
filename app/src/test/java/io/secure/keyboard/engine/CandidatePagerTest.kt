@@ -36,6 +36,33 @@ class CandidatePagerTest {
         assertEquals(listOf("西安"),engine.candidates("xi'an",false,mode=ChineseInputMode.PINYIN).map { it.text })
         assertEquals(6,pages)
     }
+    @Test fun cancellationStopsInsidePagedLookupAndComposition() {
+        var cancelled = false
+        var reads = 0
+        val pinyin = object : PinyinLookup {
+            override val entryCount = 100000
+            override fun index(kind: String) = emptyMap<String, List<DictionaryEngine.Entry>>()
+            override fun lookupPage(kind: String, key: String, offset: Int, limit: Int): List<DictionaryEngine.Entry> {
+                reads++
+                cancelled = true
+                return List(limit) { DictionaryEngine.Entry("不匹配$it", "xian", 1) }
+            }
+        }
+        val wubi = object : WubiLookup {
+            override val entryCount = 0
+            override fun exactCandidateCount(code: String) = 0
+            override fun exact(code: String, limit: Int) = emptyList<Candidate>()
+            override fun prefix(code: String, limit: Int) = emptyList<Candidate>()
+        }
+        val english = object : EnglishLookup { override fun complete(prefix: String, limit: Int) = emptyList<String>() }
+        val engine = DictionaryEngine(wubi, pinyin, english)
+        assertTrue(engine.candidates("xi'an", mode = ChineseInputMode.PINYIN, cancelled = { cancelled }).isEmpty())
+        assertEquals(1, reads)
+        cancelled = false; reads = 0
+        assertTrue(engine.decodePinyin("xi'an", "", emptyList(), true, setOf("an_ian"), { cancelled }).isEmpty())
+        assertEquals(1, reads)
+    }
+
     @Test fun orderingAndDeduplicationCrossPageBoundaries() {
         val normal=listOf("甲","𠀀","乙","丙")
         val custom=listOf("a" to "乙","a" to "自定义","ab" to "尾词")

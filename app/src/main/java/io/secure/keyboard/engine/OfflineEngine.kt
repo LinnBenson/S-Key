@@ -6,7 +6,7 @@ import android.content.Context
 class OfflineEngine(context: Context) {
     private val app = context.applicationContext
     private val shortcuts = io.secure.keyboard.data.EmojiShortcutStore(app)
-    // Repository migration/cleanup can copy SQLite assets; defer it to load()'s worker.
+    // Repository initialization/cleanup can copy SQLite assets; defer it to load()'s worker.
     private val repository by lazy { io.secure.keyboard.dictionaries.DictionaryRepository(app) }
     private val prefs = app.getSharedPreferences("settings",0)
     val revision: String get() = prefs.getString("builtin_dictionary_revision", "default-v2")!! + ":emoji:" + shortcuts.revision
@@ -22,27 +22,19 @@ class OfflineEngine(context: Context) {
             val file = repository.activeFile() ?: repository.defaultRuntime()
             if (loadedPath == file.path && packagedDictionary != null) { loadedVersion=version; return }
             val replacement = io.secure.keyboard.dictionaries.CompiledDictionary(file)
-            var fallback: io.secure.keyboard.dictionaries.CompiledDictionary? = null
             try {
-                fallback = if (!replacement.scopedPinyin)
-                    io.secure.keyboard.dictionaries.CompiledDictionary(repository.defaultRuntime()) else null
-                val mixed = fallback?.let { DictionaryEngine(replacement.wubi, it.mixedPinyin, replacement.english) }
-                    ?: replacement.mixedEngine
-                // Prepare every fallible resource before publishing or closing the old snapshot.
+                require(replacement.scopedPinyin) { "词库索引格式不受支持，请重新编译" }
                 shortcuts.lexicon()
                 val previous = compiled
-                val previousFallback = legacyFallback
                 compiled = replacement
-                legacyFallback = fallback
-                mixedDictionary = mixed
+                mixedDictionary = replacement.mixedEngine
                 packagedDictionary = replacement.engine
                 loadedPath = file.path
+                loadedIdentity = repository.identity
                 loadedVersion = version
                 previous?.close()
-                previousFallback?.close()
             } catch (error: Throwable) {
-                // Once published, ownership belongs to the process-wide snapshot.
-                if (compiled !== replacement) { replacement.close(); fallback?.close() }
+                if (compiled !== replacement) replacement.close()
                 throw error
             }
             repository.cleanupSnapshots(file)
@@ -74,8 +66,8 @@ class OfflineEngine(context: Context) {
     fun completeEnglish(prefix: String, limit: Int = 8): List<Candidate> =
         withDictionary { it.completeEnglish(prefix, limit) }
 
-    internal fun boundedCandidates(code: String, fuzzy: Boolean, limit: Int, pairs: Set<String>, mode: ChineseInputMode) =
-        withDictionary { (if(mode==ChineseInputMode.MIXED) checkNotNull(mixedDictionary) else it).candidates(code,fuzzy,limit,pairs,mode=mode) }
+    internal fun boundedCandidates(code: String, fuzzy: Boolean, limit: Int, pairs: Set<String>, mode: ChineseInputMode, cancelled: () -> Boolean = { false }) =
+        withDictionary { (if(mode==ChineseInputMode.MIXED) checkNotNull(mixedDictionary) else it).candidates(code,fuzzy,limit,pairs,mode=mode,cancelled=cancelled) }
     /** Each SQL page is materialized under the snapshot lock; no cursor survives between pages. */
     internal fun wordPages(kind: String, query: String, expectedRevision: String): Sequence<String> = sequence {
         var offset = 0
@@ -107,11 +99,23 @@ class OfflineEngine(context: Context) {
         private var loadedVersion: String? = null
         private var loadedPath: String? = null
         private var compiled: io.secure.keyboard.dictionaries.CompiledDictionary? = null
-        private var legacyFallback: io.secure.keyboard.dictionaries.CompiledDictionary? = null
+        private var loadedIdentity: String? = null
         private var mixedDictionary: DictionaryEngine? = null
+        /** Called after publication, outside the repository lock to avoid lock inversion. */
+        internal fun releaseSnapshot(identity: String) = synchronized(initializationLock) {
+            if(loadedIdentity == identity) {
+                compiled?.close()
+                compiled = null
+                packagedDictionary = null
+                mixedDictionary = null
+                loadedPath = null
+                loadedVersion = null
+                loadedIdentity = null
+            }
+        }
         private val initializationLock = Any()
-        // Only immutable bundled dictionary tables live here. Never editor text, a query,
-        // candidates, user frequencies, imported words, Context, or a learning/history model.
+        // Process-wide read-only SQLite snapshot handles, including compiled user libraries.
+        // No editor text, query, candidate list, Context, or learned input history is retained.
         @Volatile private var packagedDictionary: DictionaryEngine? = null
     }
 }

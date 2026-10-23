@@ -7,6 +7,40 @@ import android.test.InstrumentationTestCase
 /** Exercises packaged dictionaries on Android, surfacing initialization errors directly. */
 @Suppress("DEPRECATION")
 class DictionaryEngineDeviceTest : InstrumentationTestCase() {
+    fun testExtendedFuzzyRulesUsePackagedIndex() {
+        val engine = OfflineEngine(instrumentation.targetContext).also { it.load() }
+        for (mode in listOf(ChineseInputMode.MIXED, ChineseInputMode.PINYIN)) {
+            assertTrue(engine.candidates("zhongkuo", true, 200, setOf("g_k"), mode = mode).any { it.text == "中国" })
+            assertFalse(engine.candidates("zhongkuo", true, 200, emptySet(), mode = mode).any { it.text == "中国" })
+        }
+        assertTrue(engine.decodePinyin("zhongkuo", "", emptyList(), true, setOf("g_k")).any { it.text == "中国" })
+        for (query in listOf("nihao", "zhongguo", "shurufa", "zhongkuo")) {
+            val started = SystemClock.elapsedRealtime()
+            val candidates = engine.decodePinyin(query, "", emptyList(), true, io.secure.keyboard.data.SettingsStore.fuzzyPairIds.toSet())
+            assertTrue(candidates.isNotEmpty())
+            instrumentation.sendStatus(2, Bundle().apply { putLong("all_fuzzy_${query}_ms", SystemClock.elapsedRealtime() - started) })
+        }
+    }
+
+    fun testWarmIndexedQueryLatency() {
+        val engine = OfflineEngine(instrumentation.targetContext).also { it.load() }
+        val cases = linkedMapOf<String, () -> Unit>(
+            "wubi_exact" to { check(engine.exactWubi("wq").isNotEmpty()) },
+            "wubi_prefix" to { check(engine.candidates("a",false,mode=ChineseInputMode.WUBI).isNotEmpty()) },
+            "pinyin" to { check(engine.decodePinyin("nihao","",emptyList(),false,emptySet()).isNotEmpty()) },
+            "english" to { check(engine.completeEnglish("s").isNotEmpty()) }
+        )
+        for ((name, query) in cases) {
+            repeat(5) { query() }
+            val samples = (0 until 30).map {
+                val start=System.nanoTime(); query(); (System.nanoTime()-start)/1_000_000.0
+            }.sorted()
+            instrumentation.sendStatus(0, Bundle().apply {
+                putString("query_$name", "median_ms=${samples[15]},p95_ms=${samples[28]}")
+            })
+        }
+    }
+
     fun testPackagedEngineLoadsAndFindsChineseCandidates() {
         val start = SystemClock.elapsedRealtime()
         val engine = OfflineEngine(instrumentation.targetContext)
@@ -57,16 +91,13 @@ class DictionaryEngineDeviceTest : InstrumentationTestCase() {
         assertEquals(listOf("赞", "👍"), engine.appendEmoji(listOf("赞")))
     }
 
-    fun testMappedWubiIncludesCompleteLargeExactBucket() {
-        val assets = instrumentation.targetContext.assets
-        // openFd fails for compressed assets, detecting accidental packaging regressions.
-        assets.openFd("dictionaries/compact-wubi.skwb").use { descriptor ->
-            assertTrue("Compact table must be a directly mappable APK asset", descriptor.length > 64)
-        }
+    fun testIndexedWubiIncludesCompleteLargeExactBucket() {
+        val repository=io.secure.keyboard.dictionaries.DictionaryRepository(instrumentation.targetContext)
         val engine = OfflineEngine(instrumentation.targetContext)
         engine.load()
-        val full = engine.candidates("khkh", false)
-        assertEquals("All exact entries must remain reachable beyond the first 40", 472, full.size)
+        val expected=io.secure.keyboard.dictionaries.CompiledDictionary(repository.defaultRuntime()).use { it.wubi.exact("khkh",10000) }
+        val full = engine.candidates("khkh", false, mode=ChineseInputMode.WUBI)
+        assertEquals(expected,full)
         assertEquals(full.size, full.map { it.text }.distinct().size)
         assertTrue(full.all { it.source == Source.WUBI && it.code == "khkh" })
         assertEquals(full.first(), engine.exactWubi("khkh", 1).single())

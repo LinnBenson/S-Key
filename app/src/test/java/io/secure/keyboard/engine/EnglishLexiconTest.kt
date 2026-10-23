@@ -105,7 +105,7 @@ class EnglishLexiconTest {
 
     @Test
     fun packagedVocabularyCoversCommonDailyAndTechnicalWords() {
-        val lexicon = EnglishLexicon(File("src/main/assets/dictionaries/english_frequency.tsv").reader())
+        val lexicon = EnglishLexicon(File("src/test/resources/dictionaries/english_frequency.tsv").reader())
         assertEquals(25_000, lexicon.entryCount)
         for ((prefix, word) in listOf(
             "hel" to "hello", "compu" to "computer", "keyb" to "keyboard",
@@ -128,7 +128,7 @@ class EnglishLexiconTest {
 
     @Test
     fun packagedVocabularyRetainsWeekdaysAndMonthsWithoutPersonalNameLists() {
-        val lexicon = EnglishLexicon(File("src/main/assets/dictionaries/english_frequency.tsv").reader())
+        val lexicon = EnglishLexicon(File("src/test/resources/dictionaries/english_frequency.tsv").reader())
         val calendar = ("monday tuesday wednesday thursday friday saturday sunday " +
             "january february march april may june july august september october november december").split(' ')
         for (word in calendar) {

@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import subprocess
+from verify_dictionary_apk import verify_apk
 
 SOURCE = Path(__file__).resolve().parents[1]
 ROOT = SOURCE.parent
@@ -43,4 +44,5 @@ if __name__ == "__main__":
             target,
         )
         run(tools / "apksigner", "verify", "--verbose", "--print-certs", target)
+        verify_apk(target)
         print(f"Verified: {target}", flush=True)

@@ -21,6 +21,10 @@ class FuzzyPairsTest {
                 "an_ang" to ("ban" to "bang"),
                 "en_eng" to ("ben" to "beng"),
                 "in_ing" to ("bin" to "bing"),
+                "l_h" to ("lan" to "han"), "r_y" to ("ran" to "yan"),
+                "g_k" to ("gan" to "kan"), "ai_ei" to ("bai" to "bei"),
+                "ao_ou" to ("pao" to "pou"), "an_ian" to ("nan" to "nian"),
+                "en_in" to ("ben" to "bin"), "eng_ing" to ("beng" to "bing"),
             )
         for ((pair, forms) in cases) for ((stored, typed) in
             listOf(forms, forms.second to forms.first)) {
@@ -47,6 +51,30 @@ class FuzzyPairsTest {
                 "exact reading survives",
                 engine.candidates(stored, fuzzyPairs = emptySet()).any { it.text == "目标" },
             )
+        }
+    }
+
+    @Test
+    fun extendedPairsRespectSyllableBoundariesAndWorkInDecoder() {
+        val engine = fixture("han nian")
+        val pairs = setOf("l_h", "an_ian")
+        assertTrue(engine.candidates("lannan", fuzzyPairs = pairs).any { it.text == "目标" })
+        assertTrue(engine.candidates("lan'nan", fuzzyPairs = pairs).any { it.text == "目标" })
+        assertTrue(engine.decodePinyin("lan'nan", "", emptyList(), true, pairs).any { it.text == "目标" })
+        assertFalse(engine.candidates("lann'an", fuzzyPairs = pairs).any { it.text == "目标" })
+        assertFalse(fixture("lian").candidates("lvan", fuzzyPairs = setOf("an_ian")).any { it.text == "目标" })
+        assertFalse(fixture("hang").candidates("lang", fuzzyPairs = emptySet()).any { it.text == "目标" })
+    }
+
+    @Test
+    fun oldAndNewFuzzyPairsComposeInBothDirections() {
+        for ((left, right, pairs) in listOf(
+            Triple("nan", "han", setOf("n_l", "l_h")),
+            Triple("ran", "han", setOf("r_l", "l_h")),
+            Triple("beng", "bin", setOf("en_eng", "en_in")),
+        )) for ((stored, typed) in listOf(left to right, right to left)) {
+            assertTrue("$typed -> $stored", fixture(stored).candidates(typed, fuzzyPairs = pairs).any { it.text == "目标" })
+            for (pair in pairs) assertFalse(fixture(stored).candidates(typed, fuzzyPairs = setOf(pair)).any { it.text == "目标" })
         }
     }
 

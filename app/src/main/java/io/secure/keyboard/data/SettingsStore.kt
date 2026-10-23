@@ -296,7 +296,31 @@ class SettingsStore(context: Context) {
 
     var chineseInputMode: io.secure.keyboard.engine.ChineseInputMode
         get() = io.secure.keyboard.engine.ChineseInputMode.fromId(prefs.getString("chineseInputMode", "mixed"))
-        set(value) { prefs.edit().putString("chineseInputMode", value.id).apply() }
+        set(value) {
+            prefs.edit().putString("chineseInputMode", value.id).apply {
+                if (value != io.secure.keyboard.engine.ChineseInputMode.PINYIN)
+                    putBoolean("wubiPinyinInput", value == io.secure.keyboard.engine.ChineseInputMode.MIXED)
+            }.apply()
+        }
+
+    /** Public selector has two methods; MIXED remains an engine mode under Wubi. */
+    var chineseInputMethod: io.secure.keyboard.engine.ChineseInputMode
+        get() = if (chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN)
+            io.secure.keyboard.engine.ChineseInputMode.PINYIN else io.secure.keyboard.engine.ChineseInputMode.WUBI
+        set(value) {
+            chineseInputMode = if (value == io.secure.keyboard.engine.ChineseInputMode.PINYIN) value
+                else if (wubiPinyinInput) io.secure.keyboard.engine.ChineseInputMode.MIXED
+                else io.secure.keyboard.engine.ChineseInputMode.WUBI
+        }
+
+    var wubiPinyinInput: Boolean
+        get() = prefs.getBoolean("wubiPinyinInput", chineseInputMode != io.secure.keyboard.engine.ChineseInputMode.WUBI)
+        set(value) {
+            prefs.edit().putBoolean("wubiPinyinInput", value).apply {
+                if (chineseInputMethod == io.secure.keyboard.engine.ChineseInputMode.WUBI)
+                    putString("chineseInputMode", if (value) "mixed" else "wubi")
+            }.apply()
+        }
 
     var fourCodeAutoCommit: Boolean
         get() = prefs.getBoolean("fourCodeAutoCommit", false)
@@ -400,7 +424,9 @@ class SettingsStore(context: Context) {
             }
 
         private val opaqueHex = Regex("#[0-9a-fA-F]{6}")
-        val fuzzyPairIds = listOf("zh_z", "ch_c", "sh_s", "n_l", "r_l", "f_h", "an_ang", "en_eng", "in_ing")
+        val fuzzyInitialIds = listOf("zh_z", "ch_c", "sh_s", "n_l", "r_l", "f_h", "l_h", "r_y", "g_k")
+        val fuzzyFinalIds = listOf("an_ang", "en_eng", "in_ing", "ai_ei", "ao_ou", "an_ian", "en_in", "eng_ing")
+        val fuzzyPairIds = fuzzyInitialIds + fuzzyFinalIds
         // Defaults apply only when no pair selection has been saved.
         val defaultFuzzyPairIds = setOf("r_l", "en_eng", "in_ing")
         val themeTokenIds = listOf(

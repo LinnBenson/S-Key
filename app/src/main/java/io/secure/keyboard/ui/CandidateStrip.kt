@@ -94,7 +94,9 @@ class CandidateStrip(
      * An equal ordered result is a genuine no-op: no setText, font spans, layout, invalidation,
      * listener rebinding, or scrolling. Changed results reuse every surviving position and only
      * rebind changed labels. The callback reads its current text, never a captured old candidate.
-     * Keep all candidate strings, but initially create at most 40 views. Scrolling toward the end
+     * Keep all candidate strings, but initially bind about two viewports (at most 40 views).
+     * Long English labels therefore do not create dozens of offscreen TextViews on the first key.
+     * Scrolling toward the end
      * appends another batch automatically; there is no result cap or extra expand button.
      * Viewed batches remain attached for stable backward scrolling until the result changes.
      */
@@ -105,7 +107,8 @@ class CandidateStrip(
         val previous = displayed
         displayed = values.toList()
         val appended = previous.isNotEmpty() && values.size > previous.size && values.take(previous.size) == previous
-        val visibleCount = if(appended) minOf(values.size, maxOf(row.childCount, BATCH_SIZE)) else minOf(BATCH_SIZE, values.size)
+        val initialCount = initialBindingCount(values)
+        val visibleCount = if(appended) minOf(values.size, maxOf(row.childCount, initialCount)) else initialCount
         bindThrough(visibleCount, previous)
         if (row.childCount > visibleCount)
             row.removeViews(visibleCount, row.childCount - visibleCount)
@@ -114,6 +117,19 @@ class CandidateStrip(
         // Tail-only changes may leave the first batch and its geometry untouched. Still make
         // newly available entries reachable when the user is already at that batch's end.
         scheduleAppend()
+    }
+
+    private fun initialBindingCount(values: List<String>): Int {
+        val viewport=width.takeIf { it>0 } ?: resources.displayMetrics.widthPixels
+        val target=scrollX + viewport * 2.25f
+        val padding=(16 * resources.displayMetrics.density).roundToInt() * 2
+        var occupied=0f
+        var count=0
+        while(count<minOf(BATCH_SIZE,values.size) && (count<4 || occupied<target)) {
+            occupied+=normalPaint.measureText(values[count])+padding
+            count++
+        }
+        return count
     }
 
     @SuppressLint("ClickableViewAccessibility") // Same guarded TextView clicks as updateCandidates.

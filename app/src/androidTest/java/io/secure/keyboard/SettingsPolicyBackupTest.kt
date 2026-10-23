@@ -30,6 +30,32 @@ class SettingsPolicyBackupTest : AndroidTestCase() {
         listOf("settings","symbol_closure","ai_builtin_prompts").forEach { context.deleteSharedPreferences("$tag-$it") }
         super.tearDown()
     }
+    fun testTwoInputMethodsPreserveWubiOptionsAndLegacyModes() {
+        val prefs=sandbox.getSharedPreferences("settings",0)
+        val s=SettingsStore(sandbox)
+        val wubi=io.secure.keyboard.engine.ChineseInputMode.WUBI
+        val mixed=io.secure.keyboard.engine.ChineseInputMode.MIXED
+        val pinyin=io.secure.keyboard.engine.ChineseInputMode.PINYIN
+        for (legacy in listOf(wubi,mixed,pinyin)) {
+            prefs.edit().clear().putString("chineseInputMode",legacy.id).commit()
+            assertEquals(if(legacy==pinyin) pinyin else wubi,s.chineseInputMethod)
+            assertEquals(legacy!=wubi,s.wubiPinyinInput)
+        }
+        s.chineseInputMethod=wubi
+        s.wubiPinyinInput=false
+        s.fourCodeAutoCommit=true
+        s.chineseInputMethod=pinyin
+        assertFalse(s.wubiPinyinInput)
+        s.chineseInputMethod=wubi
+        assertEquals(wubi,s.chineseInputMode)
+        assertTrue(s.fourCodeAutoCommit)
+        s.wubiPinyinInput=true
+        assertEquals(mixed,s.chineseInputMode)
+        s.chineseInputMethod=pinyin
+        s.chineseInputMethod=wubi
+        assertEquals(mixed,SettingsStore(sandbox).chineseInputMode)
+    }
+
     fun testHistoryPoliciesPreservePinsAndExpireByCopyTime() {
         val store=ContentStore(sandbox); val settings=SettingsStore(sandbox)
         store.addClipboard("pin"); store.setClipboardPinned(store.clipboard().single().id,true)

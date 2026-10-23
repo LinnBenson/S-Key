@@ -22,6 +22,7 @@ class CandidateStripPagingTest : InstrumentationTestCase() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as Activity
         lateinit var strip: CandidateStrip
         lateinit var row: LinearLayout
+        var initialCount=0
         fun awaitLayout(description: String, condition: () -> Boolean) {
             val deadline = SystemClock.uptimeMillis() + 10_000
             var ready = false
@@ -44,7 +45,8 @@ class CandidateStripPagingTest : InstrumentationTestCase() {
                 assertTrue("Fixture must have an already measured viewport", strip.width > 0)
                 assertEquals("Fixture starts with the empty row's measured width", 0, row.width)
                 strip.updateCandidates(List(10_040) { "候选$it" })
-                assertEquals(40, row.childCount)
+                initialCount=row.childCount
+                assertTrue(initialCount in 4..40)
                 assertTrue("The newly bound first batch still needs measurement", row.isLayoutRequested)
                 val append = CandidateStrip::class.java.getDeclaredField("appendNearEnd")
                     .apply { isAccessible = true }.get(strip) as Runnable
@@ -52,25 +54,25 @@ class CandidateStripPagingTest : InstrumentationTestCase() {
                 // Choreographer's animation phase precedes its layout traversal. Exercise
                 // that ordering deterministically rather than depending on worker timing.
                 append.run()
-                assertEquals("A stale zero width must not eagerly append another batch", 40, row.childCount)
+                assertEquals("A stale zero width must not eagerly append another batch", initialCount, row.childCount)
             }
             awaitLayout("New first batch must finish measurement before its next paging check") {
                 !strip.isLayoutRequested && !row.isLayoutRequested && row.width > strip.width * 2
             }
             instrumentation.runOnMainSync {
-                assertEquals("Settled initial result must retain only its first batch", 40, row.childCount)
+                assertEquals("Settled initial result must retain only its first batch", initialCount, row.childCount)
                 assertTrue(row.width > strip.width * 2)
                 strip.scrollTo(row.width, 0)
             }
             val deadline = SystemClock.uptimeMillis() + 10_000
             var appended = false
             while (SystemClock.uptimeMillis() < deadline && !appended) {
-                instrumentation.runOnMainSync { appended = row.childCount == 80 }
+                instrumentation.runOnMainSync { appended = row.childCount == initialCount+40 }
                 if (!appended) SystemClock.sleep(25)
             }
             assertTrue("Real scrolling must still make the next full batch reachable", appended)
             instrumentation.waitForIdleSync()
-            instrumentation.runOnMainSync { assertEquals(80, row.childCount) }
+            instrumentation.runOnMainSync { assertEquals(initialCount+40, row.childCount) }
         } finally {
             instrumentation.runOnMainSync { activity.finish() }
         }
@@ -82,19 +84,21 @@ class CandidateStripPagingTest : InstrumentationTestCase() {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as Activity
         lateinit var strip: CandidateStrip
         lateinit var row: LinearLayout
+        var initialCount=0
         lateinit var first: TextView
         lateinit var firstText: CharSequence
         var version = 1
         val chosen = mutableListOf<String>()
         val rare = "\uD855\uDF5A\uD856\uDF07"
-        val values = (0 until 10_040).map { if (it == 55) rare else "候选$it" }
+        val values = (0 until 10_040).map { if (it == 40) rare else "候选$it" }
         try {
             instrumentation.runOnMainSync {
                 strip = CandidateStrip(activity, Color.BLACK, Color.BLUE, { version }) { chosen.add(it) }
                 activity.setContentView(strip)
                 strip.updateCandidates(values)
                 row = strip.getChildAt(0) as LinearLayout
-                assertEquals(40, row.childCount)
+                initialCount=row.childCount
+                assertTrue(initialCount in 4..40)
                 first = row.getChildAt(0) as TextView
                 firstText = first.text
             }
@@ -103,20 +107,20 @@ class CandidateStripPagingTest : InstrumentationTestCase() {
             val end = SystemClock.uptimeMillis() + 10_000
             var appended = false
             while (SystemClock.uptimeMillis() < end && !appended) {
-                instrumentation.runOnMainSync { appended = row.childCount >= 80 }
+                instrumentation.runOnMainSync { appended = row.childCount >= initialCount+40 }
                 if (!appended) SystemClock.sleep(25)
             }
             assertTrue("Scrolling must append the next batch", appended)
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
-                assertEquals("One approach to the end must not eagerly bind all 10,040 labels", 80, row.childCount)
+                assertEquals("One approach to the end must not eagerly bind all 10,040 labels", initialCount+40, row.childCount)
                 val x = strip.scrollX
                 strip.updateCandidates(values.toList())
                 assertSame(first, row.getChildAt(0))
                 assertSame(firstText, first.text)
                 assertEquals(x, strip.scrollX)
-                assertEquals(80, row.childCount)
-                val appendedLabel = row.getChildAt(55) as TextView
+                assertEquals(initialCount+40, row.childCount)
+                val appendedLabel = row.getChildAt(40) as TextView
                 assertEquals(rare, appendedLabel.text.toString())
                 for (index in listOf(0, 2)) {
                     val paint = TextPaint(appendedLabel.paint)

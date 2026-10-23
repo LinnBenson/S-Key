@@ -6,7 +6,6 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
@@ -20,13 +19,14 @@ import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import io.secure.keyboard.diagnostics.checkedMain
 import io.secure.keyboard.data.SettingsStore
 import io.secure.keyboard.ui.ToolIcon
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** Only the selected A floating pair and C edit artwork; no full keyboard regression. */
+/** Current Miuix toolbar artwork, pin placement and narrow/floating layout contracts. */
 @Suppress("DEPRECATION")
 class ToolbarArtworkTest : InstrumentationTestCase() {
     private lateinit var service: OfflineKeyboardService
@@ -52,7 +52,7 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
         sandbox = IsolatedContext(context)
         sandbox.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().clear().commit()
         settings = SettingsStore(sandbox).apply { vibration = false }
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             harness = Harness()
             service = harness.create(context)
             io.secure.keyboard.SessionTestAccess.field("settings")
@@ -66,7 +66,7 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
 
     override fun tearDown() {
         try {
-            instrumentation.runOnMainSync { if (::harness.isInitialized) harness.close() }
+            instrumentation.checkedMain { if (::harness.isInitialized) harness.close() }
             sandbox.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().clear().commit()
         } finally {
             super.tearDown()
@@ -74,7 +74,7 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
     }
 
     fun testServiceTogglesTheFloatingArtworkTwiceWithoutChangingToolbarContracts() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertEquals(listOf("floating", "clipboard", "quickedit", "emoji", "voice"), settings.toolbarPins)
             val host = service.currentInputConnection
             assertNotNull(host)
@@ -108,13 +108,10 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
                 val moreScroll = descendants(field<FrameLayout>("body")).filterIsInstance<ScrollView>().single()
                 assertFalse("More panel hides its vertical scroll indicator", moreScroll.isVerticalScrollBarEnabled)
                 assertTrue("More tools remain vertically scrollable", moreScroll.canScrollVertically(1))
-                val moreEdit = descendants(field<FrameLayout>("body"))
-                    .filterIsInstance<ToolIcon>().single { it.contentDescription == "快捷编辑" }
-                assertEquals("More and toolbar use the same C artwork", kind(pinnedEdit), kind(moreEdit))
-                assertEquals(dp(38), moreEdit.layoutParams.width)
-                assertEquals(dp(38), moreEdit.layoutParams.height)
-                assertEquals(pinnedEdit.tint, moreEdit.tint)
-                assertTrue(moreEdit.performClick())
+                assertFalse("Pinned tools are not duplicated in More",
+                    descendants(field<FrameLayout>("body")).filterIsInstance<ToolIcon>()
+                        .any { it.contentDescription == "快捷编辑" })
+                assertTrue(toolbar.getChildAt(3).performClick())
                 assertEquals("quickedit", field<String>("panel"))
                 assertTrue(toolbar.getChildAt(3).performClick())
                 assertEquals("keys", field<String>("panel"))
@@ -123,10 +120,9 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
         }
     }
 
-    fun testSelectedSvgGeometryIsDistinctAndUsesLightDarkAndCustomTints() {
-        instrumentation.runOnMainSync {
+    fun testCurrentMiuixArtworkIsDistinctAndUsesLightDarkAndCustomTints() {
+        instrumentation.checkedMain {
             val kinds = listOf("floating_enter", "floating_exit", "quickedit")
-            val goldenNames = listOf("floating-enter", "floating-exit", "quickedit")
             val tints = listOf(
                 Color.parseColor(settings.themeTokens(false).toolbarIcon),
                 Color.parseColor(settings.themeTokens(true).toolbarIcon),
@@ -134,10 +130,8 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
             )
             assertTrue("Light and dark palette tokens differ", tints[0] != tints[1])
             val firstMasks = mutableMapOf<String, List<Int>>()
-            for (tint in tints) for ((index, kind) in kinds.withIndex()) {
+            for (tint in tints) for (kind in kinds) {
                 val bitmap = raster(kind, tint)
-                val golden = instrumentation.context.assets.open("toolbar/${goldenNames[index]}.png")
-                    .use { requireNotNull(BitmapFactory.decodeStream(it)) }
                 try {
                     val theme = when (tint) {
                         tints[0] -> "light"
@@ -145,40 +139,46 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
                         else -> "custom"
                     }
                     saveBitmap(bitmap, "toolbar-artwork-$kind-$theme.png")
-                    assertEquals(golden.width, bitmap.width)
-                    assertEquals(golden.height, bitmap.height)
                     val actual = pixels(bitmap)
-                    val expected = pixels(golden)
                     val mask = actual.map { Color.alpha(it) }
                     assertTrue("$kind must contain visible artwork", mask.count { it > 200 } > 100)
                     assertTrue("Every opaque $kind pixel must use its supplied theme tint",
                         actual.filter { Color.alpha(it) == 255 }.all { it == tint })
                     assertTrue("$kind has enough opaque pixels to verify the tint",
                         actual.count { Color.alpha(it) == 255 } > 50)
-                    val averageAlphaError = actual.indices.sumOf {
-                        abs(Color.alpha(actual[it]) - Color.alpha(expected[it])).toLong()
-                    }.toDouble() / actual.size
-                    // Inkscape (approved SVG previews) and Android use different antialiasers.
-                    assertTrue("$kind must match the chosen SVG silhouette, error=$averageAlphaError",
-                        averageAlphaError < 10.0)
-                    val actualBounds = inkBounds(actual, bitmap.width)
-                    val expectedBounds = inkBounds(expected, golden.width)
-                    assertTrue("$kind keeps the selected artwork inside the same 24-unit canvas",
-                        abs(actualBounds.left - expectedBounds.left) <= 1 &&
-                            abs(actualBounds.top - expectedBounds.top) <= 1 &&
-                            abs(actualBounds.right - expectedBounds.right) <= 1 &&
-                            abs(actualBounds.bottom - expectedBounds.bottom) <= 1)
+                    val bounds = inkBounds(actual, bitmap.width)
+                    assertTrue("Current artwork must remain centered and unclipped",
+                        abs(bounds.centerX() - bitmap.width / 2) <= 2 &&
+                        abs(bounds.centerY() - bitmap.height / 2) <= 2 &&
+                        bounds.left > 0 && bounds.top > 0 && bounds.right < bitmap.width && bounds.bottom < bitmap.height)
                     if (tint == tints.first()) firstMasks[kind] = mask
                     else assertEquals("Theme changes must not change $kind geometry", firstMasks[kind], mask)
                 } finally {
                     bitmap.recycle()
-                    golden.recycle()
                 }
             }
             assertFalse("Enter and exit must have distinct pixels",
                 firstMasks.getValue("floating_enter") == firstMasks.getValue("floating_exit"))
-            assertFalse("C edit must not reuse the floating artwork",
+            assertFalse("Edit must not reuse the floating artwork",
                 firstMasks.getValue("quickedit") == firstMasks.getValue("floating_enter"))
+        }
+    }
+
+    fun testManyPinnedToolsFitNarrowToolbarWithoutOverlapping() {
+        instrumentation.checkedMain {
+            val row = io.secure.keyboard.ui.ToolbarRow(context)
+            repeat(18) { row.addView(ToolIcon(context), LinearLayout.LayoutParams(dp(44), dp(44))) }
+            for (width in listOf(dp(176), dp(320), dp(700))) {
+                row.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(dp(44), View.MeasureSpec.EXACTLY))
+                row.layout(0, 0, width, dp(44))
+                assertEquals(0, row.getChildAt(0).left)
+                for (index in 0 until row.childCount) {
+                    val child = row.getChildAt(index)
+                    assertTrue(child.width > 0 && child.right <= width)
+                    if (index > 0) assertTrue(row.getChildAt(index - 1).right <= child.left)
+                }
+            }
         }
     }
 
@@ -200,7 +200,8 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
         } finally {
             capture.recycle()
         }
-        val expectedSlotWidth = header.width.toFloat() / (settings.toolbarPins.size + 2)
+        val expectedSlotWidth = minOf(dp(44), toolbar.width / toolbar.childCount).toFloat()
+        val expectedStep = toolbar.width.toFloat() / toolbar.childCount
         return (0 until toolbar.childCount).map { index ->
             val icon = toolbar.getChildAt(index)
             assertTrue(icon is ToolIcon)
@@ -208,15 +209,15 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
             assertEquals(listOf(0, 0, 0, 0),
                 listOf(icon.paddingLeft, icon.paddingTop, icon.paddingRight, icon.paddingBottom))
             val params = icon.layoutParams as LinearLayout.LayoutParams
-            assertEquals(0, params.width)
+            assertEquals(expectedSlotWidth.toInt(), params.width)
             assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, params.height)
-            assertEquals(1f, params.weight, 0f)
+            assertEquals(0f, params.weight, 0f)
             val hit = Rect().also { icon.getHitRect(it) }
             assertEquals(Rect(icon.left, 0, icon.right, toolbar.height), hit)
-            assertTrue("Each mode retains the original evenly weighted touch slots",
+            assertTrue("Every control fits its available touch slot",
                 abs(hit.width() - expectedSlotWidth) <= 2f)
             assertTrue("Slot positions stay proportional within each mode",
-                abs(hit.left - index * expectedSlotWidth) <= 2f)
+                abs(hit.left - index * expectedStep) <= 2f)
             hit
         }
     }
@@ -233,8 +234,7 @@ class ToolbarArtworkTest : InstrumentationTestCase() {
     }
 
     private fun raster(kind: String, tint: Int): Bitmap {
-        // Exactly 3 pixels per SVG unit, independent of the emulator density. The production
-        // default artwork size is untouched; only this golden comparison explicitly requests 72px.
+        // Fixed output canvas for tint, clipping and silhouette comparisons across themes.
         val inset = dp(8)
         val size = 72 + inset * 2
         val view = ToolIcon(context, kind, tint, artworkSizeDp = 72f / context.resources.displayMetrics.density)

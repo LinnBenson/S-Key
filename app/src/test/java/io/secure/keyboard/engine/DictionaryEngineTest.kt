@@ -7,7 +7,7 @@ import org.junit.Test
 class DictionaryEngineTest {
     companion object {
         private val engine: DictionaryEngine by lazy {
-            val root = File("src/main/assets/dictionaries")
+            val root = File("src/test/resources/dictionaries")
             DictionaryEngine(
                 File(root, "wubi86.dict.yaml").reader(),
                 File(root, "pinyin_simp.dict.yaml").reader(),

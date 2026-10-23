@@ -10,28 +10,25 @@ import java.util.UUID
 /** Original files are editable drafts; only a successful compile changes the runtime snapshot. */
 class DictionaryRepository(context: Context) {
     private val app=context.applicationContext
-    private val root=File(app.noBackupFilesDir,"builtin-dictionaries").apply { mkdirs() }
+    private val root=File(app.noBackupFilesDir,"builtin-dictionaries-v3").apply { mkdirs() }
     val identity get()=root.path
-    private val draft=File(root,"files-v2.db")
+    private val draft=File(root,"files.db")
     init {
         synchronized(lock) {
             synchronized(publicationLock) {
                 if (draft.exists()) cleanupSources()
                 cleanupTemporaryFiles()
                 cleanupSnapshots(activeFile() ?: File(root, "no-active-snapshot"))
-                // Only obsolete packaged copies: never user drafts or imported libraries.
-                listOf("defaults-v1.db", "defaults-v2.db", "defaults-v3.db", "defaults-v4.db", "runtime-v1.db", "runtime-v2.db", "defaults-v5.db", "defaults-v6.db", "runtime-v3.db", "runtime-v4.db", "defaults-v7.db", "runtime-v5.db")
-                    .forEach { CompiledDictionary.deleteIfUnused(File(root, it)) }
             }
         }
     }
     private fun cleanupTemporaryFiles() {
-        val names = setOf("defaults.tmp", "original.tmp", "restore.tmp", "catalog-update.tmp", "runtime.tmp")
+        val names = setOf("defaults.tmp", "original.tmp", "restore.tmp", "runtime.tmp")
         root.listFiles()?.filter { it.name in names || it.name.startsWith("building-") || it.name.startsWith("parsing-") }
             ?.forEach { it.delete() }
     }
     data class Library(val id: Long,val name: String,val kind: String,val filename: String,val sourcePath: String,val notice: String)
-    private fun defaults()=File(root,"defaults-v8.db").also { file -> if(!file.exists()) {
+    private fun defaults()=File(root,"defaults.db").also { file -> if(!file.exists()) {
         val temp=File(root,"defaults.tmp")
         app.assets.open("dictionaries/catalog.db").use { input -> temp.outputStream().use { input.copyTo(it) } }
         SQLiteDatabase.openDatabase(temp.path, null, SQLiteDatabase.OPEN_READWRITE).use {
@@ -41,61 +38,8 @@ class DictionaryRepository(context: Context) {
         check(temp.renameTo(file))
     } }
     private fun <T> database(work: (SQLiteDatabase)->T): T = synchronized(lock) {
-        // Upgrade only the untouched preview catalog; user edits and compiled versions survive.
-        if(draft.exists() && activeFile()==null) {
-            val pristineOldCatalog=SQLiteDatabase.openDatabase(draft.path,null,SQLiteDatabase.OPEN_READONLY).use { db ->
-                db.rawQuery("SELECT (SELECT value FROM metadata WHERE key='dirty')='0' AND NOT EXISTS(SELECT 1 FROM metadata WHERE key='catalog_version') AND NOT EXISTS(SELECT 1 FROM libraries WHERE source_path!='')",null).use { it.moveToFirst(); it.getInt(0)==1 }
-            }
-            if(pristineOldCatalog) {
-                val update=File(root,"catalog-update.tmp")
-                defaults().copyTo(update,overwrite=true)
-                SQLiteDatabase.openDatabase(update.path,null,SQLiteDatabase.OPEN_READWRITE).use { it.execSQL("DROP TABLE IF EXISTS entries"); it.execSQL("VACUUM") }
-                check(update.renameTo(draft))
-            }
-        }
-        if(!draft.exists()) {
-            defaults().copyTo(draft)
-            SQLiteDatabase.openDatabase(draft.path,null,SQLiteDatabase.OPEN_READWRITE).use { it.execSQL("DROP TABLE IF EXISTS entries"); it.execSQL("VACUUM") }
-        }
-        SQLiteDatabase.openDatabase(draft.path,null,SQLiteDatabase.OPEN_READWRITE).use { db ->
-            val migrated=db.rawQuery("SELECT 1 FROM metadata WHERE key='initials_added'",null).use { it.moveToFirst() }
-            if(!migrated) {
-                db.beginTransaction()
-                try {
-                    db.execSQL("INSERT INTO libraries(name,kind,priority,notice,filename,source_path) SELECT '拼音单字母词库','pinyin',0,'Rime / AOSP; Apache-2.0; derived single characters','pinyin_initials.dict.yaml','' WHERE NOT EXISTS(SELECT 1 FROM libraries WHERE filename='pinyin_initials.dict.yaml')")
-                    db.execSQL("INSERT INTO metadata VALUES('initials_added','1')")
-                    db.execSQL("UPDATE metadata SET value='1' WHERE key='dirty'")
-                    db.setTransactionSuccessful()
-                } finally { db.endTransaction() }
-            }
-            val fullInitials=db.rawQuery("SELECT 1 FROM metadata WHERE key='initials_version' AND value='2'",null).use { it.moveToFirst() }
-            if(!fullInitials) {
-                // Only refresh factory bytes. Preserve edited/imported files and intentional deletion.
-                val ids=db.rawQuery("SELECT id FROM libraries WHERE filename='pinyin_initials.dict.yaml' AND source_path=''",null).use { c ->
-                    buildList { while(c.moveToNext()) add(c.getLong(0)) }
-                }
-                ids.forEach { File(root,"original-$it.txt").delete() }
-                db.beginTransaction()
-                try {
-                    db.execSQL("INSERT OR REPLACE INTO metadata VALUES('initials_version','2')")
-                    if(ids.isNotEmpty()) db.execSQL("UPDATE metadata SET value='1' WHERE key='dirty'")
-                    db.setTransactionSuccessful()
-                } finally { db.endTransaction() }
-            }
-            val priorityAdded=db.rawQuery("SELECT 1 FROM metadata WHERE key='priority_libraries_added'",null).use { it.moveToFirst() }
-            if(!priorityAdded) {
-                db.beginTransaction()
-                try {
-                    for ((kind,filename) in listOf("pinyin" to "pinyin_high_priority.dict.yaml","english" to "english_high_priority.tsv")) {
-                        // A pre-existing user file is not silently converted to a priority library.
-                        db.execSQL("INSERT INTO libraries(name,kind,priority,notice,filename,source_path) SELECT '本地高优先级词库',?,1,'Local user-maintained entries',?,'' WHERE NOT EXISTS(SELECT 1 FROM libraries WHERE filename=?)",arrayOf(kind,filename,filename))
-                    }
-                    db.execSQL("INSERT INTO metadata VALUES('priority_libraries_added','1')")
-                    db.setTransactionSuccessful()
-                } finally { db.endTransaction() }
-            }
-            work(db)
-        }
+        if(!draft.exists()) defaults().copyTo(draft)
+        SQLiteDatabase.openDatabase(draft.path,null,SQLiteDatabase.OPEN_READWRITE).use(work)
     }
     fun libraries(): List<Library> = database { db -> db.rawQuery("SELECT id,name,kind,filename,source_path,notice FROM libraries ORDER BY id",null).use { c ->
         buildList { while(c.moveToNext()) add(Library(c.getLong(0),c.getString(1),c.getString(2),c.getString(3),c.getString(4),c.getString(5))) }
@@ -125,8 +69,7 @@ class DictionaryRepository(context: Context) {
     private fun priority(id: Long) = database { db ->
         db.rawQuery("SELECT priority FROM libraries WHERE id=?",arrayOf(id.toString())).use { it.moveToFirst() && it.getInt(0)!=0 }
     }
-    private fun priorityFilename(kind: String,filename: String) =
-        (kind=="pinyin" && filename=="pinyin_high_priority.dict.yaml") || (kind=="english" && filename=="english_high_priority.tsv")
+    private fun priorityFilename(kind: String,filename: String) = BuiltinDictionaryFiles.isHighPriority(filename,kind)
     fun savePage(id: Long,page: DictionarySource.Page,text: String)=synchronized(lock) {
         val lib=current(id); check(lib.sourcePath==page.version) { "文件已更新，请重新打开后编辑" }
         val temp=File(root,"edit-${UUID.randomUUID()}.txt")
@@ -135,28 +78,42 @@ class DictionaryRepository(context: Context) {
     }
     private fun publishSource(id: Long,file: File) {
         require(file.length()<=64*1024*1024) { "词库文件不能超过 64 MiB" }
-        DictionarySource.reader(file.inputStream()).use { r -> while(r.read()!=-1) {} }
+        // Callers have already validated every line and UTF-8 byte before publication.
         java.io.RandomAccessFile(file,"rw").use { it.fd.sync() }
         mutate { it.execSQL("UPDATE libraries SET source_path=? WHERE id=?",arrayOf<Any>(file.name,id)) }
     }
-    fun addFile(filename: String,kind: String,input: InputStream,allowEmptyTemplate: Boolean = false) = synchronized(lock) {
-        checkName(filename); require(kind in listOf("wubi","pinyin","english"))
-        require(libraries().none { it.filename==filename }) { "已存在同名文件" }
-        val file=File(root,"edit-${UUID.randomUUID()}.txt")
-        try {
-            DictionarySource.copy(input,file)
-            DictionarySource.validate(file,kind,filename,allowEmptyTemplate || priorityFilename(kind,filename))
-            java.io.RandomAccessFile(file,"rw").use { it.fd.sync() }
-            mutate { it.execSQL("INSERT INTO libraries(name,kind,filename,source_path,priority) VALUES(?,?,?,?,?)",arrayOf(filename,kind,filename,file.name,if(priorityFilename(kind,filename)) 1 else 0)) }
-        } catch(e: Exception) { file.delete(); throw e }
+    fun addFile(filename: String,kind: String,input: InputStream,allowEmptyTemplate: Boolean = false,
+                replaceExisting: Boolean = false) = synchronized(lock) {
+        input.use { stream ->
+            checkName(filename); require(kind in listOf("wubi","pinyin","english"))
+            val existing=libraries().firstOrNull { it.filename==filename }
+            require(existing==null || replaceExisting) { "已存在同名文件" }
+            require(existing==null || existing.kind==kind) { "同名词库类型不一致，请选择原词库所属类型后导入" }
+            val file=File(root,"edit-${UUID.randomUUID()}.txt")
+            try {
+                DictionarySource.copy(stream,file)
+                val allowEmpty=if(existing!=null) priority(existing.id) else allowEmptyTemplate || priorityFilename(kind,filename)
+                DictionarySource.validate(file,kind,filename,allowEmpty)
+                if(existing!=null) {
+                    // Publish only after validating the entire replacement; keep identity and ordering.
+                    publishSource(existing.id,file)
+                } else {
+                    java.io.RandomAccessFile(file,"rw").use { it.fd.sync() }
+                    mutate { it.execSQL("INSERT INTO libraries(name,kind,filename,source_path,priority) VALUES(?,?,?,?,?)",arrayOf(filename,kind,filename,file.name,if(priorityFilename(kind,filename)) 1 else 0)) }
+                }
+                cleanupSources()
+            } finally {
+                if(libraries().none { it.sourcePath==file.name }) file.delete()
+            }
+        }
     }
-    fun protectedFilename(filename: String) = filename == "pinyin_simp.dict.yaml"
+    fun protectedFilename(filename: String) = BuiltinDictionaryFiles.isProtected(filename)
 
     fun renameFile(id: Long,filename: String)=synchronized(lock) {
         checkName(filename)
         require(libraries().none { it.id!=id && it.filename==filename }) { "已存在同名文件" }
         val lib=current(id)
-        require(!protectedFilename(lib.filename)) { "默认混输拼音词库不能重命名" }
+        require(!protectedFilename(lib.filename)) { "内置词库不能重命名" }
         DictionarySource.validate(source(lib),lib.kind,filename,allowEmpty=priority(id))
         // A renamed default must keep pointing to the original bytes, not the renamed asset path.
         if(lib.sourcePath.isEmpty()) {
@@ -165,7 +122,7 @@ class DictionaryRepository(context: Context) {
         mutate { it.execSQL("UPDATE libraries SET filename=? WHERE id=?",arrayOf<Any>(filename,id)) }
     }
     fun deleteLibrary(id: Long)=synchronized(lock) {
-        require(!protectedFilename(current(id).filename)) { "默认混输拼音词库不能删除" }
+        require(!protectedFilename(current(id).filename)) { "内置词库不能删除" }
         mutate { it.execSQL("DELETE FROM libraries WHERE id=?",arrayOf(id)) }
         cleanupSources()
     }
@@ -225,13 +182,17 @@ class DictionaryRepository(context: Context) {
             cleanupSnapshots(published)
         } catch(e: Exception) { file.delete(); if(activeFile()?.name!=published.name) published.delete(); throw e }
         finally { SQLiteDatabase.deleteDatabase(parsed); SQLiteDatabase.deleteDatabase(file) }
+    }.also {
+        // Drop process-wide references even if the IME is hidden and no new query occurs.
+        io.secure.keyboard.engine.OfflineEngine.releaseSnapshot(identity)
+        activeFile()?.let { cleanupSnapshots(it) }
     }
     fun activeFile(): File?=synchronized(publicationLock) {
         val name=runCatching { String(AtomicFile(File(root,"active")).readFully()) }.getOrNull() ?: return@synchronized null
         require(Regex("compiled-[a-f0-9-]+\\.db").matches(name)); File(root,name).takeIf { it.isFile }
     }
     fun defaultRuntime(): File=synchronized(publicationLock) {
-        File(root,"runtime-v6.db").also { file -> if(!file.exists()) {
+        File(root,"runtime.db").also { file -> if(!file.exists()) {
             val temp=File(root,"runtime.tmp")
             app.assets.open("dictionaries/runtime.db").use { input -> temp.outputStream().use { input.copyTo(it) } }; check(temp.renameTo(file))
         } }

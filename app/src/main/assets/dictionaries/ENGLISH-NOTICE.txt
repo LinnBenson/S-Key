@@ -1,7 +1,8 @@
 OFFLINE ENGLISH CURRENT-WORD COMPLETION
 =======================================
 
-Asset: english_frequency.tsv
+Current asset: skey_english.tsv (converted attribution header; data unchanged)
+Recovered original: english_frequency.tsv
 Entries: 25,000
 
 The adapted word-frequency data in this asset is distributed under the
@@ -68,14 +69,12 @@ The data is not censored; normal dictionary words and colloquial language may
 appear. Some words also have uses as names. It is not an exhaustive dictionary,
 spelling-correction system, or a claim about present-day population frequencies.
 
-The source distribution includes third_party/english/rebuild.py, a standalone
-Python standard-library build-time generator, and manifest.json with the input
-and output hashes. The packaged Android application never runs that generator,
-downloads a dictionary, reads user history, learns frequencies, or predicts a
-next word. EnglishLexicon uses only the supplied current word and this fixed
-packaged asset.
+The source distribution includes the pinned original TSV, conversion script and
+SHA-256 manifest under third_party/open_dictionaries/. The Android application
+queries only the active local SQLite dictionary. It does not download dictionaries
+or learn frequencies from user input.
 
-Asset SHA-256:
+Recovered original asset SHA-256:
 e818b1f3ea72bc7a391abaa171f717bc5d2f90397fdeef60cad8862202a6d290
 
 CC BY-SA 4.0 full license text, retrieved from Creative Commons' official repo:

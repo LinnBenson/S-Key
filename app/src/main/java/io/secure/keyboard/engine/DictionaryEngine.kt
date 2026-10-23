@@ -26,10 +26,6 @@ class DictionaryEngine private constructor(
     constructor(wubi: Reader, pinyin: Reader, englishLexicon: EnglishLexicon? = null) :
         this(wubi, pinyin, englishLexicon, null)
 
-    /** Production Wubi data stays in an immutable read-only file mapping. */
-    constructor(wubi: CompactWubiTable, pinyin: Reader, englishLexicon: EnglishLexicon? = null) :
-        this(null, pinyin, englishLexicon, wubi)
-
     data class Entry(val text: String, val code: String, val weight: Long, val priority: Long = Long.MAX_VALUE)
 
     constructor(wubi: WubiLookup, pinyin: PinyinLookup, english: EnglishLookup, initials: (String)->List<Entry> = { emptyList() }) :
@@ -80,14 +76,18 @@ class DictionaryEngine private constructor(
             .toList()
     }
 
-    private fun matchingPinyin(kind: String, key: String, limit: Int, predicate: (Entry)->Boolean): List<Entry> {
-        if(indexedPinyin==null) return (if(kind=="exact") pinyinExact[key] else fuzzyExact[key]).orEmpty().asSequence().filter(predicate).distinctBy { it.text }.take(limit).toList()
+    private fun matchingPinyin(kind: String, key: String, limit: Int, cancelled: () -> Boolean = { false }, predicate: (Entry)->Boolean): List<Entry> {
+        if (cancelled() || Thread.currentThread().isInterrupted) return emptyList()
+        if(indexedPinyin==null) return (if(kind=="exact") pinyinExact[key] else fuzzyExact[key]).orEmpty().asSequence().takeWhile { !cancelled() && !Thread.currentThread().isInterrupted }.filter(predicate).distinctBy { it.text }.take(limit).toList()
         val matches=ArrayList<Entry>()
         val seen=HashSet<String>()
         var offset=0
-        while(matches.size<limit) {
+        while(matches.size<limit && !cancelled() && !Thread.currentThread().isInterrupted) {
             val page=indexedPinyin.lookupPage(kind,key,offset,40)
-            for(entry in page) if(predicate(entry) && seen.add(entry.text)) { matches.add(entry); if(matches.size==limit) break }
+            for(entry in page) {
+                if (cancelled() || Thread.currentThread().isInterrupted) return emptyList()
+                if(predicate(entry) && seen.add(entry.text)) { matches.add(entry); if(matches.size==limit) break }
+            }
             if(page.size<40) break
             offset+=page.size
         }
@@ -101,6 +101,7 @@ class DictionaryEngine private constructor(
         fuzzyPairs: Set<String> = DEFAULT_FUZZY_PAIRS,
         allExactWubi: Boolean = false,
         mode: ChineseInputMode = ChineseInputMode.MIXED,
+        cancelled: () -> Boolean = { false },
     ): List<Candidate> {
         if (limit <= 0) return emptyList()
         val raw = code.lowercase(Locale.ROOT).replace('ü', 'v')
@@ -131,7 +132,7 @@ class DictionaryEngine private constructor(
         if (mode != ChineseInputMode.WUBI) {
             val segmented = raw.contains('\'') || raw.contains(' ')
             val syllableCode = raw.split(' ', '\'').filter(String::isNotEmpty).joinToString(" ")
-            val exactPinyin = matchingPinyin("exact",key,resultLimit) { !segmented || it.code == syllableCode }
+            val exactPinyin = matchingPinyin("exact",key,resultLimit,cancelled) { !segmented || it.code == syllableCode }
             add(exactPinyin, Source.PINYIN)
             if (fuzzyPinyin && fuzzyPairs.isNotEmpty()) {
                 // Preserve the existing pairs' matching rules. The optional r/l pair has a
@@ -142,7 +143,7 @@ class DictionaryEngine private constructor(
                     if (segmented) syllableCode.split(' ').map { fuzzySyllable(it, selectedPairs) }
                     else emptyList()
                 add(
-                    matchingPinyin("fuzzy",fuzzyInputKey(raw),resultLimit) {
+                    matchingPinyin("fuzzy",fuzzyInputKey(raw),resultLimit,cancelled) {
                         (fuzzyInputKey(it.code, selectedPairs) == selectedKey &&
                             (!segmented ||
                                 it.code.split(' ').map { part -> fuzzySyllable(part, selectedPairs) } ==
@@ -152,9 +153,10 @@ class DictionaryEngine private constructor(
                     Source.PINYIN,
                 )
             }
+            if (fuzzyPinyin && result.size < resultLimit && !cancelled()) add(extendedFuzzyEntries(raw, fuzzyPairs, resultLimit, cancelled), Source.PINYIN)
             // A dictionary phrase is preferred; otherwise segment into known words/syllables locally.
             if (exactPinyin.isNullOrEmpty() && key.length >= 4) {
-                for (text in composePinyin(raw)) if (result.size < resultLimit) {
+                for (text in composePinyin(raw, cancelled)) if (result.size < resultLimit) {
                     result.putIfAbsent(text, Candidate(text, raw, Source.PINYIN))
                 }
             }
@@ -174,19 +176,19 @@ class DictionaryEngine private constructor(
         val decoder = PinyinDecoder(cancelled = cancelled, lookup = { token ->
             val segmented = token.contains('\'')
             val syllables = token.split('\'').filter(String::isNotEmpty)
-            val exact = matchingPinyin("exact", compact(token), 24) {
+            val exact = matchingPinyin("exact", compact(token), 24, cancelled) {
                 !segmented || it.code.split(' ') == syllables
             }
             if (!fuzzy || pairs.isEmpty()) exact else {
                 val selected = pairs - "r_l"
                 val selectedKey = fuzzyInputKey(token, selected)
                 val selectedSyllables = syllables.map { fuzzySyllable(it, selected) }
-                val alternatives = matchingPinyin("fuzzy", fuzzyInputKey(token), 24) {
+                val alternatives = matchingPinyin("fuzzy", fuzzyInputKey(token), 24, cancelled) {
                     compact(it.code) != compact(token) && ((fuzzyInputKey(it.code, selected) == selectedKey &&
                         (!segmented || it.code.split(' ').map { part -> fuzzySyllable(part, selected) } == selectedSyllables)) ||
                         ("r_l" in pairs && matchesRL(token, it.code, selected)))
                 }
-                (exact + alternatives).distinctBy { it.text }
+                (exact + alternatives + extendedFuzzyEntries(token, pairs, 24, cancelled)).distinctBy { it.text }
             }
         }, predict = { contextText ->
             indexedPinyin?.predictions(contextText) ?: pinyinExact.values.asSequence().flatten()
@@ -211,13 +213,16 @@ class DictionaryEngine private constructor(
 
     private data class Path(val text: String, val score: Double, val count: Int)
 
-    private fun composePinyin(raw: String): List<String> {
+    private fun composePinyin(raw: String, cancelled: () -> Boolean): List<String> {
         // Explicit apostrophes/spaces force syllable boundaries (xi'an versus xian).
         val tokens = raw.split(' ', '\'').filter(String::isNotEmpty)
         if (tokens.size > 1) {
             var paths = listOf(Path("", 0.0, 0))
             for (token in tokens) {
-                val entries = syllables[token]?.take(3) ?: return emptyList()
+                if (cancelled() || Thread.currentThread().isInterrupted) return emptyList()
+                val entries = if (indexedPinyin != null) indexedPinyin.lookup("syllable", token, 3)
+                    else syllables[token]?.take(3).orEmpty()
+                if (entries.isEmpty()) return emptyList()
                 paths =
                     paths
                         .flatMap { p ->
@@ -232,9 +237,12 @@ class DictionaryEngine private constructor(
         val paths = Array(key.length + 1) { emptyList<Path>() }
         paths[0] = listOf(Path("", 0.0, 0))
         for (start in key.indices) {
+            if (cancelled() || Thread.currentThread().isInterrupted) return emptyList()
             if (paths[start].isEmpty()) continue
             for (end in start + 1..minOf(key.length, start + 24)) {
-                val entries = pinyinExact[key.substring(start, end)]?.take(3) ?: continue
+                if (cancelled() || Thread.currentThread().isInterrupted) return emptyList()
+                val entries = matchingPinyin("exact", key.substring(start, end), 3, cancelled) { true }
+                if (entries.isEmpty()) continue
                 val next =
                     paths[start].flatMap { p ->
                         entries.map {
@@ -251,12 +259,84 @@ class DictionaryEngine private constructor(
         return paths[key.length].filter { it.count > 1 }.map { it.text }
     }
 
+    /** New optional pairs reuse indexed lookups; no table scan or startup index rebuild. */
+    private fun extendedFuzzyEntries(raw: String, pairs: Set<String>, limit: Int, cancelled: () -> Boolean): List<Entry> {
+        val rules = EXTENDED_FUZZY_RULES.filter { it.id in pairs }
+        if (rules.isEmpty()) return emptyList()
+        val legacy = pairs - EXTENDED_FUZZY_RULES.map { it.id }.toSet()
+        fun legacySyllable(value: String): String {
+            val initial = if ("r_l" in legacy && value in R_L_N_SYLLABLES && value.startsWith('r')) "l" + value.drop(1) else value
+            return fuzzySyllable(initial, legacy)
+        }
+        val syllableVariants = HashMap<String, List<String>>()
+        fun equivalent(typed: String, stored: String): Boolean =
+            syllableVariants.getOrPut(typed) { (extendedVariants(typed, rules, syllableOnly = true) +
+                extendedVariants(legacySyllable(typed), rules, syllableOnly = true)).distinct() }.any {
+                fuzzySyllable(it, legacy) == fuzzySyllable(stored, legacy) ||
+                    ("r_l" in legacy && matchesRLSyllable(it, stored, legacy - "r_l"))
+            }
+        fun matches(code: String): Boolean {
+            val stored = code.split(' ').filter(String::isNotEmpty)
+            if (raw.contains(' ') || raw.contains('\'')) {
+                val typed = raw.split(' ', '\'').filter(String::isNotEmpty)
+                return typed.size == stored.size && typed.indices.all { equivalent(typed[it], stored[it]) }
+            }
+            var reachable = setOf(0)
+            for (syllable in stored) {
+                if (cancelled() || Thread.currentThread().isInterrupted) return false
+                reachable = reachable.flatMap { start ->
+                    (start + 1..minOf(raw.length, start + 6)).filter { end -> equivalent(raw.substring(start, end), syllable) }
+                }.toSet()
+                if (reachable.isEmpty()) return false
+            }
+            return raw.length in reachable
+        }
+        return sequenceOf(raw, fuzzyInputKey(raw, legacy)).distinct()
+            .flatMap { extendedVariants(it, rules, syllableOnly = false).asSequence() }
+            .map { fuzzyInputKey(it) }.distinct().take(64)
+            .takeWhile { !cancelled() && !Thread.currentThread().isInterrupted }
+            .flatMap { key -> matchingPinyin("fuzzy", key, limit, cancelled) { matches(it.code) }.asSequence() }
+            .distinctBy { it.text }.sortedByDescending { it.weight }.take(limit).toList()
+    }
+
     private fun score(entry: Entry) = kotlin.math.ln(entry.weight.toDouble() + 1.0)
 
     companion object {
         val DEFAULT_FUZZY_PAIRS: Set<String> =
             setOf("zh_z", "ch_c", "sh_s", "n_l", "f_h", "an_ang", "en_eng", "in_ing")
         private val ALL_FUZZY_PAIRS = DEFAULT_FUZZY_PAIRS + "r_l"
+        private data class FuzzyRule(val id: String, val initial: Boolean) {
+            val forms = id.split('_')
+        }
+        private val EXTENDED_FUZZY_RULES = listOf(
+            FuzzyRule("l_h", true), FuzzyRule("r_y", true), FuzzyRule("g_k", true),
+            FuzzyRule("ai_ei", false), FuzzyRule("ao_ou", false), FuzzyRule("an_ian", false),
+            FuzzyRule("en_in", false), FuzzyRule("eng_ing", false),
+        )
+        private val PINYIN_INITIAL = Regex("^(zh|ch|sh|[bpmfdtnlgkhjqxrzcsyw])")
+        private fun extendedVariants(raw: String, rules: List<FuzzyRule>, syllableOnly: Boolean): List<String> {
+            val found = linkedSetOf(raw)
+            val queue = java.util.ArrayDeque<String>().apply { add(raw) }
+            while (queue.isNotEmpty() && found.size < 64) {
+                val value = queue.removeFirst()
+                for (rule in rules) for ((from, to) in listOf(rule.forms[0] to rule.forms[1], rule.forms[1] to rule.forms[0])) {
+                    var at = value.indexOf(from)
+                    while (at >= 0 && found.size < 64) {
+                        val initial = PINYIN_INITIAL.find(value)?.value.orEmpty()
+                        val validPart = if (rule.initial) at == 0 && initial == from
+                            else at == initial.length && value.substring(at) == from
+                        // Avoid repeatedly expanding an -> ian -> iian in broad phrase probes.
+                        val duplicateI = rule.id == "an_ian" && from == "an" && at > 0 && value[at - 1] == 'i'
+                        if ((!syllableOnly || validPart) && !duplicateI) {
+                            val changed = value.replaceRange(at, at + from.length, to)
+                            if (changed.length <= 64 && found.add(changed)) queue.add(changed)
+                        }
+                        at = value.indexOf(from, at + 1)
+                    }
+                }
+            }
+            return found.toList()
+        }
         private val N_BEFORE_VOWEL = Regex("n(?=[aeiouv])")
         // Only complete, valid syllables can participate in an r/l change. The n
         // syllables also allow r/l and n/l to work together when BOTH are selected.

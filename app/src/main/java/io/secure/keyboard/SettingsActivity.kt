@@ -214,6 +214,7 @@ open class SettingsActivity : ComponentActivity() {
                                 "home", "settings" -> Home()
                                 "input" -> InputSettings()
                                 "input_english" -> EnglishSettings()
+                                "input_fuzzy" -> FuzzySettings()
                                 "keyboard", "feedback" -> KeyboardSettings()
                                 "behavior" -> Appearance()
                                 "layout" -> Layouts()
@@ -328,7 +329,7 @@ open class SettingsActivity : ComponentActivity() {
         }
         Group("开始定制") {
             Nav("偏好设置", "输入、键盘、主题与本机内容", "settings") { openPage("home") }
-            Nav("输入方式", "五笔、混输、拼音与英文补全", "input") { openPage("input") }
+            Nav("输入方式", "五笔、拼音与英文补全", "input") { openPage("input") }
             Nav("主题工作室", "深浅主题与自定义配色", "theme") { openPage("behavior") }
         }
         Group("应用与隐私") {
@@ -339,7 +340,7 @@ open class SettingsActivity : ComponentActivity() {
     @Composable private fun Home() {
         model.revision
         Group("输入与外观") {
-            Nav("输入方式", "五笔、混输、拼音与英文补全", "input") { openPage("input") }
+            Nav("输入方式", "五笔、拼音与英文补全", "input") { openPage("input") }
             Nav("键盘操作", "声音、触感、长按、工具栏", "keyboard") { openPage("keyboard") }
             Nav("主题与外观", "自定义配色、黑白切换、跟随系统", "theme") { openPage("behavior") }
             Nav("布局配置", "横竖屏、折叠屏、悬浮与分离", "layout") { openPage("layout") }
@@ -454,22 +455,36 @@ open class SettingsActivity : ComponentActivity() {
         model.revision
         val s = model.settings
         Group("输入选项") {
-            HorizontalChoices(io.secure.keyboard.engine.ChineseInputMode.entries.map { it.id to it.label }, s.chineseInputMode.id) {
-                s.chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.fromId(it)
+            HorizontalChoices(listOf("wubi" to "五笔", "pinyin" to "拼音"), s.chineseInputMethod.id) {
+                s.chineseInputMethod = io.secure.keyboard.engine.ChineseInputMode.fromId(it)
             }
         }
         Group("中文输入偏好") {
             Toggle("简繁转换", s.traditionalOutput) { s.traditionalOutput = it }
             Toggle("自动插入空格", s.autoChineseSpacing) { s.autoChineseSpacing = it }
-            Toggle("五笔四码自动上屏", s.fourCodeAutoCommit) { s.fourCodeAutoCommit = it }
-            Toggle("模糊拼音", s.fuzzyPinyin) { s.fuzzyPinyin = it }
-            if (s.fuzzyPinyin) SettingsStore.fuzzyPairIds.forEach { pair ->
-                Toggle(pair.replace("_", " ↔ "), pair in s.fuzzyPairs) {
-                    s.fuzzyPairs = if (it) s.fuzzyPairs + pair else s.fuzzyPairs - pair
+            if (s.chineseInputMethod == io.secure.keyboard.engine.ChineseInputMode.WUBI) {
+                Toggle("五笔四码自动上屏", s.fourCodeAutoCommit) { s.fourCodeAutoCommit = it }
+                Toggle("五笔拼音混输入", s.wubiPinyinInput) { s.wubiPinyinInput = it }
+            }
+            Nav("模糊拼音", if (s.fuzzyPinyin) "已开启 · ${s.fuzzyPairs.size} 项" else "已关闭", "input") { openPage("input_fuzzy") }
+        }
+        EnglishSettings()
+    }
+    @Composable private fun FuzzySettings() {
+        model.revision
+        val s = model.settings
+        Group("使用设置") {
+            Toggle("模糊拼音", s.fuzzyPinyin, "用于拼音和五笔拼音混输入；关闭后保留各项选择") { s.fuzzyPinyin = it }
+        }
+        listOf("声母模糊" to SettingsStore.fuzzyInitialIds, "韵母模糊" to SettingsStore.fuzzyFinalIds).forEach { (title, pairs) ->
+            Group(title) {
+                pairs.forEach { pair ->
+                    Toggle(pair.replace("_", " ↔ "), pair in s.fuzzyPairs) {
+                        s.fuzzyPairs = if (it) s.fuzzyPairs + pair else s.fuzzyPairs - pair
+                    }
                 }
             }
         }
-        EnglishSettings()
     }
     @Composable private fun EnglishSettings() {
         model.revision
@@ -916,6 +931,7 @@ open class SettingsActivity : ComponentActivity() {
         "dashboard" -> "S Key"
         "input" -> "输入方式"
         "input_english" -> "英文设置"
+        "input_fuzzy" -> "模糊拼音"
         "keyboard", "feedback" -> "键盘操作"
         "behavior" -> "主题与外观"
         "theme_light" -> "自定义白色主题"

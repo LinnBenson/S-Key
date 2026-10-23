@@ -35,7 +35,7 @@ object KeyboardIcons {
         "arrow_left" -> R.drawable.ic_keyboard_arrow_back
         "arrow_right" -> R.drawable.ic_keyboard_arrow_forward
         "undo" -> R.drawable.ic_miuix_undo
-        "layout" -> R.drawable.ic_keyboard_open_in_full
+        "layout" -> R.drawable.ic_keyboard_keyboard
         "floating" -> R.drawable.ic_miuix_sidebar
         "floating_enter" -> R.drawable.ic_miuix_sidebar
         "floating_exit" -> R.drawable.ic_miuix_horizontalsplit

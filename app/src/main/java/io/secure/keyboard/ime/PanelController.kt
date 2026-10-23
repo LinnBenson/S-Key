@@ -20,9 +20,9 @@ import io.secure.keyboard.*
 internal object PanelController {
     internal fun KeyboardSession.openToolImpl(tool: String) {
         if (tool == "input_mode") {
-            val modes = io.secure.keyboard.engine.ChineseInputMode.entries
-            settings.chineseInputMode = modes[(settings.chineseInputMode.ordinal + 1) % modes.size]
-            toast(settings.chineseInputMode.label)
+            settings.chineseInputMethod = if (settings.chineseInputMethod == io.secure.keyboard.engine.ChineseInputMode.WUBI)
+                io.secure.keyboard.engine.ChineseInputMode.PINYIN else io.secure.keyboard.engine.ChineseInputMode.WUBI
+            toast(if (settings.chineseInputMethod == io.secure.keyboard.engine.ChineseInputMode.WUBI) "五笔" else "拼音")
             return
         }
         if (tool == "script") {

@@ -3,13 +3,14 @@ android {
     useLibrary("android.test.runner")
     useLibrary("android.test.base")
     namespace = "io.secure.keyboard"
+    testBuildType = providers.gradleProperty("testBuildType").getOrElse("debug")
     compileSdk = 35
     defaultConfig {
         applicationId = "io.secure.keyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 93
-        versionName = "1.0.86"
+        versionCode = 105
+        versionName = "1.0.98"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
     buildFeatures { compose = true }
@@ -17,8 +18,6 @@ android {
     kotlinOptions { jvmTarget = "17" }
     splits { abi { isEnable = true; reset(); include("arm64-v8a", "x86_64"); isUniversalApk = true } }
     packaging { jniLibs { useLegacyPackaging = true } }
-    // Read-only file mapping avoids decoding the entire Wubi lexicon into the Java heap.
-    androidResources { noCompress += "skwb" }
     buildTypes { release { isMinifyEnabled = false } }
 }
 dependencies {
@@ -36,9 +35,9 @@ dependencies {
 val buildDictionaryCatalog by tasks.registering(Exec::class) {
     workingDir(rootProject.projectDir)
     commandLine("python3", "scripts/build_dictionary_catalog.py")
-    inputs.files(rootProject.file("scripts/build_dictionary_catalog.py"), rootProject.file("scripts/build_compact_wubi.py"))
-    inputs.dir(rootProject.file("third_party/wubi_supplements"))
-    inputs.files(file("src/main/assets/dictionaries/wubi86.dict.yaml"), file("src/main/assets/dictionaries/pinyin_simp.dict.yaml"), file("src/main/assets/dictionaries/pinyin_initials.dict.yaml"), file("src/main/assets/dictionaries/pinyin_high_priority.dict.yaml"), file("src/main/assets/dictionaries/english_high_priority.tsv"), file("src/main/assets/dictionaries/english_frequency.tsv"), file("src/main/assets/dictionaries/english_extended.tsv"))
+    inputs.file(rootProject.file("scripts/build_dictionary_catalog.py"))
+    inputs.dir(rootProject.file("third_party/open_dictionaries"))
+    inputs.files(file("src/main/assets/dictionaries/skey_wubi86_high.tsv"), file("src/main/assets/dictionaries/skey_pinyin_high.tsv"), file("src/main/assets/dictionaries/skey_english_high.tsv"))
     outputs.dir(layout.buildDirectory.dir("generated/dictionaryCatalog"))
 }
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/dictionaryCatalog"))

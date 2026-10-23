@@ -141,10 +141,10 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
     val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if(uri!=null) {
             val kind=model.pendingImportKind
-            model.run("原始文件已添加，编译后生效") {
+            model.run("文件已导入，编译后生效") {
                 val resolver=model.getApplication<Application>().contentResolver
                 val name=resolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use { if(it.moveToFirst()) it.getString(0) else null } ?: error("无法获取文件名")
-                model.repository.addFile(name,kind,resolver.openInputStream(uri) ?: error("无法打开文件"))
+                model.repository.addFile(name,kind,resolver.openInputStream(uri) ?: error("无法打开文件"),replaceExisting=true)
             }
         }
     }
@@ -180,8 +180,9 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                                     Box(Modifier.size(40.dp).background(colors.secondaryContainer,RoundedCornerShape(12.dp)),contentAlignment=Alignment.Center) { DictionaryIcon("phrases",tint=colors.primary) }
                                     Column(Modifier.weight(1f)) {
                                         Text(file.filename,fontSize=15.sp,fontWeight=FontWeight.Medium,maxLines=2,overflow=TextOverflow.Ellipsis)
-                                        Text(if(file.sourcePath.isEmpty()) file.name else "已保存的源文件",fontSize=12.sp,color=colors.onSurfaceSecondary,modifier=Modifier.padding(top=5.dp))
-                                        if(file.kind=="pinyin") Text(if(file.filename=="pinyin_simp.dict.yaml") "混输与纯拼音共用" else "仅纯拼音使用",fontSize=12.sp,color=colors.onSurfaceSecondary)
+                                        val localPriority = io.secure.keyboard.dictionaries.BuiltinDictionaryFiles.isHighPriority(file.filename,file.kind)
+                                        Text(if(localPriority) "本地高优先级词库" else if(file.sourcePath.isEmpty()) file.name else "已保存的源文件",fontSize=12.sp,color=colors.onSurfaceSecondary,modifier=Modifier.padding(top=5.dp))
+                                        if(file.kind=="pinyin" && !localPriority) Text(if(file.filename=="skey_pinyin.tsv") "混输与纯拼音共用" else "仅纯拼音使用",fontSize=12.sp,color=colors.onSurfaceSecondary)
                                     }
                                     DictionaryIcon("forward",tint=colors.onSurfaceSecondary)
                                 }
@@ -267,6 +268,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
             TextButton(text=(if(model.kind==kind) "✓ " else "")+kindLabel(kind),modifier=Modifier.weight(1f),onClick={model.kind=kind;model.filename=if(kind=="english") "custom_english.tsv" else "custom_$kind.dict.yaml"})
         } }
         TextField(value=model.filename,onValueChange={model.filename=it},label="文件名")
+        Text("同名文件校验通过后将覆盖原内容，编译后生效。",fontSize=12.sp,color=colors.onSurfaceSecondary)
         TextButton(text="从文件导入",modifier=Modifier.fillMaxWidth(),onClick={model.pendingImportKind=model.kind;model.showAdd=false;picker.launch(arrayOf("*/*"))})
         Button(colors=ButtonDefaults.buttonColorsPrimary(),onClick={
             val filename=model.filename;val kind=model.kind

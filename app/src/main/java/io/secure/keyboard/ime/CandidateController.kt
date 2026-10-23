@@ -8,8 +8,6 @@ import android.widget.*
 import kotlin.math.*
 import io.secure.keyboard.data.ContentStore
 import io.secure.keyboard.data.DictionaryKind
-import io.secure.keyboard.engine.CustomCandidateRanking
-import io.secure.keyboard.engine.EnglishCustomCandidateRanking
 import io.secure.keyboard.engine.Source
 import io.secure.keyboard.ui.CandidateFont
 
@@ -137,18 +135,20 @@ internal object CandidateController {
                 } else {
                     val baseline = if(!zh) engine.wordPages("english",query,runtimeRevision) else if(query.length==4) sequence {
                         yieldAll(engine.wordPages("wubi",query,runtimeRevision))
-                        val base=engine.boundedCandidates(query,fuzzy,40,fuzzyPairs,mode)
+                        val base=engine.boundedCandidates(query,fuzzy,40,fuzzyPairs,mode) { destroyed || seq != generation }
                         yieldAll(base.filter { it.source==Source.WUBI }.map { it.text })
                         yieldAll(base.filter { it.source!=Source.WUBI }.map { it.text })
                     } else {
-                        val base=engine.boundedCandidates(query,fuzzy,40,fuzzyPairs,mode)
+                        val base=engine.boundedCandidates(query,fuzzy,40,fuzzyPairs,mode) { destroyed || seq != generation }
                         (base.filter { it.source==Source.WUBI }.map { it.text } + base.filter { it.source!=Source.WUBI }.map { it.text }).asSequence()
                     }
                     val ranked=io.secure.keyboard.engine.CandidateSources.merge(query,baseline,user,zh,{it.reading},{it.word})
                     val words=sequence {
-                        val leading=ranked.take(3).toList()
+                        val remaining=ranked.iterator()
+                        val leading=ArrayList<String>(3)
+                        while(leading.size<3 && remaining.hasNext()) leading.add(remaining.next())
                         yieldAll(engine.appendEmoji(leading))
-                        yieldAll(ranked.drop(3))
+                        yieldAll(remaining.asSequence())
                     }.distinct()
                     words.map { io.secure.keyboard.engine.PinyinDecoder.Option(it,query.length) }
                 }

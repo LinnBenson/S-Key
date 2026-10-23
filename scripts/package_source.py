@@ -13,7 +13,7 @@ ROOT_FILES = (
     ".gitignore", "README.md", "REQUIREMENTS.md", "build.gradle.kts", "settings.gradle.kts",
     "gradle.properties", "gradlew", "gradlew.bat", "app/build.gradle.kts",
 )
-TREES = ("app/src", "gradle/wrapper", "tests", "third_party", "scripts")
+TREES = ("app/src", "gradle/wrapper", "tests", "third_party", "scripts", "docs")
 FORBIDDEN_PARTS = {".git", ".gradle", ".gradle-home", ".kotlin", "build", "__pycache__", "validation", "deliverables"}
 FORBIDDEN_SUFFIXES = {".aar", ".apk", ".aab", ".dex", ".so", ".onnx", ".wav", ".mp3", ".ogg", ".jks", ".keystore", ".pem", ".key", ".p12", ".pyc"}
 

@@ -20,32 +20,41 @@ class BuiltinDictionaryTest : AndroidTestCase() {
     // Isolate compiler fixtures directly; public APIs must never bypass protected files.
     private fun emptyFixture(keep: Set<String> = emptySet()) {
         repository.libraries()
-        android.database.sqlite.SQLiteDatabase.openDatabase(File(directory,"builtin-dictionaries/files-v2.db").path,null,0).use { db ->
+        android.database.sqlite.SQLiteDatabase.openDatabase(File(directory,"builtin-dictionaries-v3/files.db").path,null,0).use { db ->
             repository.libraries().filter { it.filename !in keep }.forEach { db.execSQL("DELETE FROM libraries WHERE id=?", arrayOf(it.id)) }
         }
     }
 
-    fun testUntouchedPreviewCatalogUpgradePreservesEdits() {
-        assertEquals(13,repository.libraries().size)
-        assertTrue("Default catalog must only retain metadata", File(directory,"builtin-dictionaries/defaults-v8.db").length() < 1024 * 1024)
-        val draft=File(directory,"builtin-dictionaries/files-v2.db")
-        android.database.sqlite.SQLiteDatabase.openDatabase(draft.path,null,0).use {
-            it.execSQL("DELETE FROM metadata WHERE key='catalog_version'")
-            it.execSQL("DELETE FROM libraries WHERE id=10")
+    fun testCurrentNamesAndCustomLibrariesRemainEditable() {
+        assertEquals(listOf("skey_wubi86.tsv","skey_wubi86_high.tsv","skey_pinyin.tsv","skey_pinyin_high.tsv","skey_english.tsv","skey_english_high.tsv"),repository.libraries().map { it.filename })
+        repository.addFile("custom.tsv","english","hello\t7\n".byteInputStream())
+        val lib=repository.libraries().last()
+        assertFalse(repository.protectedFilename(lib.filename))
+        repository.renameFile(lib.id,"renamed.tsv")
+        repository.deleteLibrary(lib.id)
+        assertEquals(6,repository.libraries().size)
+        val high=repository.libraries().first { it.filename=="skey_wubi86_high.tsv" }
+        repository.savePage(high.id,repository.page(high.id,0),"保留\taaaa\t0\n")
+        repository=DictionaryRepository(object: ContextWrapper(context) { override fun getNoBackupFilesDir()=directory; override fun getApplicationContext()=this })
+        assertEquals("保留\taaaa\t0\n",repository.page(high.id,0).text)
+    }
+
+    fun testAllBuiltinLibrariesRejectDeleteAndRename() {
+        val bases=repository.libraries()
+        assertEquals(6,bases.size)
+        for (lib in bases) {
+            assertTrue(repository.protectedFilename(lib.filename))
+            try { repository.deleteLibrary(lib.id); fail("Base library deleted") } catch(_: IllegalArgumentException) { }
+            try { repository.renameFile(lib.id,"renamed.tsv"); fail("Base library renamed") } catch(_: IllegalArgumentException) { }
+            assertTrue(repository.page(lib.id,0).text.isNotEmpty())
         }
-        assertEquals(13,repository.libraries().size)
-        repository.deleteLibrary(10)
-        android.database.sqlite.SQLiteDatabase.openDatabase(draft.path,null,0).use {
-            it.execSQL("DELETE FROM metadata WHERE key='catalog_version'")
-        }
-        assertEquals(12,repository.libraries().size)
-        assertTrue(repository.dirty())
+        assertEquals(6,repository.libraries().size)
     }
     fun testMixedPinyinIsolationAndInitials() {
         emptyFixture()
-        repository.addFile("pinyin_simp.dict.yaml","pinyin","name: base\n...\n基础词\tji chu ci\t10\n".byteInputStream())
+        repository.addFile("skey_pinyin.tsv","pinyin","基础词\tji chu ci\t10\n".byteInputStream())
         repository.addFile("extra.tsv","pinyin","额外词\te wai ci\t999\n基础词\tji chu ci\t999999\n".byteInputStream())
-        repository.addFile("pinyin_initials.dict.yaml","pinyin","name: initials\n...\n你\tn\t100\n".byteInputStream())
+        repository.addFile("custom_initials.tsv","pinyin","你\tn\t100\n".byteInputStream())
         repository.compile {}
         CompiledDictionary(repository.activeFile()!!).use { db ->
             assertTrue(db.scopedPinyin)
@@ -54,102 +63,71 @@ class BuiltinDictionaryTest : AndroidTestCase() {
             assertEquals("额外词",db.engine.decodePinyin("ewaici","",emptyList(),false,emptySet()).first().text)
             assertEquals("你",db.engine.decodePinyin("n","",emptyList(),false,emptySet()).first().text)
             assertTrue(db.mixedEngine.candidates("n",false).isEmpty())
-            assertTrue(db.engine.decodePinyin("nn","",emptyList(),false,emptySet()).isEmpty())
+            assertEquals("你你",db.engine.decodePinyin("nn","",emptyList(),false,emptySet()).first().text)
             assertEquals(10L,db.mixedPinyin.lookup("exact","jichuci",10).single().weight)
         }
-        val protected=repository.libraries().first { it.filename=="pinyin_simp.dict.yaml" }
+        val protected=repository.libraries().first { it.filename=="skey_pinyin.tsv" }
         try { repository.deleteLibrary(protected.id); fail("Protected library deleted") } catch(_: IllegalArgumentException) { }
         try { repository.renameFile(protected.id,"other.yaml"); fail("Protected library renamed") } catch(_: IllegalArgumentException) { }
-        assertEquals("pinyin_simp.dict.yaml",repository.libraries().first { it.id==protected.id }.filename)
+        assertEquals("skey_pinyin.tsv",repository.libraries().first { it.id==protected.id }.filename)
     }
 
-    fun testLegacySnapshotDoesNotLeakExtraPinyinIntoMixed() {
-        emptyFixture()
-        repository.addFile("extra.tsv","pinyin","旧快照独有测试词\tce shi ci\t100\n".byteInputStream())
-        repository.addFile("wubi.tsv","wubi","旧五笔词\taaaa\t100\n".byteInputStream())
-        repository.compile {}
-        android.database.sqlite.SQLiteDatabase.openDatabase(repository.activeFile()!!.path,null,0).use {
-            it.execSQL("PRAGMA user_version=0")
-        }
-        val engine=OfflineEngine(object: ContextWrapper(context) {
-            override fun getNoBackupFilesDir()=directory
-            override fun getApplicationContext()=this
-        })
-        assertFalse(engine.candidates("ceshici",false).any { it.text=="旧快照独有测试词" })
-        assertEquals("旧五笔词",engine.candidates("aaaa",false).first().text)
-        assertTrue(engine.decodePinyin("ceshici","",emptyList(),false,emptySet()).any { it.text=="旧快照独有测试词" })
-    }
 
-    fun testFullInitialsAndFactoryUpgrade() {
+    fun testInitialsAreDerivedFromBaseAndOldAssetsAreAbsent() {
         CompiledDictionary(repository.defaultRuntime()).use { db ->
-            val choices=db.engine.decodePinyin("n","",emptyList(),false,emptySet())
-            assertEquals(381, db.initials("n").size)
-            assertEquals("你",choices.first().text)
-            assertTrue(choices.any { it.text==db.initials("n").last().text })
+            assertEquals("你",db.engine.decodePinyin("n","",emptyList(),false,emptySet()).first().text)
+            assertTrue(db.initials("n").isNotEmpty())
             assertTrue(db.initials("i").isEmpty())
             assertTrue(db.mixedEngine.candidates("n",false).none { it.text=="你" })
         }
-        val lib=repository.libraries().single { it.filename=="pinyin_initials.dict.yaml" }
-        val folder=File(directory,"builtin-dictionaries")
-        File(folder,"original-${lib.id}.txt").writeText("name: old\n...\n你\tn\t1\n")
-        android.database.sqlite.SQLiteDatabase.openDatabase(File(folder,"files-v2.db").path,null,0).use {
-            it.execSQL("DELETE FROM metadata WHERE key='initials_version'")
+        assertFalse(repository.libraries().any { it.filename=="pinyin_initials.dict.yaml" })
+        for(name in listOf("compact-wubi.skwb","wubi86.dict.yaml","pinyin_simp.dict.yaml","english_frequency.tsv","english_extended.tsv")) {
+            assertFalse(context.assets.list("dictionaries")!!.contains(name))
         }
-        assertTrue(repository.page(lib.id,0).text.contains("version: \"2\""))
-        assertTrue(repository.dirty())
-        val page=repository.page(lib.id,0)
-        repository.savePage(lib.id,page,page.text.replace("啊\ta","自定义\ta"))
-        android.database.sqlite.SQLiteDatabase.openDatabase(File(folder,"files-v2.db").path,null,0).use {
-            it.execSQL("DELETE FROM metadata WHERE key='initials_version'")
-        }
-        assertTrue(repository.page(lib.id,0).text.contains("自定义\ta"))
     }
 
-    fun testInitialsCatalogMigrationIsOnceOnly() {
-        val initial=repository.libraries().single { it.filename=="pinyin_initials.dict.yaml" }
-        repository.deleteLibrary(initial.id)
-        assertFalse(repository.libraries().any { it.filename=="pinyin_initials.dict.yaml" })
-        val file=File(directory,"builtin-dictionaries/files-v2.db")
-        android.database.sqlite.SQLiteDatabase.openDatabase(file.path,null,0).use {
-            it.execSQL("DELETE FROM metadata WHERE key='initials_added'")
+    fun testAllThreePriorityTemplatesCanRemainEmpty() {
+        val priorities=repository.libraries().filter { it.filename.endsWith("_high.tsv") }
+        assertEquals(3,priorities.size)
+        for(lib in priorities) {
+            val page=repository.page(lib.id,0)
+            repository.savePage(lib.id,page,page.text)
         }
-        assertEquals(1,repository.libraries().count { it.filename=="pinyin_initials.dict.yaml" })
-        val added=repository.libraries().single { it.filename=="pinyin_initials.dict.yaml" }
-        val page=repository.page(added.id,0)
-        repository.savePage(added.id,page,page.text.replace("啊\ta", "测试\ta"))
-        assertTrue(repository.page(added.id,0).text.contains("测试\ta"))
-        repository.deleteLibrary(added.id)
-        assertFalse(repository.libraries().any { it.filename=="pinyin_initials.dict.yaml" })
+        emptyFixture(priorities.map { it.filename }.toSet())
+        repository.compile {}
+        CompiledDictionary(repository.activeFile()!!).use {
+            assertEquals(0,it.wubi.entryCount)
+            assertTrue(it.engine.decodePinyin("nihao","",emptyList(),false,emptySet()).isEmpty())
+            assertTrue(it.english.complete("he",12).isEmpty())
+        }
     }
 
-    fun testPackagedIndexesMatchExistingReaders() {
-        val started=System.nanoTime()
-        CompiledDictionary(repository.defaultRuntime()).use { compiled ->
-            val baseline=CompactWubiTable(ByteBuffer.wrap(context.assets.open("dictionaries/compact-wubi.skwb").use { it.readBytes() }))
-            assertEquals(baseline.entryCount,compiled.wubi.entryCount)
-            for(code in listOf("a","b","t","zz","tmwy","rwtk","klkl","aaaa","zzzz","iuiu","pvhj","r","com")) {
-                assertEquals("exact $code",baseline.exact(code,10000),compiled.wubi.exact(code,10000))
-                assertEquals("prefix $code",baseline.prefix(code,30),compiled.wubi.prefix(code,30))
+    fun testPackagedIndexesAndPhoneCompilationPreserveOrdering() {
+        val packaged=repository.defaultRuntime()
+        repository.compile {}
+        CompiledDictionary(packaged).use { original -> CompiledDictionary(repository.activeFile()!!).use { rebuilt ->
+            assertEquals(136916,rebuilt.wubi.entryCount)
+            assertEquals(65125,rebuilt.pinyin.entryCount)
+            assertEquals(65125,rebuilt.mixedPinyin.entryCount)
+            for(code in listOf("a","b","wq","wqvb","tmwy","khlg","aaaa","wg")) {
+                assertEquals(code,original.wubi.exact(code,10000),rebuilt.wubi.exact(code,10000))
+                assertEquals(code,original.wubi.prefix(code,30),rebuilt.wubi.prefix(code,30))
             }
-            val english=EnglishLexicon(StringReader(listOf("english_frequency.tsv","english_extended.tsv").joinToString("\n") { name -> context.assets.open("dictionaries/$name").bufferedReader().use { it.readText() } }))
-            for(prefix in listOf("a","w","hel","Hel","HE","compu","january","","hello ","z","q","trans","n"))
-                assertEquals(prefix,english.complete(prefix,12),compiled.english.complete(prefix,12))
-            val reference=DictionaryEngine(StringReader("...\n"),context.assets.open("dictionaries/pinyin_simp.dict.yaml").reader())
-            val emptyWubi=object: WubiLookup { override val entryCount=0; override fun exactCandidateCount(code:String)=0
-                override fun exact(code:String,limit:Int)=emptyList<Candidate>(); override fun prefix(code:String,limit:Int)=emptyList<Candidate>() }
-            val actual=DictionaryEngine(emptyWubi,compiled.pinyin,compiled.english)
-            val pairs=listOf(emptySet(),DictionaryEngine.DEFAULT_FUZZY_PAIRS, setOf("r_l"),setOf("n_l","r_l"),setOf("zh_z"))
-            for(code in listOf("ni","nihao","zhongguo","xian","xi'an","xi an","ren","len","neng","beijing","zhongguoren","shanghai","zhang","zang","qwerty"))
-                for(selected in pairs) assertEquals("$code $selected",reference.candidates(code,true,40,selected),actual.candidates(code,true,40,selected))
-        }
-        android.util.Log.w("DictionaryTest","Parity elapsed ms="+(System.nanoTime()-started)/1_000_000)
+            for(code in listOf("nihao","weixin","zhongguo","shurufa","ni")) {
+                assertEquals(code,original.pinyin.lookup("exact",code,100),rebuilt.pinyin.lookup("exact",code,100))
+                assertEquals(code,original.mixedPinyin.lookup("exact",code,100),rebuilt.mixedPinyin.lookup("exact",code,100))
+            }
+            for(prefix in listOf("he","hel","compu","w","a","key","Hel","HE"))
+                assertEquals(prefix,original.english.complete(prefix,12),rebuilt.english.complete(prefix,12))
+            for(initial in listOf("n","b","z")) assertEquals(original.initials(initial),rebuilt.initials(initial))
+        } }
     }
     fun testDraftAddEditDeleteCompileAndRestore() {
-        assertEquals(13,repository.libraries().size)
-        assertEquals("wubi86.dict.yaml",repository.libraries().first().filename)
+        assertEquals(6,repository.libraries().size)
+        assertEquals("skey_wubi86.tsv",repository.libraries().first().filename)
         val original=java.io.ByteArrayOutputStream()
         repository.export(repository.libraries().first().id,original)
-        assertTrue(context.assets.open("dictionaries/wubi86.dict.yaml").use { it.readBytes() }.contentEquals(original.toByteArray()))
+        assertTrue(context.assets.open("dictionary-sources/skey_wubi86.tsv").use { it.readBytes() }.contentEquals(original.toByteArray()))
         assertFalse(repository.dirty())
         emptyFixture()
         repository.addFile("test_wubi.tsv","wubi","# preserved header\n测试\taaaa\t4250000000\n".byteInputStream())
@@ -182,7 +160,7 @@ class BuiltinDictionaryTest : AndroidTestCase() {
         }
         val current=repository.activeFile()
         repository.restoreDefaults()
-        assertEquals(13,repository.libraries().size)
+        assertEquals(6,repository.libraries().size)
         assertEquals(current,repository.activeFile())
         assertTrue(repository.dirty())
     }
@@ -204,6 +182,60 @@ class BuiltinDictionaryTest : AndroidTestCase() {
         assertEquals(current,repository.activeFile())
         CompiledDictionary(checkNotNull(current)).use { assertEquals(listOf("hello"),it.english.complete("he",8)); assertTrue(it.english.complete("wo",8).isEmpty()) }
     }
+    fun testSameNameImportValidatesBeforeReplacingAllSixLibraries() {
+        val original=repository.libraries()
+        original.forEach { lib ->
+            val content=when(lib.kind) { "wubi" -> "测试\taaaa\t7\n"; "pinyin" -> "测试\tce shi\t7\n"; else -> "hello\t7\n" }
+            val oldPage=repository.page(lib.id,0)
+            repository.addFile(lib.filename,lib.kind,content.byteInputStream(),replaceExisting=true)
+            assertEquals(content,repository.page(lib.id,0).text)
+            assertEquals(original.map { it.id },repository.libraries().map { it.id })
+            try { repository.savePage(lib.id,oldPage,content); fail("stale edit accepted") } catch(_: IllegalStateException) {}
+            if(lib.filename.endsWith("_high.tsv")) {
+                repository.addFile(lib.filename,lib.kind,"# empty\n".byteInputStream(),replaceExisting=true)
+                assertEquals("# empty\n",repository.page(lib.id,0).text)
+            }
+        }
+        repository.compile {}
+        val active=repository.activeFile()
+        original.forEach { lib ->
+            val page=repository.page(lib.id,0)
+            val sources=File(directory,"builtin-dictionaries-v3").list()!!.filter { it.startsWith("edit-") }.toSet()
+            for(content in listOf("broken\t!\tbad\n", "# header\n".repeat(121)+"invalid!\t!\n")) {
+                try { repository.addFile(lib.filename,lib.kind,content.byteInputStream(),replaceExisting=true); fail("bad replacement") }
+                catch(_: IllegalArgumentException) {}
+                assertEquals(page,repository.page(lib.id,0))
+                assertEquals(sources,File(directory,"builtin-dictionaries-v3").list()!!.filter { it.startsWith("edit-") }.toSet())
+                assertFalse(repository.dirty())
+            }
+            try { repository.addFile(lib.filename,if(lib.kind=="english") "wubi" else "english","hello\t9\n".byteInputStream(),replaceExisting=true); fail("wrong kind") }
+            catch(_: IllegalArgumentException) {}
+            assertEquals(page,repository.page(lib.id,0))
+        }
+        assertEquals(active,repository.activeFile())
+        CompiledDictionary(active!!).use { assertEquals(listOf("hello"),it.english.complete("he",8)) }
+        val english=original.first { it.filename=="skey_english.tsv" }
+        repository.addFile(english.filename,"english","world\t8\n".byteInputStream(),replaceExisting=true)
+        assertTrue(repository.dirty())
+        assertEquals(active,repository.activeFile())
+        repository.compile {}
+        CompiledDictionary(repository.activeFile()!!).use { assertEquals(listOf("world"),it.english.complete("wo",8)); assertTrue(it.english.complete("he",8).isEmpty()) }
+    }
+
+    fun testTamperedSourceCannotReplaceActiveDictionary() {
+        emptyFixture()
+        repository.addFile("words.tsv","english","hello\t10\n".byteInputStream())
+        repository.compile {}
+        val current=repository.activeFile()
+        val lib=repository.libraries().single()
+        val source=File(directory,"builtin-dictionaries-v3/${lib.sourcePath}")
+        source.writeText("hello\t10\ninvalid!\t3\n")
+        try { repository.compile {}; fail("tampered source accepted") }
+        catch(e: IllegalArgumentException) { assertTrue(e.message!!.contains("第 2 行")) }
+        assertEquals(current,repository.activeFile())
+        CompiledDictionary(current!!).use { assertEquals(listOf("hello"),it.english.complete("he",8)) }
+    }
+
     fun testRepeatedCompilesAndRecoveryBoundFilesWithoutRemovingLiveReader() {
         emptyFixture()
         repository.addFile("words.tsv", "english", "hello\t10\n".byteInputStream())
@@ -249,8 +281,18 @@ class BuiltinDictionaryTest : AndroidTestCase() {
         assertEquals(original.replace("wordfa","replacement"),output.toString("UTF-8"))
         try { repository.savePage(lib.id,page,"stale");fail("stale page accepted") } catch(_: IllegalStateException) {}
     }
+    fun testWubiPriorityOverridesImportedWeightButNotPrefixRank() {
+        emptyFixture()
+        repository.addFile("skey_wubi86.tsv","wubi","普通词\taaaa\t999999\n".byteInputStream())
+        repository.addFile("skey_wubi86_high.tsv","wubi","# priority\n优先词\taaaa\t0\n普通词\taaaa\t0\n".byteInputStream())
+        repository.compile {}
+        CompiledDictionary(repository.activeFile()!!).use {
+            assertEquals(listOf("优先词","普通词"),it.wubi.exact("aaaa",10).map { it.text })
+            assertEquals("普通词",it.wubi.prefix("aa",10).first().text)
+        }
+    }
     fun testEmptyPriorityLibrariesCompileAndRankOnlyExactMatches() {
-        val priorityNames=setOf("pinyin_high_priority.dict.yaml","english_high_priority.tsv")
+        val priorityNames=setOf("skey_pinyin_high.tsv","skey_english_high.tsv")
         emptyFixture(priorityNames)
         repository.compile {}
         assertFalse(repository.dirty())
@@ -259,12 +301,12 @@ class BuiltinDictionaryTest : AndroidTestCase() {
             assertTrue(it.english.complete("cat",12).isEmpty())
         }
         emptyFixture()
-        repository.addFile("pinyin_simp.dict.yaml","pinyin","name: base\n...\n你好\tni hao\t1000000\n你\tni\t1000\n好\thao\t1000\n".byteInputStream())
+        repository.addFile("skey_pinyin.tsv","pinyin","你好\tni hao\t1000000\n你\tni\t1000\n好\thao\t1000\n".byteInputStream())
         repository.addFile("normal.tsv","english","cat\t1\ncats\t99999\ncap\t100\n".byteInputStream())
-        repository.addFile("pinyin_high_priority.dict.yaml","pinyin","name: priority\n...\n".byteInputStream())
-        repository.addFile("english_high_priority.tsv","english","# empty\n".byteInputStream())
-        val py=repository.libraries().single { it.filename=="pinyin_high_priority.dict.yaml" }
-        val en=repository.libraries().single { it.filename=="english_high_priority.tsv" }
+        repository.addFile("skey_pinyin_high.tsv","pinyin","# priority\n".byteInputStream())
+        repository.addFile("skey_english_high.tsv","english","# empty\n".byteInputStream())
+        val py=repository.libraries().single { it.filename=="skey_pinyin_high.tsv" }
+        val en=repository.libraries().single { it.filename=="skey_english_high.tsv" }
         val page=repository.page(py.id,0)
         repository.savePage(py.id,page,page.text+"拟好\tni hao\t0\n你好\tni hao\t0\n")
         val englishPage=repository.page(en.id,0)
@@ -282,34 +324,15 @@ class BuiltinDictionaryTest : AndroidTestCase() {
             assertEquals(listOf("cats","cap","cat"),compiled.english.complete("ca",12))
             assertEquals(1000000L,compiled.pinyin.lookup("exact","nihao",2)[1].weight)
         }
-        // Empty high-priority files remain valid after editing and renaming.
-        repository.savePage(py.id,repository.page(py.id,0),"name: priority\n...\n")
+        // Empty high-priority files remain valid and cannot be renamed.
+        repository.savePage(py.id,repository.page(py.id,0),"# priority\n")
         repository.savePage(en.id,repository.page(en.id,0),"# empty\n")
-        repository.renameFile(en.id,"my-priority.tsv")
+        try { repository.renameFile(en.id,"my-priority.tsv"); fail("Priority library renamed") } catch(_: IllegalArgumentException) { }
         repository.compile {}
         CompiledDictionary(repository.activeFile()!!).use {
             assertEquals("你好",it.engine.decodePinyin("nihao","",emptyList(),false,emptySet()).first().text)
             assertEquals(listOf("cats"),it.english.complete("cat",12))
         }
-    }
-
-    fun testPriorityCatalogMigrationPreservesDraftsAndDeletion() {
-        val names=setOf("pinyin_high_priority.dict.yaml","english_high_priority.tsv")
-        repository.libraries().filter { it.filename in names }.forEach { repository.deleteLibrary(it.id) }
-        val catalog=File(directory,"builtin-dictionaries/files-v2.db")
-        android.database.sqlite.SQLiteDatabase.openDatabase(catalog.path,null,0).use {
-            it.execSQL("DELETE FROM metadata WHERE key='priority_libraries_added'")
-        }
-        assertEquals(names,repository.libraries().filter { it.filename in names }.map { it.filename }.toSet())
-        val py=repository.libraries().single { it.filename=="pinyin_high_priority.dict.yaml" }
-        repository.savePage(py.id,repository.page(py.id,0),"name: custom\n...\n自定\tzi ding\t1\n")
-        android.database.sqlite.SQLiteDatabase.openDatabase(catalog.path,null,0).use {
-            it.execSQL("DELETE FROM metadata WHERE key='priority_libraries_added'")
-        }
-        assertTrue(repository.page(py.id,0).text.contains("自定"))
-        assertEquals(1,repository.libraries().count { it.filename==py.filename })
-        repository.deleteLibrary(py.id)
-        assertFalse(repository.libraries().any { it.filename==py.filename })
     }
 
     fun testSearchIndexesPreserveLimitsAndLegacySnapshots() {
@@ -338,6 +361,71 @@ class BuiltinDictionaryTest : AndroidTestCase() {
             assertEquals(expected.complete("a",12),compiled.english.complete("a",12))
             assertEquals(listOf("甲","乙"),compiled.wubi.prefix("a",30).map { it.text })
         }
+    }
+
+    fun testMalformedSearchIndexRejectedWithoutLeakingDatabase() {
+        emptyFixture()
+        repository.addFile("words.tsv","wubi","你\twq\t1\n".byteInputStream())
+        repository.compile {}
+        val file=repository.activeFile()!!
+        android.database.sqlite.SQLiteDatabase.openDatabase(file.path,null,0).use {
+            it.execSQL("DROP TABLE short_prefixes")
+        }
+        val baseline=CompiledDictionary.openSnapshotPaths()
+        repeat(20) {
+            try { CompiledDictionary(file).use { }; fail("Broken index accepted") }
+            catch (_: android.database.sqlite.SQLiteException) { }
+            assertEquals(baseline,CompiledDictionary.openSnapshotPaths())
+        }
+        assertTrue(CompiledDictionary.deleteIfUnused(file))
+    }
+
+    fun testAppliedSnapshotReleasesOldResourcesAndNeverFallsBack() {
+        val engine=OfflineEngine(object: ContextWrapper(context) { override fun getNoBackupFilesDir()=directory; override fun getApplicationContext()=this })
+        engine.load()
+        val packaged=repository.defaultRuntime().absolutePath
+        assertTrue(CompiledDictionary.openSnapshotPaths().contains(packaged))
+        emptyFixture()
+        fun snapshotRef(): java.lang.ref.WeakReference<Any> {
+            val field=OfflineEngine::class.java.getDeclaredField("compiled").apply { isAccessible=true }
+            return java.lang.ref.WeakReference(field.get(null))
+        }
+        var previous=packaged
+        val metrics=org.json.JSONArray()
+        repeat(12) { iteration ->
+            val old=snapshotRef()
+            val even=iteration%2==0
+            val word=if(even) "新词" else "替换"
+            val code=if(even) "aaaa" else "bbbb"
+            val py=if(even) "xin ci" else "ti huan"
+            val en=if(even) "bravo" else "charlie"
+            repository.addFile("skey_wubi86.tsv","wubi","$word\t$code\t5\n".byteInputStream(),replaceExisting=true)
+            repository.addFile("skey_pinyin.tsv","pinyin","$word\t$py\t5\n".byteInputStream(),replaceExisting=true)
+            repository.addFile("skey_english.tsv","english","$en\t5\n".byteInputStream(),replaceExisting=true)
+            repository.compile {}
+            assertFalse(engine.isLoaded)
+            assertFalse(CompiledDictionary.openSnapshotPaths().contains(previous))
+            val staleFd=File("/proc/self/fd").listFiles().orEmpty().any { runCatching { it.canonicalPath==previous }.getOrDefault(false) }
+            assertFalse("old SQLite file descriptor retained",staleFd)
+            // Do not dereference the WeakReference before GC: ART may keep that temporary alive.
+            repeat(5) { System.gc(); System.runFinalization(); Thread.sleep(40) }
+            assertNull("old snapshot reachable after apply",old.get())
+            assertEquals(word,engine.exactWubi(code,10).single().text)
+            assertTrue(engine.exactWubi(if(even) "bbbb" else "aaaa",10).isEmpty())
+            assertTrue(engine.decodePinyin(py.replace(" ",""),"",emptyList(),false,emptySet()).any { it.text==word })
+            assertTrue(engine.candidates(py.replace(" ",""),false).any { it.text==word })
+            assertEquals(listOf(en),engine.completeEnglish(en.take(2),10).map { it.text })
+            assertTrue(engine.completeEnglish(if(even) "ch" else "br",10).isEmpty())
+            assertTrue(engine.completeEnglish("you",10).isEmpty())
+            assertFalse(CompiledDictionary.openSnapshotPaths().contains(packaged))
+            previous=repository.activeFile()!!.absolutePath
+            assertEquals(setOf(previous),CompiledDictionary.openSnapshotPaths().filter { it.startsWith(directory.path) }.toSet())
+            assertEquals(1,File(previous).parentFile!!.listFiles()!!.count { it.name.startsWith("compiled-") && it.extension=="db" })
+            System.gc()
+            val runtime=Runtime.getRuntime()
+            metrics.put(org.json.JSONObject().put("iteration",iteration).put("javaHeap",runtime.totalMemory()-runtime.freeMemory()).put("nativeHeap",android.os.Debug.getNativeHeapAllocatedSize()).put("openSnapshots",CompiledDictionary.openSnapshotPaths().size))
+        }
+        File(context.cacheDir,"snapshot-replacement-memory.json").writeText(metrics.toString())
     }
 
     fun testFullDefaultCompilation() {

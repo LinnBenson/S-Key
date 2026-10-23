@@ -1302,7 +1302,10 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     fun testFinishedPresentationReleasesStripGridPreeditAndPreviewIdempotently() {
-        query(true, "khkh")
+        val engine=io.secure.keyboard.engine.OfflineEngine(context).also { it.load() }
+        val expected=engine.exactWubi("kkkk",10000).map { it.text }
+        assertTrue(expected.size>40)
+        query(true, "kkkk")
         loadRemainingCandidatePages()
         lateinit var oldStrip: CandidateStrip
         lateinit var oldGrid: CandidateGrid
@@ -1313,7 +1316,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         onMainChecked {
             // All logical candidates remain reachable, including many visited strip batches.
             val all = field<List<String>>("candidateTexts")
-            assertEquals(472, all.size)
+            assertEquals(expected, all)
             CandidateStrip::class.java.getDeclaredMethod("bindThrough",
                 Int::class.javaPrimitiveType, List::class.java, Int::class.javaPrimitiveType)
                 .apply { isAccessible = true }.invoke(strip, all.size, all, row.childCount)
@@ -1491,7 +1494,10 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     fun testAllMappedWubiCandidatesRemainReachableAtTheExpandedGridTail() {
-        query(true, "khkh")
+        val engine=io.secure.keyboard.engine.OfflineEngine(context).also { it.load() }
+        val expected=engine.exactWubi("kkkk",10000).map { it.text }
+        assertTrue(expected.size>40)
+        query(true, "kkkk")
         lateinit var expectedTail: String
         onMainChecked {
             assertEquals("Only the first data page is queried",40,field<List<String>>("candidateTexts").size)
@@ -1504,18 +1510,18 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
         onMainChecked {
             val values=field<List<String>>("candidateTexts")
-            assertEquals(472,values.size)
+            assertEquals(expected,values)
             assertEquals(values.size,values.distinct().size)
             expectedTail=values.last()
-            field<CandidateGrid>("candidateGrid").setSelection(471)
+            field<CandidateGrid>("candidateGrid").setSelection(expected.lastIndex)
         }
         waitFor("last real mapped Wubi entry becomes visible") {
             val grid = field<CandidateGrid>("candidateGrid")
-            grid.firstVisiblePosition <= 471 && grid.lastVisiblePosition >= 471
+            grid.firstVisiblePosition <= expected.lastIndex && grid.lastVisiblePosition >= expected.lastIndex
         }
         onMainChecked {
             val grid = field<CandidateGrid>("candidateGrid")
-            val cell = grid.getChildAt(471 - grid.firstVisiblePosition) as TextView
+            val cell = grid.getChildAt(expected.lastIndex - grid.firstVisiblePosition) as TextView
             assertEquals(expectedTail, cell.text.toString())
             cell.performClick()
             assertEquals(listOf(expectedTail), connection.committed)
@@ -1900,7 +1906,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             query(true, "q")
             onMainChecked {
                 assertEquals(expected.take(40), field<List<String>>("candidateTexts"))
-                assertEquals("Initial binding must stay bounded despite all retained matches", 40, row.childCount)
+                assertTrue("Initial binding must stay bounded despite all retained matches", row.childCount in 1..40)
             }
             waitFor("custom tail appended through ordinary horizontal scrolling") {
                 if (row.childCount < expected.size) strip.scrollTo(row.width, 0)
@@ -2576,6 +2582,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
     }
 
     fun testPinyinContextPredictionAndModeToolbar() {
+        onMainChecked { SettingsStore(context).wubiPinyinInput = false }
         onMainChecked { SettingsStore(context).chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.PINYIN }
         instrumentation.waitForIdleSync()
         query(true,"zhong")
@@ -2592,6 +2599,10 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         assertFalse(field<List<String>>("candidateTexts").contains("你"))
         onMainChecked { invoke("openTool","input_mode") }
         instrumentation.waitForIdleSync()
+        assertEquals(io.secure.keyboard.engine.ChineseInputMode.PINYIN,SettingsStore(context).chineseInputMode)
+        onMainChecked { SettingsStore(context).wubiPinyinInput = true; invoke("openTool","input_mode") }
+        instrumentation.waitForIdleSync()
+        assertEquals(io.secure.keyboard.engine.ChineseInputMode.WUBI,SettingsStore(context).chineseInputMethod)
         assertEquals(io.secure.keyboard.engine.ChineseInputMode.MIXED,SettingsStore(context).chineseInputMode)
         query(true,"ni")
         assertTrue(field<List<String>>("candidateTexts").contains("你"))
@@ -2819,6 +2830,71 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             host.connection.keyEvents.clear()
             host.observedActions.clear()
             host.haptics.reset()
+        }
+    }
+
+    /** Real key touch dispatch through the production service, ending at candidate draw. */
+    fun testTypingLatencyDiagnostic() {
+        val settings=SettingsStore(context)
+        val engine=io.secure.keyboard.engine.OfflineEngine(context).also { it.load() }
+        val oldMixed=settings.wubiPinyinInput
+        val oldFuzzy=settings.fuzzyPinyin
+        val oldPairs=settings.fuzzyPairs
+        val scenarios=listOf("wubi" to "wqvb", "wubi" to "kkkk", "wubi" to "wg",
+            "mixed" to "nihao", "mixed" to "zhongguo", "mixed" to "wqvb",
+            "pinyin" to "nihao", "pinyin" to "zhongguo", "pinyin" to "shurufa",
+            "english" to "computer", "english" to "hello", "english" to "what")
+        fun report(data: org.json.JSONObject) = instrumentation.sendStatus(2,android.os.Bundle().apply { putString("typing_latency",data.toString()) })
+        try {
+            settings.fuzzyPinyin=true
+            settings.fuzzyPairs=io.secure.keyboard.engine.DictionaryEngine.DEFAULT_FUZZY_PAIRS
+            repeat(3) { round -> for ((mode,word) in scenarios) {
+                onMainChecked {
+                    settings.chineseInputMode=io.secure.keyboard.engine.ChineseInputMode.fromId(if(mode=="english") "mixed" else mode)
+                    invoke("clearPending"); connection.before=""; connection.committed.clear()
+                    setField("chinese",mode!="english"); setField("panel","keys"); invoke("renderBody")
+                }
+                instrumentation.waitForIdleSync()
+                for ((index,char) in word.withIndex()) {
+                    val ready=CountDownLatch(1)
+                    var started=0L; var drawn=0L; var initial=0; var emptyResult=false
+                    val root=field<View>("root")
+                    // An empty result may not invalidate a view; it has no candidate draw to time.
+                    val emptyCheck=object: Runnable {
+                        override fun run() {
+                            if(ready.count==0L) return
+                            if(field<Int>("generation")>initial && field<Int>("candidateGeneration")==field<Int>("generation") && field<List<String>>("candidateTexts").isEmpty()) {
+                                emptyResult=true; drawn=System.nanoTime(); ready.countDown()
+                            } else root.postDelayed(this,4)
+                        }
+                    }
+                    val observer=ViewTreeObserver.OnDrawListener {
+                        if(started!=0L && field<Int>("generation")>initial && field<Int>("candidateGeneration")==field<Int>("generation") && ready.count>0) {
+                            drawn=System.nanoTime(); ready.countDown()
+                        }
+                    }
+                    onMainChecked {
+                        initial=field("generation"); root.viewTreeObserver.addOnDrawListener(observer)
+                        started=System.nanoTime(); tapKey(char.toString()); root.postDelayed(emptyCheck,4)
+                    }
+                    val finished=ready.await(15,TimeUnit.SECONDS)
+                    onMainChecked { root.viewTreeObserver.removeOnDrawListener(observer); root.removeCallbacks(emptyCheck) }
+                    assertTrue("Candidate draw timeout: $mode ${word.take(index+1)}",finished)
+                    val query=word.take(index+1)
+                    val t=System.nanoTime()
+                    val words=when(mode) {
+                        "english" -> engine.wordPages("english",query,engine.revision).take(40).toList()
+                        "pinyin" -> engine.decodePinyinWithoutInitials(query,"",emptyList(),true,settings.fuzzyPairs) { false }.take(40).map { it.text }.toList()
+                        else -> engine.boundedCandidates(query,true,40,settings.fuzzyPairs,settings.chineseInputMode).map { it.text }
+                    }
+                    report(org.json.JSONObject().put("round",round).put("mode",mode).put("query",query)
+                        .put("key_to_draw_us",(drawn-started)/1000).put("warm_lookup_us",(System.nanoTime()-t)/1000)
+                        .put("empty_result",emptyResult)
+                        .put("result_hash",words.hashCode()).put("count",words.size))
+                }
+            } }
+        } finally {
+            settings.fuzzyPinyin=oldFuzzy; settings.fuzzyPairs=oldPairs; settings.wubiPinyinInput=oldMixed
         }
     }
 

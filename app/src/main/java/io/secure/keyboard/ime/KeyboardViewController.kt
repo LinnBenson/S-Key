@@ -139,7 +139,7 @@ internal object KeyboardViewController {
     internal fun KeyboardSession.iconImpl(name: String, description: String, action: () -> Unit) =
         ToolIcon(
             this,
-            if (name == "input_mode") "mode_" + settings.chineseInputMode.id else if (name == "script") {
+            if (name == "input_mode") "mode_" + settings.chineseInputMethod.id else if (name == "script") {
                 if (settings.traditionalOutput) "script_traditional" else "script"
             } else if (name == "floating") {
                 if (profile.floating) "floating_exit" else "floating_enter"
@@ -148,7 +148,7 @@ internal object KeyboardViewController {
         ).apply {
             KeyboardFeedback.disableAutomatic(this)
             isSelected = toolIsSelected(name)
-            contentDescription = if (name == "input_mode") settings.chineseInputMode.label + "，点击切换输入模式" else if (name == "script") (if (settings.traditionalOutput) "繁体输出，点击切换简体" else "简体输出，点击切换繁体") else description
+            contentDescription = if (name == "input_mode") (if (settings.chineseInputMethod == io.secure.keyboard.engine.ChineseInputMode.WUBI) "五笔" else "拼音") + "，点击切换输入模式" else if (name == "script") (if (settings.traditionalOutput) "繁体输出，点击切换简体" else "简体输出，点击切换繁体") else description
             isClickable = true
             isFocusable = true
             val feedback = installPressFeedback()
@@ -270,7 +270,7 @@ internal object KeyboardViewController {
             LinearLayout.LayoutParams(dp(42), -1),
         )
         header.addView(candidateGroup, LinearLayout.LayoutParams(0, -1, 1f))
-        toolbarGroup = LinearLayout(this)
+        toolbarGroup = io.secure.keyboard.ui.ToolbarRow(this)
         header.addView(toolbarGroup, LinearLayout.LayoutParams(0, -1, 1f))
         hideIcon = icon("hide", "收起键盘") {
             if (showsCandidateMode()) {
@@ -285,7 +285,7 @@ internal object KeyboardViewController {
                 requestHideSelf(0)
             }
         }
-        header.addView(hideIcon, LinearLayout.LayoutParams(0, -1, 1f))
+        header.addView(hideIcon, LinearLayout.LayoutParams(dp(44), -1))
     }
 
     internal fun KeyboardSession.showsCandidateModeImpl() = !secret && panel == "keys" &&
@@ -355,7 +355,7 @@ internal object KeyboardViewController {
                     renderHeader()
                     renderBody()
                 },
-                LinearLayout.LayoutParams(0, -1, 1f),
+                LinearLayout.LayoutParams(dp(44), -1),
             )
             if (paste != null) {
                 val preview = button(paste.replace(Regex("[\\r\\n\\t\\u2028\\u2029]+"), " ")) {
@@ -391,22 +391,23 @@ internal object KeyboardViewController {
                     marginStart = dp(6)
                     marginEnd = dp(6)
                 })
-            } else signature.second.forEach { tool ->
-                toolbarGroup.addView(
-                    icon(tool, tools[tool] ?: tool) { openTool(tool) },
-                    LinearLayout.LayoutParams(0, -1, 1f),
-                )
+            } else {
+                signature.second.forEach { tool ->
+                    toolbarGroup.addView(
+                        icon(tool, tools[tool] ?: tool) { openTool(tool) },
+                        LinearLayout.LayoutParams(dp(44), -1),
+                    )
+                }
             }
-            toolbarGroup.layoutParams =
-                LinearLayout.LayoutParams(0, -1, (signature.second.size + 1).toFloat())
+            toolbarGroup.layoutParams = LinearLayout.LayoutParams(0, -1, 1f)
             toolbarSignature = signature
         }
         if (headerShowsCandidates != hasCandidates) {
             candidateGroup.visibility = if (hasCandidates) View.VISIBLE else View.GONE
             toolbarGroup.visibility = if (hasCandidates) View.GONE else View.VISIBLE
-            hideIcon.layoutParams =
-                if (hasCandidates) LinearLayout.LayoutParams(dp(44), -1)
-                else LinearLayout.LayoutParams(0, -1, 1f)
+            val toolbarInset = if (hasCandidates) 0 else dp(8)
+            header.setPadding(toolbarInset, 0, toolbarInset, 0)
+            hideIcon.layoutParams = LinearLayout.LayoutParams(dp(44), -1)
             headerShowsCandidates = hasCandidates
         }
     }

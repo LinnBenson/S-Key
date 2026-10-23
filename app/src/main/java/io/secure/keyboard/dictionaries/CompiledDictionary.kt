@@ -12,11 +12,14 @@ class CompiledDictionary(file: File) : AutoCloseable {
         val opened = SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READONLY)
         try {
             opened.rawQuery("SELECT text,code,weight,kind,compact,fuzzy,syllable,priority,ordinal FROM words LIMIT 0", null).use { }
+            val version = opened.rawQuery("PRAGMA user_version", null).use { it.moveToFirst(); it.getInt(0) }
+            require(version in 2..3) { "词库索引版本不受支持，请重新编译" }
+            if (version == 3) opened.rawQuery("SELECT kind,prefix,rank,word_id FROM short_prefixes LIMIT 0", null).use { }
+            opened.execSQL("PRAGMA cache_size=-2048")
             openFiles[path] = (openFiles[path] ?: 0) + 1
             opened
         } catch (error: Throwable) { opened.close(); throw error }
     }
-    init { db.execSQL("PRAGMA cache_size=-2048") }
     private val indexedPrefixes = db.rawQuery("PRAGMA user_version",null).use { it.moveToFirst(); it.getInt(0)>=3 }
     private fun shortPrefix(kind: String, code: String, limit: Int) = rows(
         "SELECT w.text,w.code,w.weight FROM short_prefixes p JOIN words w ON w.rowid=p.word_id WHERE p.kind=? AND p.prefix=? ORDER BY p.rank LIMIT ?",
@@ -42,7 +45,7 @@ class CompiledDictionary(file: File) : AutoCloseable {
         override fun lookup(kind: String, key: String, limit: Int) = lookupPage(kind,key,0,limit)
         override fun lookupPage(kind: String, key: String, offset: Int, limit: Int): List<DictionaryEngine.Entry> {
             if (limit<=0) return emptyList()
-            val column = if(kind == "exact") "compact" else "fuzzy"
+            val column = when(kind) { "exact" -> "compact"; "syllable" -> "syllable"; else -> "fuzzy" }
             val ranking = if(kind=="exact") "priority,weight DESC,ordinal" else "weight DESC,ordinal"
             val columns = if(kind=="exact") "text,code,weight,priority" else "text,code,weight"
             return rows("SELECT $columns FROM words WHERE kind='$namespace' AND kind IN ('pinyin','mixed_pinyin','pinyin_initial') AND $column=? ORDER BY $ranking LIMIT ? OFFSET ?", arrayOf(key, limit.toString(),offset.toString()))
@@ -131,6 +134,7 @@ class CompiledDictionary(file: File) : AutoCloseable {
     }
     companion object {
         private val openFiles = mutableMapOf<String, Int>()
+        internal fun openSnapshotPaths(): Set<String> = synchronized(openFiles) { openFiles.keys.toSet() }
         internal fun deleteIfUnused(file: File) = synchronized(openFiles) {
             if (file.absolutePath !in openFiles) SQLiteDatabase.deleteDatabase(file) else false
         }

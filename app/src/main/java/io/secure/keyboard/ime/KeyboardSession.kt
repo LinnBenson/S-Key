@@ -310,7 +310,13 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             else if (key == "toolbarPins" || key == "traditionalOutput") main.post {
                 if (active) { renderHeader(); if (panel == "more") renderBody() }
             }
-            else if (key == "fuzzyPairs" || key == "fuzzyPinyin" || key == "englishCompletion" || key == "builtin_dictionary_revision" || key == "emojiShortcuts")
+            else if (key == "builtin_dictionary_revision") main.post {
+                generation++
+                candidateQueries.clear()
+                clearCandidates()
+                if (active) { renderHeader(); refreshCandidates() }
+            }
+            else if (key == "fuzzyPairs" || key == "fuzzyPinyin" || key == "englishCompletion" || key == "emojiShortcuts")
                 main.post { if (active) refreshCandidates() }
         }
     internal lateinit var profile: SettingsStore.LayoutProfile

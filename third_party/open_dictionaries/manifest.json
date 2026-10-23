@@ -1,0 +1,36 @@
+{
+  "skey_wubi86.tsv": {
+    "source": "wubi86.dict.yaml",
+    "url": "https://github.com/rime/rime-wubi/blob/152a0d3f3efe40cae216d1e3b338242446848d07/wubi86.dict.yaml",
+    "source_sha256": "f833d86b72341fe82e069a425b6625f29ef85f1bc0f34f6fb7975fe514888b5a",
+    "sha256": "f2834de98d5794900cd22057ce37dc1f763ecd8bb016418c4465897e969e7f2f",
+    "entries": 136916,
+    "license": "LGPL-3.0",
+    "weight_changes": [
+      {
+        "text": "χ",
+        "code": "zzxx",
+        "original": "450.5",
+        "converted": 450
+      }
+    ]
+  },
+  "skey_pinyin.tsv": {
+    "source": "pinyin_simp.dict.yaml",
+    "url": "https://github.com/rime/rime-pinyin-simp/blob/0c6861ef7420ee780270ca6d993d18d4101049d0/pinyin_simp.dict.yaml",
+    "source_sha256": "e341598343a0f0f2035bb1aafc34a7f3bb7887deeecb3f60796262aaa2983e6b",
+    "sha256": "6314b901ac83e60d0331a9b9eecae86c5ae320072b7c14dd3d9c1de8c302f372",
+    "entries": 65125,
+    "license": "Apache-2.0",
+    "weight_changes": []
+  },
+  "skey_english.tsv": {
+    "source": "english_frequency.tsv",
+    "url": "https://github.com/LinnBenson/S-Key/blob/4b0e4957de249026fac5a0cd3638f9aa2ed904b0/app/src/main/assets/dictionaries/english_frequency.tsv",
+    "source_sha256": "e818b1f3ea72bc7a391abaa171f717bc5d2f90397fdeef60cad8862202a6d290",
+    "sha256": "80375a6471e9196c35713ea19cb2c3e971267f9561443eb4205b48936a27d920",
+    "entries": 25000,
+    "license": "CC-BY-SA-4.0; SCOWL notices retained",
+    "weight_changes": []
+  }
+}

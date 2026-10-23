@@ -23,7 +23,7 @@ object DictionaryCompiler {
                         while(c.moveToNext()) {
                             if (Thread.currentThread().isInterrupted) error("编译已中断")
                             val sourceKind=c.getString(0); val filename=c.getString(6)
-                            val kind=if(sourceKind=="pinyin" && filename=="pinyin_initials.dict.yaml") "pinyin_initial" else sourceKind; val text=c.getString(1); val code=c.getString(2); val weight=c.getLong(3)
+                            val kind=sourceKind; val text=c.getString(1); val code=c.getString(2); val weight=c.getLong(3)
                             validate(sourceKind,text,code,weight)
                             val priority=if(c.getInt(5)!=0) ordinal else Long.MAX_VALUE
                             val compact=code.replace(" ","")
@@ -32,7 +32,7 @@ object DictionaryCompiler {
                             ins.bindString(8,if(kind=="pinyin") DictionaryEngine.fuzzyInputKey(code) else "")
                             ins.bindString(9,if(kind=="pinyin" && !code.contains(' ') && text.codePointCount(0,text.length)==1) code else "")
                             ins.executeInsert()
-                            if (kind=="pinyin" && filename=="pinyin_simp.dict.yaml") {
+                            if (kind=="pinyin" && filename=="skey_pinyin.tsv") {
                                 ins.bindString(1,"mixed_pinyin"); ins.executeInsert()
                             }
                             if(priority!=Long.MAX_VALUE) { pro.bindLong(1,priority); pro.bindString(2,kind); pro.bindString(3,text); pro.bindString(4,code); pro.executeUpdateDelete() }
@@ -50,12 +50,15 @@ object DictionaryCompiler {
             db.execSQL("CREATE INDEX syllable_words ON words(kind,syllable,weight DESC,ordinal) WHERE kind='pinyin'")
             db.execSQL("CREATE INDEX mixed_fuzzy_words ON words(kind,fuzzy,weight DESC,ordinal) WHERE kind='mixed_pinyin'")
             db.execSQL("CREATE INDEX mixed_syllable_words ON words(kind,syllable,weight DESC,ordinal) WHERE kind='mixed_pinyin'")
+            // Initial-letter candidates are derived from the active single-character pinyin rows.
+            // There is no separate legacy initials library to retain or restore.
+            db.execSQL("INSERT OR IGNORE INTO words SELECT 'pinyin_initial',text,substr(code,1,1),max(weight),min(ordinal),9223372036854775807,substr(code,1,1),'','' FROM words WHERE kind='pinyin' AND length(text)=1 AND instr(code,' ')=0 GROUP BY text,substr(code,1,1)")
             DictionarySearchIndex.build(db)
             db.rawQuery("PRAGMA integrity_check",null).use { check(it.moveToFirst() && it.getString(0)=="ok") }
         } finally { db.close() }
     }
     fun validate(kind: String,text: String,code: String,weight: Long) {
-        require(text.isNotBlank() && text.length<=256 && text.none { it=='\n' || it=='\r' || it=='\t' || it=='\u0000' }) { "词条应为 1–256 个字符，不能包含换行或制表符" }
+        require(text.isNotBlank() && text.length<=256 && text.none { Character.isISOControl(it) }) { "词条应为 1–256 个字符，不能包含控制字符" }
         require(weight >= 0) { "词频须为 非负 的整数" }
         require(when(kind) {
             "wubi" -> code.length in 1..4 && code.all { it in 'a'..'z' }
