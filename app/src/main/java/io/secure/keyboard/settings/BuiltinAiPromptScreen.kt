@@ -32,8 +32,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
             "内置助手" to AiPromptStore.prompts.filter { it.id != "custom_common" }
         )) {
             item {
-                SmallTitle(title)
-                Card {
+                SettingsSection(title, spacedAfter = false) {
                     definitions.forEach { prompt ->
                         val value = remember(revision, prompt.id) { store.read(prompt.id) }
                         BasicComponent(title = prompt.title, summary = when {

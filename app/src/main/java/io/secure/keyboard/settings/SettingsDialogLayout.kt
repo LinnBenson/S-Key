@@ -20,7 +20,7 @@ internal fun settingsDialogContentModifier(): Modifier = Modifier
 
 internal val SettingsDialogSpacing = 14.dp
 internal val SettingsActionSpacing = 12.dp
-internal val SettingsPagePadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+internal val SettingsPagePadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 24.dp)
 
 @Composable
 internal fun SettingsDialogActions(cancel: () -> Unit, confirm: () -> Unit, label: String = "保存", enabled: Boolean = true, cancelEnabled: Boolean = true) {

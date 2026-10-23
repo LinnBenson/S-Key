@@ -47,6 +47,53 @@ class ThemePreviewPaletteTest : InstrumentationTestCase() {
         instrumentation.runOnMainSync { activity?.finish() }
         super.tearDown()
     }
+    fun testUiDesignSlidersPersistAcrossRecreation() {
+        val store = SettingsStore(instrumentation.targetContext)
+        val original = listOf(store.keyBorderWidth, store.keyHorizontalGap, store.keyVerticalGap, store.keyCornerRadius, store.enterCornerRadius)
+        try {
+            open()
+            for ((label, value) in listOf("边框宽度" to 2, "横向间距" to 10, "竖向间距" to 12, "按钮圆角" to 3, "回车键圆角" to 22)) {
+                val slider = reach(label)
+                assertTrue(slider.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id,
+                    android.os.Bundle().apply { putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, value.toFloat()) }))
+                instrumentation.waitForIdleSync()
+            }
+            assertEquals(2, store.keyBorderWidth)
+            assertEquals(10, store.keyHorizontalGap)
+            assertEquals(12, store.keyVerticalGap)
+            assertEquals(3, store.keyCornerRadius)
+            assertEquals(22, store.enterCornerRadius)
+            repeat(4) { scroll(instrumentation.uiAutomation.rootInActiveWindow, false) }
+            instrumentation.waitForIdleSync(); SystemClock.sleep(150)
+            val bounds = Rect().also { reach("边框宽度").getBoundsInScreen(it) }
+            val time = SystemClock.uptimeMillis()
+            for ((action, fraction) in listOf(MotionEvent.ACTION_DOWN to .5f, MotionEvent.ACTION_MOVE to .65f, MotionEvent.ACTION_MOVE to .75f, MotionEvent.ACTION_UP to .75f)) {
+                val event = MotionEvent.obtain(time, SystemClock.uptimeMillis(), action,
+                    bounds.left + bounds.width() * fraction, bounds.exactCenterY(), 0)
+                instrumentation.sendPointerSync(event); event.recycle()
+            }
+            instrumentation.waitForIdleSync(); SystemClock.sleep(150)
+            val draggedBorder = store.keyBorderWidth
+            assertTrue("Dragging increases the border", draggedBorder in 3..4)
+            assertEquals(10, store.keyHorizontalGap)
+            assertEquals(12, store.keyVerticalGap)
+            instrumentation.runOnMainSync { activity?.recreate() }
+            instrumentation.waitForIdleSync(); SystemClock.sleep(500)
+            assertEquals(draggedBorder, store.keyBorderWidth)
+            assertEquals(10, store.keyHorizontalGap)
+            assertEquals(12, store.keyVerticalGap)
+            assertEquals(3, store.keyCornerRadius)
+            assertEquals(22, store.enterCornerRadius)
+        } finally {
+            store.keyBorderWidth = original[0]
+            store.keyHorizontalGap = original[1]
+            store.keyVerticalGap = original[2]
+            store.keyCornerRadius = original[3]
+            store.enterCornerRadius = original[4]
+            instrumentation.targetContext.getSharedPreferences("settings", 0).edit().commit()
+        }
+    }
+
     fun testFullPreviewPaletteDraftCancelAndSave() {
         val store = SettingsStore(instrumentation.targetContext)
         val original = store.themeTokens(false)

@@ -1,0 +1,9 @@
+
+io.secure.keyboard.SettingsNavigationTest:...
+io.secure.keyboard.ThemePreviewPaletteTest:..
+io.secure.keyboard.KeyboardBottomRowTest:.
+io.secure.keyboard.KeyboardEnglishSymbolPairTest:.
+Test results for InstrumentationTestRunner=.......
+Time: 9.557
+
+OK (7 tests)

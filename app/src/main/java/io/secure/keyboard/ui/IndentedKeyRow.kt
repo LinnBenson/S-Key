@@ -54,6 +54,12 @@ class IndentedKeyRow(context: Context) : LinearLayout(context) {
         isMotionEventSplittingEnabled = true
     }
 
+    override fun onViewRemoved(child: View) {
+        // A row may be reused: do not retain detached key views or their listeners.
+        cells.remove(child)?.extend(0, 0)
+        super.onViewRemoved(child)
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         // Always let the existing spacers/weights decide integer pixel allocation. Expanded
         // padding cannot affect a weighted key's exact width or the row's exact height.

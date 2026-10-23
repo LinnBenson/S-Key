@@ -1,5 +1,11 @@
 package io.secure.keyboard
 
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+
 import android.Manifest
 import android.content.*
 import android.content.pm.PackageManager
@@ -46,6 +52,7 @@ open class SettingsActivity : ComponentActivity() {
     private val model: SettingsModel by viewModels()
     private val builtinModel: BuiltinDictionaryModel by viewModels()
     private var incomingPage by mutableStateOf<String?>(null)
+    private val pageHistory = ArrayList<String>()
     private var voiceState by mutableStateOf<ModelImportCoordinator.State>(ModelImportCoordinator.State.Idle)
     private var microphone by mutableStateOf(false)
     private var enabledIme by mutableStateOf(false)
@@ -84,11 +91,14 @@ open class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         incomingPage = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: initialPage
+        pageHistory.addAll(savedInstanceState?.getStringArrayList("pageHistory").orEmpty())
         if (savedInstanceState == null) consumePhraseShortcut(intent)
         setContent { ApplicationUi() }
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent); setIntent(intent)
+        pageHistory.clear()
+        model.edit = null
         incomingPage = intent.getStringExtra("page") ?: initialPage
         consumePhraseShortcut(intent)
     }
@@ -112,12 +122,18 @@ open class SettingsActivity : ComponentActivity() {
     }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("page", incomingPage)
+        outState.putStringArrayList("pageHistory", ArrayList(pageHistory))
         super.onSaveInstanceState(outState)
     }
     private fun launch(action: () -> Unit) {
         try { action() } catch (e: Exception) { model.message = e.message ?: "设备不支持此操作" }
     }
-    private fun openPage(page: String) { incomingPage = page }
+    private fun openPage(page: String) {
+        val current = incomingPage ?: initialPage
+        if (current == page) return
+        pageHistory.add(current)
+        incomingPage = page
+    }
 
     @Composable private fun ApplicationUi() {
         val revision = model.revision
@@ -130,6 +146,10 @@ open class SettingsActivity : ComponentActivity() {
         fun ask(message: String, action: () -> Unit) { confirm = message to action }
         fun back() {
             if (route == "builtin_dictionaries" && builtinModel.selected != null) { builtinModel.back(); return }
+            if (pageHistory.isNotEmpty()) {
+                incomingPage = pageHistory.removeAt(pageHistory.lastIndex)
+                return
+            }
             incomingPage = when {
                 route.startsWith("input_") -> "input"
                 route.startsWith("profile_") -> "layout"
@@ -220,6 +240,7 @@ open class SettingsActivity : ComponentActivity() {
                                     Action("清空最近表情") { ask("清空最近表情？") { model.task { model.content.clearEmoji() } } }
                                 }
                                 "licenses" -> Licenses()
+                                "about" -> AboutApp()
                                 else -> when {
                                     route.startsWith("profile_") -> ProfileSettings(route)
                                     route.startsWith("theme_") -> ThemeSettings(route == "theme_dark") { message, action -> ask(message, action) }
@@ -301,11 +322,14 @@ open class SettingsActivity : ComponentActivity() {
             var trial by remember { mutableStateOf("") }
             TextField(value = trial, onValueChange = { trial = it }, label = "在这里试打…", modifier = Modifier.fillMaxWidth().padding(16.dp))
         }
-        Spacer(Modifier.height(16.dp))
         Group("开始定制") {
             Nav("偏好设置", "输入、键盘、主题与本机内容", "settings") { openPage("home") }
             Nav("输入方式", "五笔、混输、拼音与英文补全", "input") { openPage("input") }
             Nav("主题工作室", "深浅主题与自定义配色", "theme") { openPage("behavior") }
+        }
+        Group("应用与隐私") {
+            Nav("开源许可", "Miuix、图标、词库与语音组件", "dictionary") { openPage("licenses") }
+            Nav("关于应用", "版本信息、项目与开发者", "settings") { openPage("about") }
         }
     }
     @Composable private fun Home() {
@@ -316,14 +340,12 @@ open class SettingsActivity : ComponentActivity() {
             Nav("主题与外观", "自定义配色、黑白切换、跟随系统", "theme") { openPage("behavior") }
             Nav("布局配置", "横竖屏、折叠屏、悬浮与分离", "layout") { openPage("layout") }
         }
-        Spacer(Modifier.height(16.dp))
         Group("内置设置") {
             Nav("内置词库", "五笔、拼音、英文 · 编辑与编译", "dictionary") { openPage("builtin_dictionaries") }
             Nav("内置 AI 提示词", "助手指令与自定义 AI 通用指令", "ai") { openPage("builtin_ai_prompts") }
             Nav("符号自动闭合", "输入符号、闭合符号与光标回移", "keyboard") { openPage("symbol_closure") }
             Nav("符号键盘", "中英文符号页与字母长按", "keyboard") { openPage("symbol_keyboard") }
         }
-        Spacer(Modifier.height(16.dp))
         Group("本机内容") {
             Nav("剪贴板", "${model.clipboard.size} 条", "clipboard") { openPage("clipboard") }
             Nav("常用语", "${model.phrases.size} 条", "phrases") { openPage("phrases") }
@@ -331,16 +353,39 @@ open class SettingsActivity : ComponentActivity() {
             Nav("英文自定义词库", "${model.english.size} 条", "english_dictionary") { openPage("english_dictionary") }
             Nav("最近表情", "${model.emoji.size} / 50", "emoji") { openPage("emoji") }
         }
-        Spacer(Modifier.height(16.dp))
         Group("应用与隐私") {
             Nav("AI 设置", "Google 翻译 · Grok · 模型选择", "input") { openPage("api") }
             Nav("语音输入", "离线语音 / AI 语音", "voice") { openPage("voice") }
-            Nav("Android 输入法设置", icon = "settings") { launch { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) } }
             Nav("内容清理", "保留主题与设置", "delete") { openPage("cleanup") }
             Nav("开源许可", "Miuix、图标、词库与语音组件", "dictionary") { openPage("licenses") }
-            Info("普通输入离线处理，不记录输入历史。剪贴板、词库和常用语保存在本机。翻译、AI 和模型列表功能需要联网，发送范围见 AI 设置。")
+            Nav("关于应用", "版本信息、项目与开发者", "settings") { openPage("about") }
         }
     }
+    @Composable private fun AboutApp() {
+        val version = remember { packageManager.getPackageInfo(packageName, 0).versionName.orEmpty() }
+        Group("S Key") {
+            Column(Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AndroidView(factory = { context -> android.widget.ImageView(context).apply {
+                    setImageDrawable(context.packageManager.getApplicationIcon(context.packageName))
+                    contentDescription = "S Key 应用图标"
+                    scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                } }, modifier = Modifier.size(80.dp))
+                Text("S Key", fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+                Text("版本 $version", fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceSecondary)
+            }
+        }
+        Group("项目与开发者") {
+            Nav("项目地址", "github.com/LinnBenson/S-Key", "open_link") {
+                launch { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/LinnBenson/S-Key"))) }
+            }
+            Nav("开发者主页", "github.com/LinnBenson", "open_link") {
+                launch { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/LinnBenson"))) }
+            }
+        }
+    }
+
     @Composable private fun ApiSettings() {
         model.revision
         val draft = model.apiDraft
@@ -404,23 +449,21 @@ open class SettingsActivity : ComponentActivity() {
         model.revision
         val s = model.settings
         Group("输入选项") {
-            io.secure.keyboard.engine.ChineseInputMode.entries.forEach { mode ->
-                Choice(mode.label, s.chineseInputMode == mode) { s.chineseInputMode = mode }
+            HorizontalChoices(io.secure.keyboard.engine.ChineseInputMode.entries.map { it.id to it.label }, s.chineseInputMode.id) {
+                s.chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.fromId(it)
             }
         }
-        Spacer(Modifier.height(16.dp))
         Group("中文输入偏好") {
-            Toggle("简繁转换", s.traditionalOutput, if (s.traditionalOutput) "繁体输出 · 上屏时转换" else "简体输出 · 默认") { s.traditionalOutput = it }
-            Toggle("自动插入空格", s.autoChineseSpacing, "在中文与字母、数字之间加空格") { s.autoChineseSpacing = it }
+            Toggle("简繁转换", s.traditionalOutput) { s.traditionalOutput = it }
+            Toggle("自动插入空格", s.autoChineseSpacing) { s.autoChineseSpacing = it }
             Toggle("五笔四码自动上屏", s.fourCodeAutoCommit) { s.fourCodeAutoCommit = it }
-            Toggle("模糊拼音", s.fuzzyPinyin, "适用于混输和拼音模式") { s.fuzzyPinyin = it }
+            Toggle("模糊拼音", s.fuzzyPinyin) { s.fuzzyPinyin = it }
             if (s.fuzzyPinyin) SettingsStore.fuzzyPairIds.forEach { pair ->
                 Toggle(pair.replace("_", " ↔ "), pair in s.fuzzyPairs) {
                     s.fuzzyPairs = if (it) s.fuzzyPairs + pair else s.fuzzyPairs - pair
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
         EnglishSettings()
     }
     @Composable private fun EnglishSettings() {
@@ -438,40 +481,32 @@ open class SettingsActivity : ComponentActivity() {
             Toggle("按键振动", s.vibration) { s.vibration = it }
             Range("振动强度", s.vibrationStrength, 1, 100, "%") { s.vibrationStrength = it }
         }
-        Spacer(Modifier.height(16.dp))
         Group("手势与长按") {
             Toggle("长按输入符号", s.longPressSymbols) { s.longPressSymbols = it }
             Range("长按延迟", s.longPressDelay, 150, 1500, "ms", 10) { s.longPressDelay = it }
             Toggle("滑动退格删除", s.swipeDelete) { s.swipeDelete = it }
-            Info("左右滑动空格移动光标，长按空格开始听写。")
             Nav("定制工具栏", "固定工具与排列顺序", "more") { openPage("toolbar") }
         }
-        Spacer(Modifier.height(16.dp))
         Group("剪贴板设置") {
             Toggle("快捷粘贴", s.quickPaste) { s.quickPaste = it }
-            Nav("历史保留", "保留时间、条数与置顶内容", "clipboard") { openPage("clipboard") }
-            Info("新复制的内容在下次打开键盘时显示一次，点击粘贴。")
         }
     }
     @Composable private fun Appearance() {
         model.revision
         val s = model.settings
         Group("默认主题与切换") {
-            Toggle("跟随系统深浅色", s.theme == "system", "键盘与应用设置同步切换") {
-                s.theme = if (it) "system" else if (s.manualDark) "dark" else "light"
+            HorizontalChoices(listOf("system" to "跟随系统", "light" to "白色主题", "dark" to "黑色主题"), s.theme) {
+                if (it != "system") s.manualDark = it == "dark"
+                s.theme = it
             }
-            Choice("白色主题", s.theme == "light") { s.manualDark = false; s.theme = "light" }
-            Choice("黑色主题", s.theme == "dark") { s.manualDark = true; s.theme = "dark" }
             Nav("自定义白色主题", "调整键盘与设置页配色", "theme") { openPage("theme_light") }
             Nav("自定义黑色主题", "调整键盘与设置页配色", "theme") { openPage("theme_dark") }
-            Info("深浅两套配色分别保存，恢复默认只影响当前主题。")
         }
-        Spacer(Modifier.height(16.dp))
         Group("文字与提示") {
             Range("候选栏字号", s.candidateTextSize, 12, 32, "sp") { s.candidateTextSize = it }
             Range("展开候选字号", s.expandedCandidateTextSize, 12, 32, "sp") { s.expandedCandidateTextSize = it }
-            listOf("all" to "全部按键角标", "digits" to "仅数字角标", "hidden" to "隐藏角标").forEach { (id, label) ->
-                Choice(label, s.symbolHints == id) { s.symbolHints = id }
+            HorizontalChoices(listOf("all" to "全部按键角标", "digits" to "仅数字角标", "hidden" to "隐藏角标"), s.symbolHints) {
+                s.symbolHints = it
             }
         }
     }
@@ -496,14 +531,12 @@ open class SettingsActivity : ComponentActivity() {
             Range("两侧留白", p.sideGapDp, 0, 300, "dp") { save(p.copy(sideGapDp = it)) }
             Range("底部留白", p.bottomGapDp, 0, 300, "dp") { save(p.copy(bottomGapDp = it)) }
         }
-        Spacer(Modifier.height(16.dp))
         Group("布局形态") {
             Toggle("悬浮键盘", p.floating) { save(p.copy(floating = it)) }
             if (!outer) {
                 Toggle("分离键盘", p.split) { save(p.copy(split = it)) }
                 Range("分离间距", p.splitGapDp, 0, 180, "dp") { save(p.copy(splitGapDp = it)) }
             }
-            Info("悬浮键盘可在键盘内拖动和缩放。内外屏按窗口宽度识别。")
         }
     }
     @Composable private fun ToolbarSettings() {
@@ -529,11 +562,19 @@ open class SettingsActivity : ComponentActivity() {
         var editing by remember { mutableStateOf<String?>(null) }
         Group("主题预览") {
             SKeyTheme(tokens, dark) {
-                KeyboardThemePreview(tokens, s.toolbarPins, s.symbolHints)
-                Info("点击切换候选栏或大写状态，预览对应颜色。")
+                KeyboardThemePreview(tokens, s.toolbarPins, s.symbolHints, borderWidth = s.keyBorderWidth,
+                    horizontalGap = s.keyHorizontalGap, verticalGap = s.keyVerticalGap,
+                    cornerRadius = s.keyCornerRadius, enterCornerRadius = s.enterCornerRadius)
             }
         }
-        Spacer(Modifier.height(16.dp))
+        Group("UI 设计") {
+            DesignRange("边框宽度", s.keyBorderWidth, 4) { s.keyBorderWidth = it }
+            DesignRange("横向间距", s.keyHorizontalGap, 16) { s.keyHorizontalGap = it }
+            DesignRange("竖向间距", s.keyVerticalGap, 16) { s.keyVerticalGap = it }
+            DesignRange("按钮圆角", s.keyCornerRadius, 30) { s.keyCornerRadius = it }
+            DesignRange("回车键圆角", s.enterCornerRadius, 30) { s.enterCornerRadius = it }
+            Action("恢复默认 UI 设计") { s.resetUiDesign() }
+        }
         Group("颜色") {
             themeLabels.forEach { (id, label) ->
                 BasicComponent(title = label, summary = tokens.asMap().getValue(id), onClick = { editing = id },
@@ -548,6 +589,8 @@ open class SettingsActivity : ComponentActivity() {
                 val draft = tokens.previewColor(id, color)
                 SKeyTheme(draft, dark) {
                     KeyboardThemePreview(draft, s.toolbarPins, s.symbolHints,
+                        borderWidth = s.keyBorderWidth, horizontalGap = s.keyHorizontalGap, verticalGap = s.keyVerticalGap,
+                        cornerRadius = s.keyCornerRadius, enterCornerRadius = s.enterCornerRadius,
                         initialCandidates = id in listOf("candidate", "candidateSelected", "preedit", "divider"),
                         initialShifted = id in listOf("selectedKeyBackground", "selectedKeyText"))
                 }
@@ -616,10 +659,8 @@ open class SettingsActivity : ComponentActivity() {
         model.revision
         Group(pageTitle(route)) {
             if (route == "clipboard") {
-                listOf("none" to "不保存历史", "timed" to "定时清理", "forever" to "长期保留").forEach { (id, label) ->
-                    Choice(label, model.settings.clipboardRetention == id) {
-                        model.task { model.settings.clipboardRetention = id; model.content.trimClipboard() }
-                    }
+                HorizontalChoices(listOf("none" to "不保存历史", "timed" to "定时清理", "forever" to "长期保留"), model.settings.clipboardRetention) { id ->
+                    model.task { model.settings.clipboardRetention = id; model.content.trimClipboard() }
                 }
                 if (model.settings.clipboardRetention == "timed") {
                     Range("保留时间", model.settings.clipboardRetentionHours, 1, 720, "小时") { value ->
@@ -709,8 +750,9 @@ open class SettingsActivity : ComponentActivity() {
         model.revision
         val ai = model.settings.voiceMode == "ai"
         Group("识别方式") {
-            Choice("离线语音", !ai) { model.settings.voiceMode = "offline" }
-            Choice("AI 语音", ai) { model.settings.voiceMode = "ai" }
+            HorizontalChoices(listOf("offline" to "离线语音", "ai" to "AI 语音"), model.settings.voiceMode) {
+                model.settings.voiceMode = it
+            }
             Info(if(ai) "录音上传至 AI 识别，需要联网。" else "本地识别普通话，录音和转写均不上传。")
         }
         if(ai) {
@@ -756,10 +798,7 @@ open class SettingsActivity : ComponentActivity() {
         model.message = "已复制"
     }
     @Composable private fun Group(title: String, content: @Composable ColumnScope.() -> Unit) {
-        Column {
-            SmallTitle(text = title)
-            Card(modifier = Modifier.fillMaxWidth(), content = content)
-        }
+        SettingsSection(title, content = content)
     }
     @Composable private fun Info(value: String, strong: Boolean = false) {
         Text(value, modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -780,6 +819,19 @@ open class SettingsActivity : ComponentActivity() {
     @Composable private fun Choice(title: String, checked: Boolean, action: () -> Unit) {
         BasicComponent(title = title, onClick = action, rightActions = { if (checked) UiIcon("check", "已选择") })
     }
+    @Composable private fun DesignRange(title: String, value: Int, maximum: Int, save: (Int) -> Unit) {
+        val onSave by rememberUpdatedState(save)
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Text("$title  $value dp")
+            Slider(progress = value.toFloat(), minValue = 0f, maxValue = maximum.toFloat(),
+                decimalPlaces = 0, onProgressChange = { onSave(it.roundToInt().coerceIn(0, maximum)) },
+                modifier = Modifier.semantics {
+                    contentDescription = title
+                    progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo(value.toFloat(), 0f..maximum.toFloat(), maximum - 1)
+                    setProgress { onSave(it.roundToInt().coerceIn(0, maximum)); true }
+                })
+        }
+    }
     @Composable private fun Range(title: String, value: Int, minimum: Int, maximum: Int, unit: String, step: Int = 1, save: (Int) -> Unit) {
         Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
             Text("$title  $value $unit")
@@ -794,7 +846,7 @@ open class SettingsActivity : ComponentActivity() {
     @Composable private fun ContentCard(text: String, summary: String, actions: List<Pair<String, () -> Unit>>) {
         var preview by remember(text) { mutableStateOf(false) }
         Card(Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.weight(1f).heightIn(min = 40.dp).clickable { preview = true },
                     verticalAlignment = Alignment.CenterVertically,
@@ -877,6 +929,7 @@ open class SettingsActivity : ComponentActivity() {
         "voice" -> "语音输入"
         "cleanup", "recovery" -> "内容清理"
         "licenses" -> "开源声明"
+        "about" -> "关于应用"
         else -> if (route.startsWith("profile_")) "${if (route.contains("outer")) "外屏" else "内屏"} · ${if (route.endsWith("landscape")) "横屏" else "竖屏"}" else "偏好设置"
     }
     private fun toolName(id: String) = when(id) {

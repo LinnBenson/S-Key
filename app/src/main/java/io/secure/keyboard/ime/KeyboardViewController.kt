@@ -567,25 +567,29 @@ internal object KeyboardViewController {
         )
         addKey(
             bottom,
-            if (chinese) "，。" else ". ,",
+            if (symbols) { if (chinese) "，" else "." } else if (chinese) "，。" else ". ,",
             9f,
-            if (chinese) "。" else ",",
+            if (symbols) "" else if (chinese) "。" else ",",
             { type(if (chinese) "，" else ".") },
         )
         addKey(bottom, if (chinese) { if (settings.chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) "拼音" else "五笔" } else "English", 42f, "", { space() }, isSpace = true)
         addKey(
             bottom,
-            "◎",
+            if (symbols) { if (chinese) "。" else "," } else "◎",
             9f,
             "",
             {
-                clearPending()
-                chinese = !chinese
-                settings.lastChineseLanguage = chinese
-                symbols = false
-                renderHeader()
-                renderBody()
-                refreshCandidates()
+                if (symbols) {
+                    type(if (chinese) "。" else ",")
+                } else {
+                    clearPending()
+                    chinese = !chinese
+                    settings.lastChineseLanguage = chinese
+                    symbols = false
+                    renderHeader()
+                    renderBody()
+                    refreshCandidates()
+                }
             },
         )
         addKey(bottom, "↵", 17f, "", { enter() })
@@ -712,7 +716,14 @@ internal object KeyboardViewController {
     }
 
     // Draw the same gaps inside a full-cell touch target, never as untouchable layout margins.
-    internal fun KeyboardSession.keyShapeImpl(color: Int) = InsetDrawable(shape(color, 9), dp(2), dp(3), dp(2), dp(3))
+    internal fun KeyboardSession.keyShapeImpl(color: Int, enter: Boolean = false): InsetDrawable {
+        val horizontal = (settings.keyHorizontalGap * resources.displayMetrics.density / 2f).roundToInt()
+        val vertical = (settings.keyVerticalGap * resources.displayMetrics.density / 2f).roundToInt()
+        val face = shape(color, if (enter) settings.enterCornerRadius else settings.keyCornerRadius).apply {
+            if (settings.keyBorderWidth > 0) setStroke(dp(settings.keyBorderWidth), muted)
+        }
+        return InsetDrawable(face, horizontal, vertical, horizontal, vertical)
+    }
 
     internal fun KeyboardSession.addKeyImpl(
         row: LinearLayout,
@@ -726,8 +737,11 @@ internal object KeyboardViewController {
         val container = KeyContainer(this)
         if (text == "⇧") shiftKeyView = container
         row.addView(container, LinearLayout.LayoutParams(0, -1, weight))
-        container.setPadding(dp(2), dp(3), dp(2), dp(3))
-        val specialKey = text in listOf("⇧", "⌫", "?123", "ABC", "=\\<", "↵", "◎", "，。", ". ,")
+        val horizontal = (settings.keyHorizontalGap * resources.displayMetrics.density / 2f).roundToInt()
+        val vertical = (settings.keyVerticalGap * resources.displayMetrics.density / 2f).roundToInt()
+        container.setPadding(horizontal, vertical, horizontal, vertical)
+        val singlePunctuation = symbols && row is SymmetricBottomRow && text in listOf("，", "。", ".", ",")
+        val specialKey = singlePunctuation || text in listOf("⇧", "⌫", "?123", "ABC", "=\\<", "↵", "◎", "，。", ". ,")
         val selected = text == "⇧" && shifted
         // Only these three screenshot-marked controls get one larger, bold text step.
         val emphasizedLabel = text == "?123" || text == "ABC" || text == "=\\<"
@@ -740,9 +754,15 @@ internal object KeyboardViewController {
             keyShape(
                 if (text == "↵") accent
                 else if (selected) selectedKeyBg else if (specialKey) special else keyBg,
+                enter = text == "↵",
             )
         val key: View =
-            when (text) {
+            if (singlePunctuation) PunctuationKeyLabel(this).apply {
+                this.text = text
+                textSize = 23f
+                setTextColor(ink)
+                setAutoSizeTextTypeUniformWithConfiguration(9, 23, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            } else when (text) {
                 "◎" -> ToolIcon(this, "globe", ink)
                 "↵" -> ToolIcon(this, "enter", ink)
                 "⌫" -> ToolIcon(this, "backspace", ink)

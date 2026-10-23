@@ -269,17 +269,21 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var selectedKeyText = 0
     internal var enterText = 0
     private val refreshLetterSymbols = Runnable { if (active && !symbols) renderBody() }
+    private val refreshTheme = Runnable {
+        if (active) {
+            cancelTransient()
+            createView()
+            setInputView(root)
+            refreshCandidates()
+        }
+    }
     internal val preferenceListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key?.startsWith("themeTokens_") == true || key == "theme")
-                main.post {
-                    if (active) {
-                        cancelTransient()
-                        createView()
-                        setInputView(root)
-                        refreshCandidates()
-                    }
-                }
+            if (key?.startsWith("themeTokens_") == true || key?.startsWith("keyDesign_") == true || key == "theme") {
+                // A single reset can notify once per token. Rebuild once with the final values.
+                main.removeCallbacks(refreshTheme)
+                main.post(refreshTheme)
+            }
             else if (key?.startsWith("symbol_keyboard_") == true) main.post {
                 if (active && symbols) renderBody()
             }
@@ -731,7 +735,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
 
     fun updateShiftKeyFaces() = with(KeyboardViewController) { updateShiftKeyFacesImpl() }
 
-    fun keyShape(color: Int) = with(KeyboardViewController) { keyShapeImpl(color) }
+    fun keyShape(color: Int, enter: Boolean = false) = with(KeyboardViewController) { keyShapeImpl(color, enter) }
 
     fun addKey(
         row: LinearLayout,

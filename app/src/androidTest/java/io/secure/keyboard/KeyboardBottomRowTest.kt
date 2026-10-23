@@ -589,6 +589,49 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
         }
     }
 
+    fun testUiDesignPreservesTouchCellsAndChangesFaces() {
+        onMainChecked {
+            val settings = SettingsStore(context)
+            assertEquals(0, settings.keyBorderWidth)
+            assertEquals(4, settings.keyHorizontalGap)
+            assertEquals(6, settings.keyVerticalGap)
+            assertEquals(9, settings.keyCornerRadius)
+            assertEquals(9, settings.enterCornerRadius)
+            settings.theme = "light"
+            val original = bottomRow(true, 260)
+            val widths = (0 until original.childCount).map { original.getChildAt(it).width }
+            settings.keyCornerRadius = 3
+            settings.enterCornerRadius = 22
+            settings.keyBorderWidth = 2
+            settings.keyHorizontalGap = 12
+            settings.keyVerticalGap = 14
+            val reloaded = SettingsStore(context)
+            assertEquals(2, reloaded.keyBorderWidth)
+            assertEquals(12, reloaded.keyHorizontalGap)
+            assertEquals(14, reloaded.keyVerticalGap)
+            for (symbols in listOf(false, true)) {
+                setSymbols(symbols)
+                val row = bottomRow(true, 260)
+                for (i in 0 until row.childCount) {
+                    val view = row.getChildAt(i)
+                    assertEquals("Touch cell stays the same size", widths[i], view.width)
+                    view.background.setBounds(0, 0, view.width, view.height)
+                    val face = (view.background as InsetDrawable).drawable!!
+                    val density = view.resources.displayMetrics.density
+                    val radius = (face as android.graphics.drawable.GradientDrawable).cornerRadius
+                    assertEquals(((if (view.contentDescription == "回车") 22 else 3) * density + .5f).toInt().toFloat(), radius)
+                    assertEquals((6 * density + .5f).toInt(), face.bounds.left)
+                    assertEquals((7 * density + .5f).toInt(), face.bounds.top)
+                    val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                    view.background.draw(Canvas(bitmap))
+                    assertEquals("Border uses the hint color", Color.parseColor(settings.themeTokens(false).hint),
+                        bitmap.getPixel(view.width / 2, face.bounds.top + (density).toInt()))
+                    bitmap.recycle()
+                }
+            }
+        }
+    }
+
     private fun bottomRow(
         chinese: Boolean,
         heightDp: Int,

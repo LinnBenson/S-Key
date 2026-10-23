@@ -107,6 +107,42 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
         }
     }
 
+    fun testSymbolBottomPunctuationIsIndependentAndCentered() {
+        instrumentation.runOnMainSync {
+            for (chinese in listOf(true, false)) for (secondary in listOf(false, true)) {
+                selectLanguage(chinese)
+                enterSymbols(secondary)
+                val bottom = key("ABC").parent as LinearLayout
+                for ((index, glyph) in listOf(1 to (if (chinese) "，" else "."), 3 to (if (chinese) "。" else ","))) {
+                    val button = bottom.getChildAt(index) as KeyContainer
+                    assertEquals(glyph, button.contentDescription.toString())
+                    assertEquals("Only one centered glyph", 1, button.childCount)
+                    val label = button.getChildAt(0) as io.secure.keyboard.ui.PunctuationKeyLabel
+                    assertEquals(.5f, label.inkCenterYFraction)
+                    label.measure(View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY))
+                    label.layout(0, 0, 100, 100)
+                    val bitmap = android.graphics.Bitmap.createBitmap(100, 100, android.graphics.Bitmap.Config.ARGB_8888)
+                    label.draw(android.graphics.Canvas(bitmap))
+                    val ink = android.graphics.Rect()
+                    for (y in 0 until 100) for (x in 0 until 100) {
+                        if (android.graphics.Color.alpha(bitmap.getPixel(x, y)) > 64) ink.union(x, y, x + 1, y + 1)
+                    }
+                    assertFalse("Visible punctuation", ink.isEmpty)
+                    assertTrue("Horizontally centered ink", kotlin.math.abs(ink.exactCenterX() - 50f) <= 2f)
+                    assertTrue("Vertically centered ink", kotlin.math.abs(ink.exactCenterY() - 50f) <= 2f)
+                    bitmap.recycle()
+                    editor.setText("")
+                    button.performClick()
+                    assertEquals(glyph, editor.text.toString())
+                    assertSymbolPage(chinese, secondary)
+                }
+                key("ABC").performClick()
+                assertNotNull(key("切换中文和英文"))
+            }
+        }
+    }
+
     fun testFourEnglishSymbolPairsReplaceSelectionAndReturnToLetters() {
         instrumentation.runOnMainSync {
             selectLanguage(chinese = false)

@@ -49,6 +49,34 @@ class SettingsStore(context: Context) {
         get() = prefs.getString("translationTarget", "en") ?: "en"
         set(value) { prefs.edit().putString("translationTarget", value).apply() }
 
+    /** Shared keyboard geometry, in dp; defaults preserve the original key insets. */
+    var keyBorderWidth: Int
+        get() = prefs.getInt("keyDesign_border", 0).coerceIn(0, 4)
+        set(value) { prefs.edit().putInt("keyDesign_border", value.coerceIn(0, 4)).apply() }
+    var keyHorizontalGap: Int
+        get() = prefs.getInt("keyDesign_horizontal", 4).coerceIn(0, 16)
+        set(value) { prefs.edit().putInt("keyDesign_horizontal", value.coerceIn(0, 16)).apply() }
+    var keyVerticalGap: Int
+        get() = prefs.getInt("keyDesign_vertical", 6).coerceIn(0, 16)
+        set(value) { prefs.edit().putInt("keyDesign_vertical", value.coerceIn(0, 16)).apply() }
+
+    var keyCornerRadius: Int
+        get() = prefs.getInt("keyDesign_radius", 9).coerceIn(0, 30)
+        set(value) { prefs.edit().putInt("keyDesign_radius", value.coerceIn(0, 30)).apply() }
+    var enterCornerRadius: Int
+        get() = prefs.getInt("keyDesign_enterRadius", 9).coerceIn(0, 30)
+        set(value) { prefs.edit().putInt("keyDesign_enterRadius", value.coerceIn(0, 30)).apply() }
+
+    fun resetUiDesign() {
+        prefs.edit()
+            .remove("keyDesign_border")
+            .remove("keyDesign_horizontal")
+            .remove("keyDesign_vertical")
+            .remove("keyDesign_radius")
+            .remove("keyDesign_enterRadius")
+            .apply()
+    }
+
     data class LayoutProfile(
         val heightDp: Int = 260,
         val sideGapDp: Int = 0,

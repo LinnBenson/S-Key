@@ -1,0 +1,27 @@
+
+io.secure.keyboard.SettingsNavigationTest:..
+Failure in testNewExternalIntentClearsOldCallerAndDraft:
+junit.framework.AssertionFailedError: expected:<home> but was:<about>
+	at io.secure.keyboard.SettingsNavigationTest.back$lambda$5(SettingsNavigationTest.kt:51)
+	at io.secure.keyboard.SettingsNavigationTest.$r8$lambda$1uSJg0oAQvo1c2p1uIltaXixF0I(Unknown Source:0)
+	at io.secure.keyboard.SettingsNavigationTest$$ExternalSyntheticLambda3.invoke(D8$$SyntheticClass:0)
+	at io.secure.keyboard.diagnostics.LifetimeServiceFixtureKt.checkedMain$lambda$1(LifetimeServiceFixture.kt:132)
+	at io.secure.keyboard.diagnostics.LifetimeServiceFixtureKt.$r8$lambda$7nFWvDOyd3_sU7yDlogZ_Kd9FbE(Unknown Source:0)
+	at io.secure.keyboard.diagnostics.LifetimeServiceFixtureKt$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+	at android.app.Instrumentation$SyncRunnable.run(Instrumentation.java:2772)
+	at android.os.Handler.handleCallback(Handler.java:942)
+	at android.os.Handler.dispatchMessage(Handler.java:99)
+	at android.os.Looper.loopOnce(Looper.java:201)
+	at android.os.Looper.loop(Looper.java:288)
+	at android.app.ActivityThread.main(ActivityThread.java:7997)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:548)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:936)
+
+io.secure.keyboard.ui.IndentedKeyRowLifecycleTest:.
+io.secure.keyboard.HiddenPanelLifecycleTest:...........
+io.secure.keyboard.diagnostics.PrivacyMemoryAuditTest:..
+Test results for InstrumentationTestRunner=...F..............
+Time: 47.035
+
+FAILURES!!!
+Tests run: 17,  Failures: 1,  Errors: 0

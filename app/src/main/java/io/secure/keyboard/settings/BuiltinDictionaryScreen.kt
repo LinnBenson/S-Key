@@ -159,7 +159,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
     val lib=model.selected
     Column(modifier.fillMaxSize().imePadding()) {
         if(lib==null) {
-            LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(horizontal=20.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
+            LazyColumn(Modifier.weight(1f),contentPadding=SettingsPagePadding,verticalArrangement=Arrangement.spacedBy(18.dp)) {
                 item {
                     Card { Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(SettingsDialogSpacing)) {
                         if(model.busy) CircularProgressIndicator(modifier=Modifier.size(24.dp)) else DictionaryIcon(if(model.dirty) "edit" else "check",tint=colors.primary)
@@ -172,8 +172,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                 for(kind in listOf("wubi","pinyin","english")) {
                     val files=model.libraries.filter { it.kind==kind }
                     item {
-                        SmallTitle(text="${kindLabel(kind)} · ${files.size} 个文件")
-                        Card {
+                        SettingsSection("${kindLabel(kind)} · ${files.size} 个文件", spacedAfter = false) {
                             if(files.isEmpty()) Text("暂无文件",modifier=Modifier.padding(20.dp),color=colors.onSurfaceSecondary)
                             files.forEachIndexed { index,file ->
                                 Row(Modifier.fillMaxWidth().clickable(enabled=!model.busy) { model.open(file) }.padding(horizontal=18.dp,vertical=18.dp),
@@ -199,7 +198,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                 }
             }
             Card(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=10.dp)) {
-                Row(Modifier.padding(10.dp),horizontalArrangement=Arrangement.spacedBy(SettingsActionSpacing)) {
+                Row(Modifier.padding(16.dp),horizontalArrangement=Arrangement.spacedBy(SettingsActionSpacing)) {
                     TextButton(text="添加文件",enabled=!model.busy,onClick={model.showAdd=true},modifier=Modifier.weight(1f))
                     Button(colors=ButtonDefaults.buttonColorsPrimary(),onClick={model.compile()},enabled=!model.busy,modifier=Modifier.weight(1.4f)) { Text("编译并应用",color=colors.onPrimary) }
                 }
