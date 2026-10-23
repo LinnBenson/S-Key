@@ -9,8 +9,8 @@ android {
         applicationId = "io.secure.keyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 106
-        versionName = "1.1.0"
+        versionCode = 107
+        versionName = "1.1.1"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
     buildFeatures { compose = true }
@@ -42,3 +42,13 @@ val buildDictionaryCatalog by tasks.registering(Exec::class) {
 }
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/dictionaryCatalog"))
 tasks.named("preBuild").configure { dependsOn(buildDictionaryCatalog) }
+
+val buildSpaceGlossary by tasks.registering(Exec::class) {
+    workingDir(rootProject.projectDir)
+    commandLine("python3", "scripts/build_space_glossary.py")
+    inputs.file(rootProject.file("scripts/build_space_glossary.py"))
+    inputs.dir(rootProject.file("third_party/cc_cedict"))
+    outputs.dir(layout.buildDirectory.dir("generated/spaceGlossary"))
+}
+android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/spaceGlossary"))
+tasks.named("preBuild").configure { dependsOn(buildSpaceGlossary) }

@@ -35,6 +35,13 @@ def verify_archive(apk):
         assert hashlib.sha256(apk.read('assets/dictionaries/'+name)).digest()==hashlib.sha256(expected.read_bytes()).digest(), f'Stale compiled dictionary: {name}'
     for name in NOTICES | {'emoji_keywords.tsv'}:
         assert apk.read('assets/dictionaries/'+name)==(ROOT/'app/src/main/assets/dictionaries'/name).read_bytes(), f'Stale notice/emoji resource: {name}'
+    learning = ROOT/'app/build/generated/spaceGlossary/learning'
+    learning_names = {'glossary.bin', 'sha256.txt', 'LICENSE.txt', 'NOTICE.txt'}
+    assert {p.name for p in learning.iterdir()} == learning_names, 'Unexpected generated learning resources'
+    expected_learning = {'assets/learning/'+name for name in learning_names}
+    assert {n for n in names if n.startswith('assets/learning/')} == expected_learning, 'Unexpected/missing learning resources'
+    for p in learning.iterdir():
+        assert apk.read('assets/learning/'+p.name) == p.read_bytes(), f'Stale learning resource: {p.name}'
     return {'base_entries':{n:v['entries'] for n,v in manifest.items()},'sources':sorted(sources),'compiled':['catalog.db','runtime.db']}
 
 def verify_apk(path):

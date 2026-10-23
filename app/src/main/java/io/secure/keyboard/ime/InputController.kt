@@ -39,6 +39,8 @@ internal object InputController {
 
     /** Finished/hidden/editor-invalidated ownership only; never the asynchronous loading path. */
     internal fun KeyboardSession.releaseFinishedInputPresentationImpl() {
+        releaseSpaceGlossary()
+        spaceGlossLabel = null
         // Native posted clicks/long presses must be revoked while their views are still in
         // the root. cancelTransient separately revokes our key timers and voice session.
         main.removeCallbacks(quickPasteExpiry)
@@ -116,7 +118,7 @@ internal object InputController {
                     return true
                 }
                 val sentence = pinyinComposition.text + value
-                if (!commitInputText(sentence)) return false
+                if (!commitInputText(sentence, glossary = true)) return false
                 pinyinContext = (pinyinContext + sentence).takeLast(16)
                 clearComposition()
                 refreshCandidates()
@@ -124,7 +126,7 @@ internal object InputController {
             }
             if (code.isEmpty()) return false
             feedback()
-            if (!commitInputText(value)) return false
+            if (!commitInputText(value, glossary = true)) return false
             clearComposition()
         } else {
             if (candidateQuery.isEmpty() || !settings.englishCompletion) return false
@@ -202,7 +204,7 @@ internal object InputController {
         return true
     }
 
-    internal fun KeyboardSession.commitInputTextImpl(value: String): Boolean {
+    internal fun KeyboardSession.commitInputTextImpl(value: String, glossary: Boolean = false): Boolean {
         dismissQuickPasteOnInput()
         if (aiCommandVoice != null || inlineOfflineVoice != null) cancelAiCommandVoice()
         if (translation.enabled) {
@@ -229,17 +231,20 @@ internal object InputController {
                 variation !in listOf(android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
                     android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, android.text.InputType.TYPE_TEXT_VARIATION_URI)) {
                 if (spacingTexts.size >= 1024) return false
-                spacingTexts.addLast(value)
+                spacingTexts.addLast(InputState.SpacedText(value, glossary))
                 if (!spacingPending) commitNextSpacedText()
                 return true
             }
         }
-        return currentInputConnection?.commitText(outputText(value), 1) == true
+        val accepted = currentInputConnection?.commitText(outputText(value), 1) == true
+        if (accepted && glossary) showSpaceGlossary(value)
+        return accepted
     }
 
     internal fun KeyboardSession.commitNextSpacedTextImpl() {
         val connection = currentInputConnection ?: run { spacingTexts.clear(); spacingPending=false; return }
-        val value = spacingTexts.removeFirstOrNull() ?: run { spacingPending=false; replayQueuedKeys(); return }
+        val pending = spacingTexts.removeFirstOrNull() ?: run { spacingPending=false; replayQueuedKeys(); return }
+        val value = pending.text
         spacingPending = true
         val token = spacingEpoch
         val editor = voiceEditorGeneration
@@ -264,6 +269,7 @@ internal object InputController {
                 connection.beginBatchEdit()
                 try {
                     val accepted = connection.commitText(convertedText, 1)
+                    if (accepted && pending.glossary) showSpaceGlossary(value)
                     if (accepted && edit.trailingSpace && selection != null) {
                         val cursor = minOf(selection.first, selection.second) + convertedText.length - 1
                         connection.setSelection(cursor, cursor)
@@ -378,7 +384,7 @@ internal object InputController {
                 engine.exactWubi(code, 1).firstOrNull()?.let {
                     // A detached or temporarily unavailable host may reject the edit.
                     // Retain composition and candidates so the user can retry explicitly.
-                    if (commitInputText(it.text)) {
+                    if (commitInputText(it.text, glossary = true)) {
                         clearComposition()
                         renderHeader()
                     }

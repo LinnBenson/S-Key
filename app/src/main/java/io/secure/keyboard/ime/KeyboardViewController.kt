@@ -420,6 +420,7 @@ internal object KeyboardViewController {
         applyLiveLayout()
         letterKeyViews.clear()
         shiftKeyView = null
+        spaceGlossLabel = null
         body.removeAllViews()
         if (!keepAssistant) {
             assistantArea.removeAllViews()
@@ -443,6 +444,7 @@ internal object KeyboardViewController {
         applyLiveLayout()
         letterKeyViews.clear()
         shiftKeyView = null
+        spaceGlossLabel = null
         body.removeAllViews()
         if (candidatesExpanded && showsCandidateMode()) renderCandidateGrid() else renderKeys()
     }
@@ -583,6 +585,7 @@ internal object KeyboardViewController {
                     type(if (chinese) "。" else ",")
                 } else {
                     clearPending()
+                    releaseSpaceGlossary()
                     chinese = !chinese
                     settings.lastChineseLanguage = chinese
                     symbols = false
@@ -794,6 +797,14 @@ internal object KeyboardViewController {
                             )
                         }
             }
+        if (isSpace && key is TextView) {
+            key.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE)
+            key.setSingleLine(true)
+            key.ellipsize = android.text.TextUtils.TruncateAt.END
+            key.setPadding(dp(12), 0, dp(12), 0)
+            spaceGlossLabel = key
+            updateSpaceGlossLabel()
+        }
         container.addView(key, FrameLayout.LayoutParams(-1, -1))
         container.contentDescription =
             when (text) {

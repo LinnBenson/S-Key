@@ -19,7 +19,8 @@ internal class InputState {
     var spacingEpoch = 0
     var spacingSelectionVersion = 0
     val spacingExpectedCursors = ArrayDeque<Int>()
-    val spacingTexts = ArrayDeque<String>()
+    data class SpacedText(val text: String, val glossary: Boolean)
+    val spacingTexts = ArrayDeque<SpacedText>()
     val queuedKeys = ArrayDeque<QueuedKey>()
     var queueSaturationNotified = false
     var secret = false

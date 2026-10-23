@@ -462,6 +462,7 @@ open class SettingsActivity : ComponentActivity() {
         Group("中文输入偏好") {
             Toggle("简繁转换", s.traditionalOutput) { s.traditionalOutput = it }
             Toggle("自动插入空格", s.autoChineseSpacing) { s.autoChineseSpacing = it }
+            Toggle("空格显示英语翻译", s.spaceEnglishGloss) { s.spaceEnglishGloss = it }
             if (s.chineseInputMethod == io.secure.keyboard.engine.ChineseInputMode.WUBI) {
                 Toggle("五笔四码自动上屏", s.fourCodeAutoCommit) { s.fourCodeAutoCommit = it }
                 Toggle("五笔拼音混输入", s.wubiPinyinInput) { s.wubiPinyinInput = it }
@@ -807,7 +808,9 @@ open class SettingsActivity : ComponentActivity() {
             notices = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 listOf("SHERPA_ONNX_LICENSE", "ONNXRUNTIME_LICENSE", "ONNXRUNTIME_THIRD_PARTY_NOTICES")
                     .joinToString("\n\n") { assets.open("voice-licenses/$it").bufferedReader().use { reader -> reader.readText() } } +
-                    "\n\nOpenCC 1.1.9 · 简转繁数据\n" + assets.open("opencc/LICENSE").bufferedReader().use { it.readText() }
+                    "\n\nOpenCC 1.1.9 · 简转繁数据\n" + assets.open("opencc/LICENSE").bufferedReader().use { it.readText() } +
+                    "\n\n" + assets.open("learning/NOTICE.txt").bufferedReader().use { it.readText() } +
+                    "\n\n" + assets.open("learning/LICENSE.txt").bufferedReader().use { it.readText() }
             }
         }
         Group("开源组件") {

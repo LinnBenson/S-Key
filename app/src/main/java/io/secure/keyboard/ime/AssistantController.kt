@@ -296,7 +296,7 @@ internal object AssistantController {
         val extra=translationExtraHeightPx()
         val area=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(4),dp(12),dp(4),0) }
         column.addView(area,LinearLayout.LayoutParams(-1,extra))
-        val unit=minOf(dp(32),extra/5)
+        val unit=minOf(dp(32),extra/4)
         fun compact(text: String, selected: Boolean=false, action:()->Unit): TextView = button(text,action).apply {
             textSize=12f; setPadding(dp(7),0,dp(7),0); setSingleLine(true)
             ellipsize=android.text.TextUtils.TruncateAt.END

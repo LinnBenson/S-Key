@@ -322,6 +322,10 @@ class SettingsStore(context: Context) {
             }.apply()
         }
 
+    var spaceEnglishGloss: Boolean
+        get() = prefs.getBoolean("spaceEnglishGloss", false)
+        set(value) { prefs.edit().putBoolean("spaceEnglishGloss", value).apply() }
+
     var fourCodeAutoCommit: Boolean
         get() = prefs.getBoolean("fourCodeAutoCommit", false)
         set(value) {

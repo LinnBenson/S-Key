@@ -19,6 +19,7 @@ import io.secure.keyboard.*
 /** Clipboard, phrases, emoji, tools and layout panels. */
 internal object PanelController {
     internal fun KeyboardSession.openToolImpl(tool: String) {
+        releaseSpaceGlossary()
         if (tool == "input_mode") {
             settings.chineseInputMethod = if (settings.chineseInputMethod == io.secure.keyboard.engine.ChineseInputMode.WUBI)
                 io.secure.keyboard.engine.ChineseInputMode.PINYIN else io.secure.keyboard.engine.ChineseInputMode.WUBI
@@ -691,7 +692,7 @@ internal object PanelController {
     /** A temporary panel allowance, never written to the user's layout profile. */
     internal fun KeyboardSession.translationExtraHeightPxImpl(): Int =
         if (translation.enabled && (panel == "keys" || panel in assistantTools))
-            minOf(dp(if (aiMode) 198 else 138), (floatingScreenHeightPx() - baseKeyboardHeightPx()).coerceAtLeast(0))
+            minOf(dp(138), (floatingScreenHeightPx() - baseKeyboardHeightPx()).coerceAtLeast(0))
         else 0
 
     internal fun KeyboardSession.applyLiveLayoutImpl() {

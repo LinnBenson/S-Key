@@ -277,6 +277,30 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             refreshCandidates()
         }
     }
+    internal var spaceGlossary: io.secure.keyboard.learning.SpaceGlossary? = null
+    internal var spaceGlossLabel: android.widget.TextView? = null
+
+    internal fun spaceDefaultLabel() = if (!chinese) "English" else if (settings.chineseInputMode == io.secure.keyboard.engine.ChineseInputMode.PINYIN) "拼音" else "五笔"
+
+    internal fun updateSpaceGlossLabel() {
+        spaceGlossLabel?.text = spaceGlossary?.text ?: spaceDefaultLabel()
+    }
+
+    internal fun releaseSpaceGlossary() {
+        spaceGlossary?.close(); spaceGlossary = null
+        updateSpaceGlossLabel()
+    }
+
+    internal fun showSpaceGlossary(word: String) {
+        if (!settings.spaceEnglishGloss || !active || destroyed || secret || !chinese || translation.enabled) return
+        val current = spaceGlossary ?: io.secure.keyboard.learning.SpaceGlossary(main,
+            io.secure.keyboard.learning.SpaceGlossary.SqliteBackend(this), display = { _ ->
+            if (active && !destroyed && !secret && chinese && !translation.enabled && settings.spaceEnglishGloss) updateSpaceGlossLabel()
+            else releaseSpaceGlossary()
+        }).also { spaceGlossary = it }
+        current.query(word)
+    }
+
     internal val preferenceListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key?.startsWith("themeTokens_") == true || key?.startsWith("keyDesign_") == true || key == "theme") {
@@ -300,7 +324,13 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
                 if (!settings.quickPaste) quickPasteState.clear()
                 if (active) renderHeader()
             }
+            else if (key == "spaceEnglishGloss" && !settings.spaceEnglishGloss) {
+                // Revoke this generation immediately, even if the switch is turned back on.
+                if (Looper.myLooper() == main.looper) releaseSpaceGlossary()
+                else main.post { releaseSpaceGlossary() }
+            }
             else if (key == "chineseInputMode") main.post {
+                releaseSpaceGlossary()
                 clearPending(); pinyinContext = ""
                 if (active) { renderBody(); refreshCandidates() }
             }
@@ -366,8 +396,9 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
                 while (it.hasNext()) {
                     val k = it.next()
                     val a = j.getJSONArray(k)
-                    if (k != "Component")
+                    if (k != "Component") {
                         groups.add(k to (0 until a.length()).map { a.getString(it) })
+                    }
                 }
                 main.post {
                     if (destroyed) return@post
@@ -398,6 +429,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         val restoreKeysAfterPanel = active && (candidatesExpanded || panel != "keys" ||
             (::body.isInitialized && body.childCount == 0) || translation.enabled)
+        val retainedSpaceLabel = spaceGlossLabel.takeIf { active && !restoreKeysAfterPanel }
         voiceEditorGeneration++
         releaseFinishedInputPresentation()
         clearPending()
@@ -414,10 +446,15 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         if (restoreKeysAfterPanel && ::body.isInitialized) {
             renderHeader()
             renderBody()
+        } else if (retainedSpaceLabel != null) {
+            // A live editor restart may retain the ordinary key views without onStartInputView.
+            spaceGlossLabel = retainedSpaceLabel
+            updateSpaceGlossLabel()
         }
     }
 
     fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        releaseSpaceGlossary()
         val entry = editorEntry(info)
         secret = entry.secret
         if (!restarting || !active) applyEditorEntry(entry)
@@ -594,7 +631,8 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
 
     fun choose(value: String, feedback: () -> Unit) : Boolean = with(InputController) { chooseImpl(value, feedback) }
 
-    fun commitInputText(value: String) : Boolean = with(InputController) { commitInputTextImpl(value) }
+    @JvmOverloads
+    fun commitInputText(value: String, glossary: Boolean = false) : Boolean = with(InputController) { commitInputTextImpl(value, glossary) }
 
     fun commitNextSpacedText() = with(InputController) { commitNextSpacedTextImpl() }
 

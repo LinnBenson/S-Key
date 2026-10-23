@@ -1172,6 +1172,114 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testSpaceGlossaryDisabledCommitExpiryAndHide() {
+        val settings = SettingsStore(context)
+        val original = settings.spaceEnglishGloss
+        try {
+            onMainChecked {
+                settings.spaceEnglishGloss = false
+                service.session.commitInputText("苹果", glossary = true)
+                assertNull(service.session.spaceGlossary)
+                settings.spaceEnglishGloss = true
+                service.session.commitInputText("苹果") // paste/general commit does not trigger
+                assertNull(service.session.spaceGlossary)
+                service.session.commitInputText("苹果", glossary = true)
+            }
+            waitFor("English label") { service.session.spaceGlossLabel?.text?.toString() == "apple" }
+            onMainChecked {
+                val label = service.session.spaceGlossLabel!!
+                assertEquals(1, label.maxLines)
+                assertEquals(android.text.TextUtils.TruncateAt.END, label.ellipsize)
+                assertTrue(label.paddingLeft > 0 && label.paddingRight > 0)
+                assertEquals("苹果", connection.committed.last())
+            }
+            SystemClock.sleep(8100)
+            waitFor("eight second reset") { service.session.spaceGlossLabel?.text?.toString() == service.session.spaceDefaultLabel() }
+            onMainChecked {
+                service.session.commitInputText("银行", glossary = true)
+                service.onFinishInputView(false)
+                assertNull(service.session.spaceGlossary)
+                assertNull(service.session.spaceGlossLabel)
+            }
+        } finally { onMainChecked { service.session.releaseSpaceGlossary(); settings.spaceEnglishGloss = original } }
+    }
+
+    fun testSpaceGlossaryCandidateAutoCommitSpacingAndDisable() {
+        val settings = SettingsStore(context)
+        val original = settings.spaceEnglishGloss
+        val oldSpacing = settings.autoChineseSpacing
+        val oldFour = settings.fourCodeAutoCommit
+        var closing: io.secure.keyboard.learning.SpaceGlossary? = null
+        try {
+            onMainChecked { settings.spaceEnglishGloss = true }
+            query(true, "wgkq")
+            onMainChecked {
+                invoke("space")
+                assertNotNull(service.session.spaceGlossary)
+                service.session.releaseSpaceGlossary()
+                settings.fourCodeAutoCommit = true
+                "wgkq".forEach { invoke("type", it.toString()) }
+                assertNotNull(service.session.spaceGlossary)
+                service.session.releaseSpaceGlossary()
+                settings.autoChineseSpacing = true
+                service.session.commitInputText("苹果", glossary = true)
+            }
+            waitFor("spaced commit gloss") { service.session.spaceGlossLabel?.text?.toString() == "apple" }
+            onMainChecked {
+                closing = service.session.spaceGlossary
+                settings.spaceEnglishGloss = false
+                settings.spaceEnglishGloss = true
+                assertNull("Off/on must revoke the previous generation", service.session.spaceGlossary)
+                settings.spaceEnglishGloss = false
+            }
+            waitFor("disable releases glossary") { service.session.spaceGlossary == null }
+            assertTrue(closing!!.awaitReleased(5000))
+            onMainChecked {
+                assertEquals(service.session.spaceDefaultLabel(), service.session.spaceGlossLabel?.text?.toString())
+                service.session.commitInputText("银行", glossary = true)
+                assertNull(service.session.spaceGlossary)
+            }
+        } finally { onMainChecked {
+            service.session.releaseSpaceGlossary(); settings.spaceEnglishGloss = original
+            settings.autoChineseSpacing = oldSpacing; settings.fourCodeAutoCommit = oldFour
+        } }
+    }
+
+    fun testSpaceGlossaryLiveEditorRestartRetainsLabelAndReleasesOldQuery() {
+        val settings = SettingsStore(context)
+        val original = settings.spaceEnglishGloss
+        var old: io.secure.keyboard.learning.SpaceGlossary? = null
+        try {
+            onMainChecked {
+                settings.spaceEnglishGloss = true
+                service.session.commitInputText("苹果", glossary = true)
+            }
+            waitFor("first editor gloss") { service.session.spaceGlossLabel?.text?.toString() == "apple" }
+            onMainChecked {
+                old = service.session.spaceGlossary
+                val retained = service.session.spaceGlossLabel
+                service.session.onStartInput(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT }, true)
+                assertNull(service.session.spaceGlossary)
+                assertSame(retained, service.session.spaceGlossLabel)
+                assertEquals(service.session.spaceDefaultLabel(), retained?.text?.toString())
+                service.session.commitInputText("苹果", glossary = true)
+            }
+            assertTrue(old!!.awaitReleased(5000))
+            waitFor("restarted editor gloss") { service.session.spaceGlossLabel?.text?.toString() == "apple" }
+            onMainChecked {
+                old = service.session.spaceGlossary
+                service.session.commitInputText("不存在的学习测试词", glossary = true)
+                assertEquals(service.session.spaceDefaultLabel(), service.session.spaceGlossLabel?.text?.toString())
+                service.session.onStartInput(EditorInfo().apply {
+                    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                }, true)
+                service.session.commitInputText("苹果", glossary = true)
+                assertNull(service.session.spaceGlossary)
+            }
+            assertTrue(old!!.awaitReleased(5000))
+        } finally { onMainChecked { service.session.releaseSpaceGlossary(); settings.spaceEnglishGloss = original } }
+    }
+
     fun testAiAddsTemporaryHeightWithoutShrinkingKeys() {
         onMainChecked {
             fun layout(): Int {
@@ -1386,9 +1494,9 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testFinishedPresentationReleasesStripGridPreeditAndPreviewIdempotently() {
         val engine=io.secure.keyboard.engine.OfflineEngine(context).also { it.load() }
-        val expected=engine.exactWubi("kkkk",10000).map { it.text }
+        val expected=engine.exactWubi("fpgc",10000).map { it.text }
         assertTrue(expected.size>40)
-        query(true, "kkkk")
+        query(true, "fpgc")
         loadRemainingCandidatePages()
         lateinit var oldStrip: CandidateStrip
         lateinit var oldGrid: CandidateGrid
@@ -1578,9 +1686,9 @@ class CandidateRenderingTest : InstrumentationTestCase() {
 
     fun testAllMappedWubiCandidatesRemainReachableAtTheExpandedGridTail() {
         val engine=io.secure.keyboard.engine.OfflineEngine(context).also { it.load() }
-        val expected=engine.exactWubi("kkkk",10000).map { it.text }
+        val expected=engine.exactWubi("fpgc",10000).map { it.text }
         assertTrue(expected.size>40)
-        query(true, "kkkk")
+        query(true, "fpgc")
         lateinit var expectedTail: String
         onMainChecked {
             assertEquals("Only the first data page is queried",40,field<List<String>>("candidateTexts").size)
