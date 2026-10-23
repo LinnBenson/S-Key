@@ -10,7 +10,7 @@ import io.secure.keyboard.data.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 
-/** Current edit survives rotation in memory; private text never enters saved-state bundles. */
+/** Private drafts are discarded when leaving their page or backgrounding the activity. */
 internal data class ContentEdit(val category: String, val id: String? = null,
     val first: TextFieldValue = TextFieldValue(), val second: TextFieldValue = TextFieldValue(), val reasoningEffort: String = "low", val modelId: String = "")
 
@@ -18,8 +18,7 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
     val apiStore = ApiConfigurationStore(app)
     var apiDraft by mutableStateOf(ApiConfiguration())
     var apiModels by mutableStateOf<List<String>>(emptyList())
-    fun loadApi() { runCatching { apiStore.load() }.onSuccess { apiDraft = it }
-        .onFailure { message = "API 配置读取失败，可清除后重新配置" } }
+    fun loadApi() { if (visible && page == "api") refresh() }
     fun fetchApiModels() {
         val snapshot = apiDraft
         var result = emptyList<String>()
@@ -40,8 +39,9 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("settings", 0)
     var revision by mutableIntStateOf(0)
         private set
-    var busy by mutableStateOf(false)
-        private set
+    private var taskBusy by mutableStateOf(false)
+    private var loading by mutableStateOf(false)
+    val busy: Boolean get() = taskBusy || loading
     var pendingBackup by mutableStateOf<ContentStore.BackupPlan?>(null)
     var message by mutableStateOf<String?>(null)
     var edit by mutableStateOf<ContentEdit?>(null)
@@ -52,37 +52,94 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
     var aiPresets by mutableStateOf<List<ContentStore.AiPreset>>(emptyList())
     var emoji by mutableStateOf<List<String>>(emptyList())
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> revision++ }
-    init { prefs.registerOnSharedPreferenceChangeListener(listener); loadApi(); refresh() }
-    override fun onCleared() { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    init { prefs.registerOnSharedPreferenceChangeListener(listener) }
+    override fun onCleared() { releaseSensitive(); prefs.unregisterOnSharedPreferenceChangeListener(listener) }
 
-    private var contentSnapshot: ContentStore.SettingsSnapshot? = null
+    private var page: String? = null
+    private var visible by mutableStateOf(false)
+    private var generation = 0L
+    private var loadJob: Job? = null
+    private var loadRevision = 0L
 
-    private suspend fun loadContent() {
-        val snapshot = withContext(Dispatchers.IO) { content.settingsSnapshot(contentSnapshot) }
-        contentSnapshot = snapshot
-        clipboard = snapshot.clipboard; phrases = snapshot.phrases
-        chinese = snapshot.chinese; english = snapshot.english; emoji = snapshot.emoji; aiPresets = snapshot.aiPresets
+    private fun releaseSensitive() {
+        generation++
+        loadRevision++; loading = false
+        loadJob?.cancel(); loadJob = null
+        apiDraft = ApiConfiguration(); apiModels = emptyList()
+        clipboard = emptyList(); phrases = emptyList(); chinese = emptyList()
+        english = emptyList(); emoji = emptyList(); aiPresets = emptyList()
+        edit = null; pendingBackup = null; message = null
+    }
+
+    fun showPage(value: String) {
+        if (visible && page == value) return
+        releaseSensitive()
+        page = value; visible = true
+        refresh()
+    }
+
+    fun hide() { visible = false; releaseSensitive() }
+
+    fun refresh() {
+        if (!visible) return
+        loadJob?.cancel()
+        val loadTicket = ++loadRevision
+        loading = true
+        val ticket = generation
+        val route = page
+        loadJob = viewModelScope.launch {
+            try {
+                // Only the displayed category is retained; unrelated pages do not read content.
+                val value: Any? = withContext(Dispatchers.IO) {
+                    when (route) {
+                        "api" -> apiStore.load()
+                        "clipboard" -> content.clipboardForDisplay()
+                        "phrases" -> content.phrasesForDisplay()
+                        "dictionary" -> content.dictionary(DictionaryKind.CHINESE)
+                        "english_dictionary" -> content.dictionary(DictionaryKind.ENGLISH)
+                        "emoji" -> content.recentEmoji()
+                        "custom_ai" -> content.aiPresets()
+                        else -> null
+                    }
+                }
+                if (!visible || ticket != generation || route != page) return@launch
+                @Suppress("UNCHECKED_CAST")
+                when (route) {
+                    "api" -> apiDraft = value as ApiConfiguration
+                    "clipboard" -> clipboard = value as List<ContentStore.ClipboardItem>
+                    "phrases" -> phrases = value as List<ContentStore.Phrase>
+                    "dictionary" -> chinese = value as List<ContentStore.DictionaryEntry>
+                    "english_dictionary" -> english = value as List<ContentStore.DictionaryEntry>
+                    "emoji" -> emoji = value as List<String>
+                    "custom_ai" -> aiPresets = value as List<ContentStore.AiPreset>
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { if (visible && ticket == generation) message = "读取失败，请重试" }
+            finally { if (loadTicket == loadRevision) loading = false }
+        }
     }
 
     /** Picker results must not disappear when onResume is refreshing the content lists. */
     fun fileTask(refreshContent: Boolean = false, success: (() -> Unit)? = null, work: () -> Unit) {
         viewModelScope.launch {
-            snapshotFlow { busy }.first { !it }
+            snapshotFlow { busy to visible }.first { !it.first && it.second }
             task(refreshContent, success, work)
         }
     }
-    fun refresh() = task { }
     fun task(refreshContent: Boolean = true, success: (() -> Unit)? = null, work: () -> Unit) {
         if (busy) return
-        busy = true
+        taskBusy = true
+        val ticket = generation
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { work() }
-                if (refreshContent) loadContent()
-                success?.invoke()
+                if (visible && refreshContent) refresh()
+                if (visible && ticket == generation) {
+                    success?.invoke()
+                }
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { message = e.message ?: "操作失败，请重试" }
-            finally { busy = false }
+            catch (e: Exception) { if (visible && ticket == generation) message = e.message ?: "操作失败，请重试" }
+            finally { taskBusy = false }
         }
     }
     fun saveEdit() {

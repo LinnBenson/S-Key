@@ -35,7 +35,7 @@ class BilingualContentStoreTest : AndroidTestCase() {
         val item = store.aiPresets().single()
         assertEquals("model-a", item.modelId)
         assertEquals(item, ContentStore(sandbox).aiPresets().single())
-        assertEquals(item, store.settingsSnapshot().aiPresets.single())
+        assertEquals(item, store.aiPresets().single())
         val backup = java.io.ByteArrayOutputStream()
         store.writeBackup(backup)
         store.restoreBackup(backup.toByteArray().inputStream())

@@ -161,6 +161,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var emojiCategory = 1
     internal var emojiCategoryScroll: Pair<Int, Int>? = null
     internal var secret by inputState::secret
+    internal var personalizedLearning = true
     internal lateinit var root: FrameLayout
     internal lateinit var box: LinearLayout
     internal lateinit var header: LinearLayout
@@ -277,6 +278,9 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             refreshCandidates()
         }
     }
+    private var glossarySelectionStart = -1
+    private var glossarySelectionEnd = -1
+    private var glossaryExpectedCursors: java.util.ArrayDeque<Int>? = null
     internal var spaceGlossary: io.secure.keyboard.learning.SpaceGlossary? = null
     internal var spaceGlossLabel: android.widget.TextView? = null
 
@@ -287,18 +291,28 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     }
 
     internal fun releaseSpaceGlossary() {
+        glossaryExpectedCursors = null
         spaceGlossary?.close(); spaceGlossary = null
         updateSpaceGlossLabel()
     }
 
-    internal fun showSpaceGlossary(word: String) {
-        if (!settings.spaceEnglishGloss || !active || destroyed || secret || !chinese || translation.enabled) return
+    internal fun spaceGlossaryCommitted(units: Int, eligible: Boolean, cursor: Int? = null, committed: String? = null) {
+        if (!settings.spaceEnglishGloss || !active || destroyed || secret || !personalizedLearning || !chinese || translation.enabled) return
+        val previous = glossaryExpectedCursors?.peekLast() ?: minOf(glossarySelectionStart, glossarySelectionEnd)
+        val expected = cursor ?: previous.takeIf { it >= 0 }?.plus(units)
+        if (expected != null) {
+            val cursors = glossaryExpectedCursors ?: java.util.ArrayDeque<Int>().also { glossaryExpectedCursors = it }
+            if (cursors.size >= 32) { releaseSpaceGlossary(); return }
+            cursors.addLast(expected)
+        }
+        if (!eligible) { spaceGlossary?.close(); spaceGlossary = null; updateSpaceGlossLabel(); return }
+        val connection = currentInputConnection ?: return
         val current = spaceGlossary ?: io.secure.keyboard.learning.SpaceGlossary(main,
             io.secure.keyboard.learning.SpaceGlossary.SqliteBackend(this), display = { _ ->
-            if (active && !destroyed && !secret && chinese && !translation.enabled && settings.spaceEnglishGloss) updateSpaceGlossLabel()
+            if (active && !destroyed && !secret && personalizedLearning && chinese && !translation.enabled && settings.spaceEnglishGloss) updateSpaceGlossLabel()
             else releaseSpaceGlossary()
         }).also { spaceGlossary = it }
-        current.query(word)
+        current.queryBeforeCursor(committed) { connection.getTextBeforeCursor(4, 0) }
     }
 
     internal val preferenceListener =
@@ -437,7 +451,10 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         cancelTransient()
         panel = "keys"
         val entry = editorEntry(attribute)
+        glossarySelectionStart = attribute?.initialSelStart ?: -1
+        glossarySelectionEnd = attribute?.initialSelEnd ?: -1
         secret = entry.secret
+        personalizedLearning = EditorEntryPolicy.allowsPersonalizedLearning(attribute?.imeOptions ?: 0)
         // Only an opening/new editor applies the field default. A live restart preserves any
         // manual language or symbol-page change made after the keyboard became visible.
         if (!restarting || !active) applyEditorEntry(entry)
@@ -457,6 +474,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         releaseSpaceGlossary()
         val entry = editorEntry(info)
         secret = entry.secret
+        personalizedLearning = EditorEntryPolicy.allowsPersonalizedLearning(info?.imeOptions ?: 0)
         if (!restarting || !active) applyEditorEntry(entry)
         quickEditSelection.reset()
         if (!active) prepareQuickPaste()
@@ -531,8 +549,14 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         candidatesStart: Int,
         candidatesEnd: Int,
     ) {
+        glossarySelectionStart = newSelStart
+        glossarySelectionEnd = newSelEnd
         val moved = oldSelStart != newSelStart || oldSelEnd != newSelEnd
         if (moved) {
+            val pending = glossaryExpectedCursors
+            if (newSelStart == newSelEnd && pending?.contains(newSelStart) == true) {
+                while (!pending.isEmpty() && pending.removeFirst() != newSelStart) { }
+            } else releaseSpaceGlossary()
             val expected = if (newSelStart == newSelEnd) spacingExpectedCursors.indexOf(newSelStart) else -1
             if (expected >= 0) repeat(expected + 1) { spacingExpectedCursors.removeFirst() }
             else { spacingSelectionVersion++; spacingExpectedCursors.clear() }

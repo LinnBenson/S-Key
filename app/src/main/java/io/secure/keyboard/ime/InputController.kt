@@ -236,8 +236,9 @@ internal object InputController {
                 return true
             }
         }
-        val accepted = currentInputConnection?.commitText(outputText(value), 1) == true
-        if (accepted && glossary) showSpaceGlossary(value)
+        val output = outputText(value)
+        val accepted = currentInputConnection?.commitText(output, 1) == true
+        if (accepted) spaceGlossaryCommitted(output.length, glossary, committed = output)
         return accepted
     }
 
@@ -269,11 +270,13 @@ internal object InputController {
                 connection.beginBatchEdit()
                 try {
                     val accepted = connection.commitText(convertedText, 1)
-                    if (accepted && pending.glossary) showSpaceGlossary(value)
                     if (accepted && edit.trailingSpace && selection != null) {
                         val cursor = minOf(selection.first, selection.second) + convertedText.length - 1
                         connection.setSelection(cursor, cursor)
                     }
+                    if (accepted) spaceGlossaryCommitted(convertedText.length, pending.glossary,
+                        selection?.let { minOf(it.first, it.second) + convertedText.length - if (edit.trailingSpace) 1 else 0 },
+                        committed = value.takeIf { it.length in 2..4 }?.let(::outputText))
                 } finally { connection.endBatchEdit() }
                 spacingPending=false
                 if (spacingTexts.isNotEmpty()) commitNextSpacedText() else replayQueuedKeys()

@@ -717,57 +717,6 @@ class ContentStore(context: Context) {
         }
     }
 
-    data class SettingsSnapshot(
-        val clipboard: List<ClipboardItem>, val phrases: List<Phrase>,
-        val chinese: List<DictionaryEntry>, val english: List<DictionaryEntry>,
-        val emoji: List<String>, val aiPresets: List<AiPreset>,
-        internal val version: Any, internal val expiresAt: Long,
-    )
-
-    /** One shared-file parse for settings, rather than one parse per category. */
-    fun settingsSnapshot(previous: SettingsSnapshot? = null): SettingsSnapshot = synchronized(lock) {
-        fun version(): Any = listOf(file.canonicalPath, dictionaryStamp(),
-            if (emojiFile.baseFile.exists()) Files.readAttributes(emojiFile.baseFile.toPath(), BasicFileAttributes::class.java).let {
-                listOf(it.size(), it.lastModifiedTime().toString(), it.fileKey())
-            } else null,
-            File(emojiDir, "history.json.bak").exists(),
-            settings.clipboardRetention, settings.clipboardRetentionHours, settings.clipboardLimit)
-        val now = System.currentTimeMillis()
-        if (previous != null && previous.version == version() && now < previous.expiresAt)
-            return@synchronized previous
-        val root = read()
-        val clips = array(root, "clipboard")
-        val rows = (0 until clips.length()).map { clips.getJSONObject(it) }.toMutableList()
-        val before = clips.toString()
-        deduplicateClipboard(rows)
-        pruneClipboard(rows, System.currentTimeMillis())
-        val after = JSONArray(rows)
-        if (before != after.toString()) { root.put("clipboard", after); write(root) }
-        scheduleClipboardCleanup(rows)
-        fun objects(key: String): List<JSONObject> {
-            val values = array(root, key)
-            return (0 until values.length()).map { values.getJSONObject(it) }
-        }
-        fun dictionary(kind: DictionaryKind) = objects(kind.storageKey).map {
-            DictionaryEntry(it.getString("id"), it.getString("word"), it.getString("reading"))
-        }
-        SettingsSnapshot(
-            rows.map { ClipboardItem(it.getString("id"), it.getString("text"), it.optBoolean("pinned"), it.optLong("copiedAt")) }
-                .asReversed().sortedByDescending { it.pinned },
-            objects("phrases").map { Phrase(it.getString("id"), it.getString("text"), it.optBoolean("pinned")) }
-                .sortedByDescending { it.pinned },
-            dictionary(DictionaryKind.CHINESE), dictionary(DictionaryKind.ENGLISH), recentEmoji(),
-            objects("aiPresets").map {
-                AiPreset(it.getString("id"), it.getString("name"), it.getString("prompt"),
-                    it.optString("reasoningEffort", "low").takeIf(AiReasoning::valid) ?: "low", it.optString("modelId", ""))
-            },
-            version(),
-            if (settings.clipboardRetention == "timed") rows.filterNot { it.optBoolean("pinned") }
-                .minOfOrNull { it.optLong("copiedAt") + settings.clipboardRetentionHours * 3_600_000L } ?: Long.MAX_VALUE
-            else Long.MAX_VALUE,
-        )
-    }
-
     /** Separate bounded history. Legacy content is migrated only after a durable new copy. */
     fun recentEmoji(): List<String> = synchronized(lock) {
         try {

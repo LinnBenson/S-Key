@@ -88,6 +88,12 @@ class EditorEntryPolicyTest {
         }
     }
 
+    @Test
+    fun privateEditorsDisableLearningOnlyForTheirSession() {
+        assertFalse(EditorEntryPolicy.allowsPersonalizedLearning(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or EditorInfo.IME_ACTION_SEARCH))
+        assertTrue(EditorEntryPolicy.allowsPersonalizedLearning(EditorInfo.IME_ACTION_SEARCH))
+    }
+
     private fun resolve(inputType: Int, remembered: Boolean) =
         EditorEntryPolicy.resolve(inputType, 0, remembered)
 }

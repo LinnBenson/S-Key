@@ -34,6 +34,13 @@ class GoogleTranslationLifecycleTest : AndroidTestCase() {
         override fun getInputStream() = reply.byteInputStream()
     }
     private val config = ApiConfiguration(googleKey = "synthetic-key")
+    fun testKeyOnlyTravelsInHeader() {
+        val conn = Connection()
+        var target: URL? = null
+        GoogleTranslation.Call { target = it; conn }.execute(config, "synthetic", "auto", "en")
+        assertNull(target!!.query)
+        assertEquals("synthetic-key", conn.getRequestProperty("X-Goog-Api-Key"))
+    }
     fun testCanceledQueuedRequestDoesNotConnectOrUpload() {
         var connections = 0
         val call = GoogleTranslation.Call { connections++; Connection() }

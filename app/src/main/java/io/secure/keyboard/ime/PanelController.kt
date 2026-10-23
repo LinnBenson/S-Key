@@ -259,7 +259,7 @@ internal object PanelController {
     }
 
     internal fun KeyboardSession.captureClipboardImpl(newCopyEvent: Boolean = false) {
-        if (!clipsInitialized || (!active && !newCopyEvent) || secret) return
+        if (!clipsInitialized || (!active && !newCopyEvent) || secret || !personalizedLearning) return
         if (!newCopyEvent && !worker.isShutdown) clipboardWrites.submit(0) {
             try { content.trimClipboard() } catch (_: Exception) { reportContentError() }
         }
@@ -546,7 +546,7 @@ internal object PanelController {
             pinyinContext = ""
             val committed = commitInputText(emoji)
             refreshCandidates()
-            if (committed && !secret) {
+            if (committed && !secret && personalizedLearning) {
                 val epoch = content.emojiGeneration()
                 val store = content
                 val owner = java.lang.ref.WeakReference(this)

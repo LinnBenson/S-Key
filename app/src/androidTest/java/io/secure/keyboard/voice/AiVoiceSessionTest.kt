@@ -74,6 +74,8 @@ class AiVoiceSessionTest : AndroidTestCase() {
         val session = AiVoiceSession(context, ApiConfiguration(voiceKey="synthetic-key", googleKey="synthetic-google"), listener, true) { conn.call(it) }
         try {
             assertEquals("Hello", output(session, "這是語音輸入"))
+            assertNull(conn.request.url.query)
+            assertEquals("synthetic-google", conn.request.header("X-Goog-Api-Key"))
             val body = conn.sent.toString("UTF-8")
             assertTrue(body.contains("\"target\":\"en\""))
             assertEquals("这是语音输入", org.json.JSONObject(body).getString("q"))

@@ -1172,6 +1172,39 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testSpaceGlossarySplitCommitsAndCursorMove() {
+        val settings = SettingsStore(context)
+        val original = settings.spaceEnglishGloss
+        try {
+            onMainChecked {
+                settings.spaceEnglishGloss = true
+                connection.before = ""
+                service.session.onStartInput(EditorInfo().apply {
+                    inputType = InputType.TYPE_CLASS_TEXT; initialSelStart = 0; initialSelEnd = 0
+                }, true)
+                service.session.commitInputText("苹", glossary = true)
+                service.session.commitInputText("果", glossary = true)
+            }
+            waitFor("split word translation") { service.session.spaceGlossary?.text == "apple" }
+            onMainChecked {
+                // Delayed acknowledgements of both commits must preserve the newest query.
+                service.session.onUpdateSelection(0, 0, 1, 1, -1, -1)
+                service.session.onUpdateSelection(1, 1, 2, 2, -1, -1)
+                assertEquals("apple", service.session.spaceGlossary?.text)
+                service.session.onUpdateSelection(2, 2, 0, 0, -1, -1)
+                assertNull(service.session.spaceGlossary)
+                service.session.commitInputText("苹果")
+                assertNull(service.session.spaceGlossary)
+                service.session.onStartInput(EditorInfo().apply {
+                    inputType = InputType.TYPE_CLASS_TEXT
+                    imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                }, true)
+                service.session.commitInputText("苹果", glossary = true)
+                assertNull(service.session.spaceGlossary)
+            }
+        } finally { onMainChecked { service.session.releaseSpaceGlossary(); settings.spaceEnglishGloss = original } }
+    }
+
     fun testSpaceGlossaryDisabledCommitExpiryAndHide() {
         val settings = SettingsStore(context)
         val original = settings.spaceEnglishGloss

@@ -3,7 +3,6 @@ package io.secure.keyboard.translation
 import io.secure.keyboard.data.ApiConfiguration
 import org.json.JSONObject
 import java.net.URL
-import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.net.ssl.HttpsURLConnection
 
@@ -29,12 +28,13 @@ internal object GoogleTranslation {
             val c = config.validated()
             require(c.googleKey.isNotBlank()) { "请先在接口 API 配置中保存 Google 翻译密钥" }
             val payload = requestBody(text, source, target, c.googleModel).toString().toByteArray(Charsets.UTF_8)
-            val connection = connect(URL(c.googleUrl + "?key=" + URLEncoder.encode(c.googleKey, "UTF-8")))
+            val connection = connect(URL(c.googleUrl))
             activeConnection = connection
             try {
                 checkActive()
                 connection.connectTimeout = 15000; connection.readTimeout = 20000
                 connection.instanceFollowRedirects = false
+                connection.setRequestProperty("X-Goog-Api-Key", c.googleKey)
                 connection.requestMethod = "POST"; connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 connection.setFixedLengthStreamingMode(payload.size)

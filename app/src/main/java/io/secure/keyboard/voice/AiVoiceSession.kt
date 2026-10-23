@@ -142,8 +142,8 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         val payload = io.secure.keyboard.translation.GoogleTranslation.requestBody(normalized, "auto", "en", c.googleModel)
             .toString().toByteArray(Charsets.UTF_8)
         try {
-            val body = send(id, c.googleUrl + "?key=" + java.net.URLEncoder.encode(c.googleKey, "UTF-8"),
-                emptyMap(), "application/json; charset=utf-8", payload.size.toLong(), { it.write(payload) }) { status ->
+            val body = send(id, c.googleUrl,
+                mapOf("X-Goog-Api-Key" to c.googleKey), "application/json; charset=utf-8", payload.size.toLong(), { it.write(payload) }) { status ->
                 when (status) {
                     401, 403 -> "Google 翻译鉴权失败，请检查密钥与权限"
                     429 -> "翻译请求过于频繁或配额不足"

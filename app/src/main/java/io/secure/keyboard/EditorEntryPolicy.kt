@@ -25,6 +25,9 @@ internal object EditorEntryPolicy {
         )
     }
 
+    fun allowsPersonalizedLearning(imeOptions: Int): Boolean =
+        imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING == 0
+
     private val textPasswords = setOf(
         InputType.TYPE_TEXT_VARIATION_PASSWORD,
         InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,

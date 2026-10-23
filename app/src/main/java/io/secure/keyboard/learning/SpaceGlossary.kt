@@ -33,7 +33,7 @@ internal class SpaceGlossary(
         private set
 
     // All public methods run on the IME main thread. The worker only owns the backend.
-    fun query(word: String) {
+    fun query(lookup: (Backend, CancellationSignal) -> String?) {
         if (closed) return
         val ticket = ++revision
         signal?.cancel(); task?.cancel(true); task?.let { executor.remove(it) }
@@ -42,7 +42,7 @@ internal class SpaceGlossary(
         if (closed || ticket != revision) return
         val cancellation = CancellationSignal(); signal = cancellation
         val job = FutureTask<Unit> {
-            val result = try { backend.lookup(word, cancellation) } catch (_: Exception) { null }
+            val result = try { lookup(backend, cancellation) } catch (_: Exception) { null }
             synchronized(callbackToken) {
                 if (!closed && ticket == revision && !cancellation.isCanceled) {
                     main.postAtTime({
@@ -59,6 +59,31 @@ internal class SpaceGlossary(
             }
         }
         task = job; executor.execute(job)
+    }
+
+    fun queryBeforeCursor(committed: String? = null, readTail: () -> CharSequence?) {
+        // Capture only a short eligible word, never the entire committed sentence.
+        val preferred = committed?.takeIf { it.length in 2..4 && it.all { c -> c in '\u3400'..'\u9fff' } }
+        query { backend, cancellation ->
+            cancellation.throwIfCanceled()
+            if (preferred != null) {
+                val exact = backend.lookup(preferred, cancellation)
+                cancellation.throwIfCanceled()
+                if (exact != null) return@query exact
+            }
+            // Read host context only when the committed word did not match.
+            val tail = readTail()?.takeLast(4)?.toString().orEmpty()
+            cancellation.throwIfCanceled()
+            var result: String? = null
+            for (length in minOf(4, tail.length) downTo 2) {
+                cancellation.throwIfCanceled()
+                val word = tail.takeLast(length)
+                if (word == preferred || word.any { it !in '\u3400'..'\u9fff' }) continue
+                result = backend.lookup(word, cancellation)
+                if (result != null) break
+            }
+            result
+        }
     }
 
     override fun close() {

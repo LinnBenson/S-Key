@@ -359,42 +359,6 @@ class ContentStoreTest : AndroidTestCase() {
         assertTrue(ContentStore(sandbox).recentEmoji().isEmpty())
     }
 
-    fun testSettingsSnapshotReusesUnchangedDataAndInvalidatesEditsAndExpiry() {
-        store.addPhrase("original")
-        val first = store.settingsSnapshot()
-        assertSame(first, store.settingsSnapshot(first))
-        ContentStore(sandbox).useEmoji("🙂")
-        val second = store.settingsSnapshot(first)
-        assertNotSame(first, second)
-        assertEquals(listOf("🙂"), second.emoji)
-        ContentStore(sandbox).addPhrase("new")
-        val third = store.settingsSnapshot(second)
-        assertEquals(2, third.phrases.size)
-        assertNotSame(third, store.settingsSnapshot(third.copy(expiresAt = 0)))
-        store.clearAll()
-        val cleared = store.settingsSnapshot(third)
-        assertTrue(cleared.phrases.isEmpty())
-        assertTrue(cleared.emoji.isEmpty())
-    }
-
-    fun testSettingsSnapshotKeepsOrderingAndRetentionSemantics() {
-        store.addClipboard("old"); store.setClipboardPinned(store.clipboard().single().id, true)
-        store.addClipboard("fresh")
-        store.addPhrase("first"); store.addPhrase("pin")
-        store.setPhrasePinned(store.phrases().last().id, true)
-        store.addDictionary("中文", "zhong"); store.addDictionary("hello", "hello", DictionaryKind.ENGLISH)
-        store.saveAiPreset(null, "AI", "instruction", "high"); store.useEmoji("🙂")
-        config.clipboardRetention = "none"
-        val snapshot = store.settingsSnapshot()
-        assertEquals(store.clipboardForDisplay(), snapshot.clipboard)
-        assertEquals(store.phrasesForDisplay(), snapshot.phrases)
-        assertEquals(store.dictionary(), snapshot.chinese)
-        assertEquals(store.dictionary(DictionaryKind.ENGLISH), snapshot.english)
-        assertEquals(store.aiPresets(), snapshot.aiPresets)
-        assertEquals(store.recentEmoji(), snapshot.emoji)
-        assertEquals(listOf("old"), snapshot.clipboard.map { it.text })
-    }
-
     fun testRecentEmojiIsUniqueRecencyBoundedTo50() {
         repeat(55) { store.useEmoji("emoji$it") }
         assertEquals(50, store.recentEmoji().size)

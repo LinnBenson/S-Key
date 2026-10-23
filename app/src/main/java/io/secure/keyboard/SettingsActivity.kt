@@ -51,6 +51,7 @@ open class SettingsActivity : ComponentActivity() {
     protected open val initialPage = "home"
     private val model: SettingsModel by viewModels()
     private val builtinModel: BuiltinDictionaryModel by viewModels()
+    private var settingsVisible by mutableStateOf(false)
     private var incomingPage by mutableStateOf<String?>(null)
     private val pageHistory = ArrayList<String>()
     private var voiceState by mutableStateOf<ModelImportCoordinator.State>(ModelImportCoordinator.State.Idle)
@@ -92,7 +93,6 @@ open class SettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         incomingPage = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: initialPage
         pageHistory.addAll(savedInstanceState?.getStringArrayList("pageHistory").orEmpty())
-        if (savedInstanceState == null) consumePhraseShortcut(intent)
         setContent { ApplicationUi() }
     }
     override fun onNewIntent(intent: Intent) {
@@ -100,17 +100,19 @@ open class SettingsActivity : ComponentActivity() {
         pageHistory.clear()
         model.edit = null
         incomingPage = intent.getStringExtra("page") ?: initialPage
+        model.showPage(incomingPage ?: initialPage)
         consumePhraseShortcut(intent)
     }
     private fun consumePhraseShortcut(intent: Intent) {
         if (intent.getBooleanExtra("add_phrase", false)) {
             intent.removeExtra("add_phrase")
             incomingPage = "phrases"
+            model.showPage("phrases")
             model.edit = ContentEdit("phrases")
         }
     }
-    override fun onStart() { super.onStart(); ModelImportTransfer.attach(voiceObserver) }
-    override fun onStop() { ModelImportTransfer.detach(voiceObserver); super.onStop() }
+    override fun onStart() { super.onStart(); settingsVisible = true; ModelImportTransfer.attach(voiceObserver) }
+    override fun onStop() { settingsVisible = false; model.hide(); ModelImportTransfer.detach(voiceObserver); super.onStop() }
     override fun onResume() {
         super.onResume()
         microphone = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -118,7 +120,8 @@ open class SettingsActivity : ComponentActivity() {
         enabledIme = manager.enabledInputMethodList.any { it.packageName == packageName }
         selectedIme = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
             ?.substringBefore('/') == packageName
-        model.refresh()
+        model.showPage(incomingPage ?: initialPage)
+        consumePhraseShortcut(intent)
     }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("page", incomingPage)
@@ -136,13 +139,15 @@ open class SettingsActivity : ComponentActivity() {
     }
 
     @Composable private fun ApplicationUi() {
+        if (!settingsVisible) return
         val revision = model.revision
         val config = model.settings
         val systemDark = LocalConfiguration.current.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
         val dark = remember(revision, systemDark) { config.isDark(systemDark) }
         val tokens = remember(revision, dark) { config.themeTokens(dark) }
         val route = incomingPage ?: initialPage
-        var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+        LaunchedEffect(route) { model.showPage(route) }
+        var confirm by remember(route) { mutableStateOf<Pair<String, () -> Unit>?>(null) }
         fun ask(message: String, action: () -> Unit) { confirm = message to action }
         fun back() {
             if (route == "builtin_dictionaries" && builtinModel.selected != null) { builtinModel.back(); return }
@@ -353,11 +358,11 @@ open class SettingsActivity : ComponentActivity() {
             Nav("快捷 emoji 表情", "表情与快捷输入关键词", "emoji") { openPage("emoji_shortcuts") }
         }
         Group("本机内容") {
-            Nav("剪贴板", "${model.clipboard.size} 条", "clipboard") { openPage("clipboard") }
-            Nav("常用语", "${model.phrases.size} 条", "phrases") { openPage("phrases") }
-            Nav("中文自定义词库", "${model.chinese.size} 条 · 手动短语", "dictionary") { openPage("dictionary") }
-            Nav("英文自定义词库", "${model.english.size} 条", "english_dictionary") { openPage("english_dictionary") }
-            Nav("最近表情", "${model.emoji.size} / 50", "emoji") { openPage("emoji") }
+            Nav("剪贴板", "管理复制记录", "clipboard") { openPage("clipboard") }
+            Nav("常用语", "管理常用语", "phrases") { openPage("phrases") }
+            Nav("中文自定义词库", "管理手动短语", "dictionary") { openPage("dictionary") }
+            Nav("英文自定义词库", "管理英文词条", "english_dictionary") { openPage("english_dictionary") }
+            Nav("最近表情", "管理最近使用的表情", "emoji") { openPage("emoji") }
         }
         Group("应用与隐私") {
             Nav("AI 设置", "Google 翻译 · Grok · 模型选择", "input") { openPage("api") }
@@ -408,7 +413,7 @@ open class SettingsActivity : ComponentActivity() {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
         }
         Group("使用设置") {
-            Nav("自定义 AI", "${model.aiPresets.size} 个 · 提示词与排序", "ai") { openPage("custom_ai") }
+            Nav("自定义 AI", "提示词与排序", "ai") { openPage("custom_ai") }
             Toggle("AI 生成后自动上屏", model.settings.aiAutoApply, "开启后直接插入结果；有选中文字时替换选中内容", icon = "enter") { model.settings.aiAutoApply = it }
             Toggle("语音自动翻译", model.settings.voiceAutoTranslate, "在英文键盘下，将 AI 语音识别结果译为英文", icon = "translate") { model.settings.voiceAutoTranslate = it }
         }
