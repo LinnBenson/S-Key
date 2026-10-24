@@ -184,6 +184,37 @@ class KeyboardUiTest : InstrumentationTestCase() {
         }
     }
 
+    fun testEditorPreviewCommitsThroughSystemConnection() {
+        val settings = SettingsStore(context)
+        val oldPreview = settings.editorPreview
+        val oldSpacing = settings.autoChineseSpacing
+        val oldMode = settings.chineseInputMode
+        try {
+            settings.editorPreview = true
+            settings.chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.MIXED
+            for (spacing in listOf(false, true)) {
+                settings.autoChineseSpacing = spacing
+                for (letter in "nihao") tapImeDescription(letter.toString())
+                waitForHost(if (spacing) "你好nihao" else "nihao")
+                waitFor("preview candidate ready") { hasImeText("你好") }
+                tapImeText("你好")
+                waitForHost(if (spacing) "你好你好" else "你好")
+            }
+            settings.autoChineseSpacing = false
+            for (letter in "nihao") tapImeDescription(letter.toString())
+            waitFor("space candidate ready") { hasImeText("你好") }
+            tapImeDescription("五笔")
+            waitForHost("你好你好你好")
+            settings.fourCodeAutoCommit = true
+            for (letter in "wgkq") tapImeDescription(letter.toString())
+            waitForHost("你好你好你好使")
+        } finally {
+            settings.editorPreview = oldPreview
+            settings.autoChineseSpacing = oldSpacing
+            settings.chineseInputMode = oldMode
+        }
+    }
+
     fun testChineseRawPreeditAndCandidateCommit() {
         val keyDescriptions = listOf("q", "a", "z", "五笔", "回车")
         val idleBounds = keyDescriptions.associateWith { imeBounds(it) }
@@ -454,6 +485,79 @@ class KeyboardUiTest : InstrumentationTestCase() {
         assertTrue("Shift remains off while local code is pending", hasImeDescription("大写"))
         assertHostEquals("AAB", "Pending Shift must not commit or delete host content")
         saveValidationScreenshot("15-chinese-shift-pending.png")
+    }
+
+    fun testEditorPreviewInOfflineWebView() {
+        val prefs = SettingsStore(context)
+        val oldPreview = prefs.editorPreview
+        val oldMode = prefs.chineseInputMode
+        prefs.editorPreview = true
+        prefs.chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.MIXED
+        lateinit var web: WebView
+        val pageReady = CountDownLatch(1)
+        instrumentation.runOnMainSync {
+            web =
+                WebView(activity).apply {
+                    settings.javaScriptEnabled = true
+                    webViewClient =
+                        object : WebViewClient() {
+                            override fun onPageFinished(view: WebView, url: String?) {
+                                pageReady.countDown()
+                            }
+                        }
+                }
+            activity.setContentView(web)
+            web.loadDataWithBaseURL(
+                null,
+                "<html><meta name='viewport' content='width=device-width,initial-scale=1'><body><input id='fixture' aria-label='Offline English fixture' autocomplete='off' autocorrect='off' style='font-size:24px;width:90%;height:80px'></body></html>",
+                "text/html",
+                "UTF-8",
+                null,
+            )
+        }
+        assertTrue("Local WebView fixture loads", pageReady.await(60, TimeUnit.SECONDS))
+        try {
+            var hostNode: AccessibilityNodeInfo? = null
+            waitFor("WebView editable accessibility node") {
+                for (window in automation.windows) {
+                    if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
+                    val root = window.root ?: continue
+                    hostNode = findNode(root) { it.isEditable }
+                    if (hostNode != null) break
+                }
+                hostNode != null
+            }
+            val editable = requireNotNull(hostNode)
+            try {
+                assertTrue(
+                    "WebView host accepts focus click",
+                    editable.performAction(AccessibilityNodeInfo.ACTION_CLICK),
+                )
+            } finally {
+                editable.recycle()
+            }
+            waitFor("WebView HTML input receives focus") {
+                webValue(web, "document.activeElement.id") == "\"fixture\""
+            }
+            instrumentation.runOnMainSync {
+                (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                    .showSoftInput(web, InputMethodManager.SHOW_IMPLICIT)
+            }
+            waitForKeyboard()
+            for (letter in "nihao") tapImeDescription(letter.toString())
+            waitFor("WebView preview") { webValue(web) == "\"nihao\"" }
+            waitFor("WebView candidate") { hasImeText("你好") }
+            tapImeText("你好")
+            waitFor("WebView candidate commits") { webValue(web) == "\"你好\"" }
+        } finally {
+            prefs.editorPreview = oldPreview
+            prefs.chineseInputMode = oldMode
+            instrumentation.runOnMainSync {
+                (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                    .hideSoftInputFromWindow(web.windowToken, 0)
+                web.destroy()
+            }
+        }
     }
 
     fun testEnglishCompletionInOfflineWebView() {

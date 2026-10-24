@@ -240,16 +240,27 @@ internal object InputController {
                 variation !in listOf(android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
                     android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, android.text.InputType.TYPE_TEXT_VARIATION_URI)) {
                 if (spacingTexts.size >= 1024) return false
-                if (!clearEditorPreview()) return false
+                if (!clearEditorPreview(expectCursorUpdate = true)) return false
                 spacingTexts.addLast(InputState.SpacedText(value, glossary))
                 if (!spacingPending) commitNextSpacedText()
                 return true
             }
         }
         val output = outputText(value)
-        val accepted = currentInputConnection?.commitText(output, 1) == true
+        val connection = currentInputConnection ?: return false
+        val previewStart = editorPreview.cursorsOnClear().lastOrNull()
+        connection.beginBatchEdit()
+        val accepted = try {
+            // Remove the temporary span explicitly, as the local assistant editor does,
+            // and insert the final text in the same batch.
+            val committed = clearEditorPreview(expectCursorUpdate = true) && connection.commitText(output, 1)
+            if (committed && previewStart != null) {
+                if (spacingExpectedCursors.size >= 1024) spacingExpectedCursors.removeFirst()
+                spacingExpectedCursors.addLast(previewStart + output.length)
+            }
+            committed
+        } finally { connection.endBatchEdit() }
         if (accepted) {
-            editorPreview.committed(currentInputConnection)
             spaceGlossaryCommitted(output.length, glossary, committed = output)
         }
         return accepted

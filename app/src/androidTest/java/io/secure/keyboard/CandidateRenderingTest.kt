@@ -2816,6 +2816,17 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             onMainChecked { service.session.onFinishInputView(false) }
             assertEquals("",host.editor.text.toString())
             assertNull(service.session.previewEditor)
+            assertNull(field<Any?>("previewConnection"))
+            assertTrue(service.session.spacingExpectedCursors.isEmpty())
+            val preview = service.session.editorPreview
+            for (name in listOf("connection", "text", "expectedCursors")) {
+                val retained = preview.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(preview)
+                when (name) {
+                    "connection" -> assertNull(retained)
+                    "text" -> assertEquals("", retained)
+                    else -> assertTrue((retained as Collection<*>).isEmpty())
+                }
+            }
         } finally { onMainChecked { settings.editorPreview=false } }
     }
 
@@ -2858,6 +2869,78 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 }
             }
         } finally { onMainChecked { settings.editorPreview=false; invoke("clearPending") } }
+    }
+
+    fun testEditorPreviewDelayedCallbacksDoNotDropSpacedCommit() {
+        val host = attachActualHost()
+        val settings = SettingsStore(context)
+        try {
+            onMainChecked { settings.editorPreview = true; settings.autoChineseSpacing = true }
+            query(true, "wgkq")
+            val expected = field<List<String>>("candidateTexts").first()
+            val release = gateWorker()
+            onMainChecked {
+                invoke("space")
+                // Remote editors can acknowledge the preview and its removal only after
+                // the final candidate was queued. Neither is an external cursor move.
+                service.session.onUpdateSelection(0, 0, 4, 4, -1, -1)
+                service.session.onUpdateSelection(4, 4, 0, 0, -1, -1)
+            }
+            release.countDown()
+            waitFor("Preview candidate survives delayed cursor acknowledgements") {
+                host.editor.text.toString() == expected
+            }
+            query(true, "wgkq")
+            val movedRelease = gateWorker()
+            onMainChecked {
+                invoke("space")
+                service.session.onUpdateSelection(expected.length, expected.length, expected.length + 4, expected.length + 4, -1, -1)
+                service.session.onUpdateSelection(expected.length + 4, expected.length + 4, expected.length, expected.length, -1, -1)
+                host.editor.setSelection(0)
+                service.session.onUpdateSelection(expected.length, expected.length, 0, 0, -1, -1)
+            }
+            movedRelease.countDown()
+            drainWorker()
+            assertEquals("A genuine cursor move still revokes the queued insertion", expected, host.editor.text.toString())
+        } finally { onMainChecked { settings.editorPreview = false; invoke("clearPending") } }
+    }
+
+    fun testEditorPreviewRemovalCannotRecreateCodeThroughCallback() {
+        val host = attachActualHost()
+        val settings = SettingsStore(context)
+        try {
+            onMainChecked { settings.editorPreview = true; settings.autoChineseSpacing = true }
+            query(true, "wgkq")
+            val expected = field<List<String>>("candidateTexts").first()
+            onMainChecked {
+                host.connection.onComposingCleared = { invoke("refreshCandidates") }
+                invoke("space")
+            }
+            waitFor("Reentrant refresh does not recreate removed code") { host.editor.text.toString() == expected }
+        } finally { onMainChecked {
+            host.connection.onComposingCleared = null
+            settings.editorPreview = false
+            invoke("clearPending")
+        } }
+    }
+
+    fun testEditorPreviewMissingSpanDoesNotCancelOwnCursorUpdate() {
+        val host = attachActualHost()
+        val settings = SettingsStore(context)
+        try {
+            onMainChecked { settings.editorPreview = true }
+            query(true, "ab")
+            onMainChecked {
+                service.session.onUpdateSelection(0, 0, 2, 2, -1, -1)
+                assertEquals("ab", field<String>("code"))
+                service.session.onUpdateSelection(2, 2, 2, 2, -1, -1)
+                assertEquals("ab", field<String>("code"))
+                host.editor.setSelection(0)
+                service.session.onUpdateSelection(2, 2, 0, 0, -1, -1)
+                assertEquals("", field<String>("code"))
+                assertEquals("ab", host.editor.text.toString())
+            }
+        } finally { onMainChecked { settings.editorPreview = false; invoke("clearPending") } }
     }
 
     fun testEditorPreviewCommitBackspaceDisableAndPassword() {
@@ -3069,6 +3152,12 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         val actions = mutableListOf<Int>()
         val keyEvents = mutableListOf<Pair<Int, Int>>()
         var rejectCommits = false
+        var onComposingCleared: (() -> Unit)? = null
+        override fun setComposingText(text: CharSequence, newCursorPosition: Int): Boolean {
+            val accepted = super.setComposingText(text, newCursorPosition)
+            if (text.isEmpty()) onComposingCleared?.invoke()
+            return accepted
+        }
         override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
             if (rejectCommits) return false
             val accepted = super.commitText(text, newCursorPosition)

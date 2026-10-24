@@ -44,7 +44,13 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal val editorPreview = EditorPreview()
     internal var previewEditor: EditText? = null
     private var previewConnection: android.view.inputmethod.BaseInputConnection? = null
-    internal fun clearEditorPreview(): Boolean {
+    internal fun clearEditorPreview(expectCursorUpdate: Boolean = false): Boolean {
+        if (expectCursorUpdate && previewEditor == null) {
+            for (cursor in editorPreview.cursorsOnClear()) {
+                if (spacingExpectedCursors.size >= 1024) spacingExpectedCursors.removeFirst()
+                spacingExpectedCursors.addLast(cursor)
+            }
+        }
         val wasSyncing = syncingAssistantEditor
         syncingAssistantEditor = true
         return try { editorPreview.clear() } finally {
@@ -53,6 +59,9 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         }
     }
     internal fun syncEditorPreview() {
+        // Host callbacks can re-enter candidate refresh while a preview is being removed.
+        // Do not recreate the old code between removal and the final candidate insertion.
+        if (syncingAssistantEditor) return
         val value = if (active && chinese && !secret && settings.editorPreview)
             pinyinComposition.text + code else ""
         if (value.isEmpty()) { clearEditorPreview(); return }
@@ -66,7 +75,9 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         }
         val wasSyncing = syncingAssistantEditor
         syncingAssistantEditor = true
-        try { editorPreview.update(if (translation.enabled) previewConnection else currentInputConnection, value) }
+        try { editorPreview.update(if (translation.enabled) previewConnection else currentInputConnection, value,
+            local?.selectionStart ?: spacingExpectedCursors.lastOrNull() ?: glossarySelectionStart,
+            local?.selectionEnd ?: spacingExpectedCursors.lastOrNull() ?: glossarySelectionEnd) }
         finally { syncingAssistantEditor = wasSyncing }
     }
     internal var pinyinContext = ""
@@ -584,7 +595,9 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         candidatesStart: Int,
         candidatesEnd: Int,
     ) {
-        if (previewEditor == null && editorPreview.selectionChanged(newSelStart, newSelEnd, candidatesStart, candidatesEnd)) {
+        val ownCursorUpdate = newSelStart == newSelEnd && newSelStart in spacingExpectedCursors
+        if (!ownCursorUpdate && previewEditor == null && editorPreview.selectionChanged(newSelStart, newSelEnd, candidatesStart, candidatesEnd,
+                oldSelStart != newSelStart || oldSelEnd != newSelEnd)) {
             clearPending()
             if (active) renderHeader()
         }
