@@ -68,8 +68,10 @@ def compile_runtime():
         priority=ordinal if priority else 9223372036854775807
         syllable=code if kind=='pinyin' and ' ' not in code and len(text)==1 else ''
         db.execute('INSERT OR IGNORE INTO words VALUES(?,?,?,?,?,?,?,?,?)',(kind,text,code,weight,ordinal,priority,compact,fuzzy,syllable))
-        if kind=='pinyin' and filename=='skey_pinyin.tsv': db.execute('INSERT OR IGNORE INTO words VALUES(?,?,?,?,?,?,?,?,?)',('mixed_pinyin',text,code,weight,ordinal,priority,compact,fuzzy,syllable))
-        if priority!=9223372036854775807: db.execute('UPDATE words SET priority=min(priority,?) WHERE kind=? AND text=? AND code=?',(priority,kind,text,code))
+        if kind=='pinyin': db.execute('INSERT OR IGNORE INTO words VALUES(?,?,?,?,?,?,?,?,?)',('mixed_pinyin',text,code,weight,ordinal,priority,compact,fuzzy,syllable))
+        if priority!=9223372036854775807:
+            for target_kind in ([kind,'mixed_pinyin'] if kind=='pinyin' else [kind]):
+                db.execute('UPDATE words SET priority=min(priority,?) WHERE kind=? AND text=? AND code=?',(priority,target_kind,text,code))
     db.execute("INSERT INTO words SELECT 'pinyin_initial',text,substr(code,1,1),max(weight),min(ordinal),9223372036854775807,substr(code,1,1),'','' FROM words WHERE kind='pinyin' AND length(text)=1 AND instr(code,' ')=0 GROUP BY text,substr(code,1,1)")
     db.execute('CREATE INDEX exact_words ON words(kind,compact,priority,weight DESC,ordinal)')
     db.execute("CREATE INDEX fuzzy_words ON words(kind,fuzzy,weight DESC,ordinal) WHERE kind='pinyin'")

@@ -59,7 +59,7 @@ class BuiltinDictionaryTest : AndroidTestCase() {
         }
         assertEquals(6,repository.libraries().size)
     }
-    fun testMixedPinyinIsolationAndInitials() {
+    fun testMixedPinyinIncludesAllLibrariesAndInitials() {
         emptyFixture()
         repository.addFile("skey_pinyin.tsv","pinyin","基础词\tji chu ci\t10\n".byteInputStream())
         repository.addFile("extra.tsv","pinyin","额外词\te wai ci\t999\n基础词\tji chu ci\t999999\n".byteInputStream())
@@ -68,12 +68,24 @@ class BuiltinDictionaryTest : AndroidTestCase() {
         CompiledDictionary(repository.activeFile()!!).use { db ->
             assertTrue(db.scopedPinyin)
             assertEquals("基础词",db.mixedEngine.candidates("jichuci",false).first().text)
-            assertTrue(db.mixedEngine.candidates("ewaici",false).isEmpty())
+            assertEquals("额外词",db.mixedEngine.candidates("ewaici",false).first().text)
             assertEquals("额外词",db.engine.decodePinyin("ewaici","",emptyList(),false,emptySet()).first().text)
             assertEquals("你",db.engine.decodePinyin("n","",emptyList(),false,emptySet()).first().text)
-            assertTrue(db.mixedEngine.candidates("n",false).isEmpty())
+            assertEquals("你",db.mixedEngine.candidates("n",false).first().text)
             assertEquals("你你",db.engine.decodePinyin("nn","",emptyList(),false,emptySet()).first().text)
             assertEquals(10L,db.mixedPinyin.lookup("exact","jichuci",10).single().weight)
+        }
+        repository.addFile("skey_pinyin_high.tsv","pinyin","基础词\tji chu ci\t1\n".byteInputStream())
+        repository.compile {}
+        CompiledDictionary(repository.activeFile()!!).use { db ->
+            assertEquals(db.pinyin.lookup("exact","jichuci",10),db.mixedPinyin.lookup("exact","jichuci",10))
+            assertTrue(db.mixedPinyin.lookup("exact","jichuci",10).single().priority<Long.MAX_VALUE)
+        }
+        repository.deleteLibrary(repository.libraries().first { it.filename=="extra.tsv" }.id)
+        repository.compile {}
+        CompiledDictionary(repository.activeFile()!!).use { db ->
+            assertTrue(db.mixedPinyin.lookup("exact","ewaici",10).isEmpty())
+            assertEquals("基础词",db.mixedEngine.candidates("jichuci",false).first().text)
         }
         val protected=repository.libraries().first { it.filename=="skey_pinyin.tsv" }
         try { repository.deleteLibrary(protected.id); fail("Protected library deleted") } catch(_: IllegalArgumentException) { }

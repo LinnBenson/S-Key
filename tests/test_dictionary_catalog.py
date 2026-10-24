@@ -6,6 +6,28 @@ ROOT=Path(__file__).resolve().parents[1]
 GENERATED=ROOT/'app/build/generated/dictionaryCatalog/dictionaries'
 
 class CatalogTest(unittest.TestCase):
+    def test_mixed_custom_priority_and_recompile_after_delete(self):
+        import importlib.util
+        import tempfile
+        spec=importlib.util.spec_from_file_location("catalog_builder",ROOT/"scripts/build_dictionary_catalog.py")
+        module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as folder:
+            module.DEST=Path(folder)/"catalog.db"
+            with sqlite3.connect(module.DEST) as db:
+                db.executescript("CREATE TABLE libraries(id INTEGER,kind TEXT,priority INTEGER,filename TEXT); CREATE TABLE entries(id INTEGER,library INTEGER,text TEXT,code TEXT,weight INTEGER);")
+                db.executemany("INSERT INTO libraries VALUES(?,?,?,?)",[(1,"pinyin",0,"skey_pinyin.tsv"),(2,"pinyin",0,"extra.tsv"),(3,"pinyin",1,"skey_pinyin_high.tsv")])
+                db.executemany("INSERT INTO entries VALUES(?,?,?,?,?)",[(1,1,"基础词","ji chu ci",10),(2,2,"额外词","e wai ci",999),(3,3,"基础词","ji chu ci",1)])
+            module.compile_runtime()
+            with sqlite3.connect(Path(folder)/"runtime.db") as db:
+                select="SELECT text,code,weight,priority FROM words WHERE kind=? ORDER BY text"
+                self.assertEqual(db.execute(select,("pinyin",)).fetchall(),db.execute(select,("mixed_pinyin",)).fetchall())
+                self.assertEqual((10,2),db.execute("SELECT weight,priority FROM words WHERE kind='mixed_pinyin' AND text='基础词'").fetchone())
+            with sqlite3.connect(module.DEST) as db:
+                db.execute("DELETE FROM libraries WHERE id=2")
+            module.compile_runtime()
+            with sqlite3.connect(Path(folder)/"runtime.db") as db:
+                self.assertEqual(0,db.execute("SELECT count(*) FROM words WHERE kind='mixed_pinyin' AND text='额外词'").fetchone()[0])
+
     def test_sources_counts_and_empty_priorities(self):
         with sqlite3.connect(GENERATED/'catalog.db') as db:
             self.assertEqual('ok', db.execute('pragma integrity_check').fetchone()[0])

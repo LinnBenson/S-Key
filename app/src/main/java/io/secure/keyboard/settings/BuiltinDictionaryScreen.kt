@@ -192,7 +192,6 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
                                         Text(file.filename,fontSize=15.sp,fontWeight=FontWeight.Medium,maxLines=2,overflow=TextOverflow.Ellipsis)
                                         val localPriority = io.secure.keyboard.dictionaries.BuiltinDictionaryFiles.isHighPriority(file.filename,file.kind)
                                         Text(if(localPriority) "本地高优先级词库" else if(file.sourcePath.isEmpty()) file.name else "已保存的源文件",fontSize=12.sp,color=colors.onSurfaceSecondary,modifier=Modifier.padding(top=5.dp))
-                                        if(file.kind=="pinyin" && !localPriority) Text(if(file.filename=="skey_pinyin.tsv") "混输与纯拼音共用" else "仅纯拼音使用",fontSize=12.sp,color=colors.onSurfaceSecondary)
                                     }
                                     DictionaryIcon("forward",tint=colors.onSurfaceSecondary)
                                 }

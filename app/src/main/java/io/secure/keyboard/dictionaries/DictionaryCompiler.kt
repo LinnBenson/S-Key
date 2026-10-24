@@ -22,7 +22,7 @@ object DictionaryCompiler {
                         var ordinal=0L
                         while(c.moveToNext()) {
                             if (Thread.currentThread().isInterrupted) error("编译已中断")
-                            val sourceKind=c.getString(0); val filename=c.getString(6)
+                            val sourceKind=c.getString(0)
                             val kind=sourceKind; val text=c.getString(1); val code=c.getString(2); val weight=c.getLong(3)
                             validate(sourceKind,text,code,weight)
                             val priority=if(c.getInt(5)!=0) ordinal else Long.MAX_VALUE
@@ -32,10 +32,14 @@ object DictionaryCompiler {
                             ins.bindString(8,if(kind=="pinyin") DictionaryEngine.fuzzyInputKey(code) else "")
                             ins.bindString(9,if(kind=="pinyin" && !code.contains(' ') && text.codePointCount(0,text.length)==1) code else "")
                             ins.executeInsert()
-                            if (kind=="pinyin" && filename=="skey_pinyin.tsv") {
+                            if (kind=="pinyin") {
                                 ins.bindString(1,"mixed_pinyin"); ins.executeInsert()
                             }
-                            if(priority!=Long.MAX_VALUE) { pro.bindLong(1,priority); pro.bindString(2,kind); pro.bindString(3,text); pro.bindString(4,code); pro.executeUpdateDelete() }
+                            if(priority!=Long.MAX_VALUE) {
+                                pro.bindLong(1,priority); pro.bindString(3,text); pro.bindString(4,code)
+                                pro.bindString(2,kind); pro.executeUpdateDelete()
+                                if(kind=="pinyin") { pro.bindString(2,"mixed_pinyin"); pro.executeUpdateDelete() }
+                            }
                             ordinal++
                             if(ordinal%10000L==0L) progress("正在编译 $ordinal 条")
                             require(ordinal<=1_000_000) { "词库总条目不能超过 100 万" }
