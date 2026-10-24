@@ -67,7 +67,7 @@ class OfflineEngine(context: Context) {
         withDictionary { it.completeEnglish(prefix, limit) }
 
     internal fun boundedCandidates(code: String, fuzzy: Boolean, limit: Int, pairs: Set<String>, mode: ChineseInputMode, cancelled: () -> Boolean = { false }) =
-        withDictionary { (if(mode==ChineseInputMode.MIXED) checkNotNull(mixedDictionary) else it).candidates(code,fuzzy,limit,pairs,mode=mode,cancelled=cancelled) }
+        withDictionary { (if(mode==ChineseInputMode.MIXED) checkNotNull(mixedDictionary) else it).candidates(code,fuzzy,limit,pairs,mode=mode,cancelled=cancelled,separateMixedGroups=true) }
     /** Each SQL page is materialized under the snapshot lock; no cursor survives between pages. */
     internal fun wordPages(kind: String, query: String, expectedRevision: String): Sequence<String> = sequence {
         var offset = 0

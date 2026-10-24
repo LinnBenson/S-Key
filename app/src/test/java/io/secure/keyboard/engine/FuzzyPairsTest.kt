@@ -9,6 +9,50 @@ class FuzzyPairsTest {
         DictionaryEngine(StringReader("...\n"), StringReader("...\n目标\t$code\t100\n"))
 
     @Test
+    fun mixedRLIndexedLookupScansPastExactPages() {
+        val entries = List(200) { DictionaryEngine.Entry("精确$it", "lan", 1000) } +
+            DictionaryEngine.Entry("然", "ran", 1)
+        var pages = 0
+        val lookup = object : PinyinLookup {
+            override val entryCount = entries.size
+            override fun index(kind: String) = emptyMap<String,List<DictionaryEngine.Entry>>()
+            override fun lookupPage(kind: String, key: String, offset: Int, limit: Int): List<DictionaryEngine.Entry> {
+                pages++
+                return (if (kind == "exact") entries.filter { it.code == key } else entries).drop(offset).take(limit)
+            }
+        }
+        val wubi = object : WubiLookup {
+            override val entryCount = 40
+            override fun exactCandidateCount(code: String) = 40
+            override fun exact(code: String, limit: Int) = List(minOf(limit,40)) { Candidate("五笔$it",code,Source.WUBI) }
+            override fun prefix(code: String, limit: Int) = emptyList<Candidate>()
+        }
+        val english = object : EnglishLookup { override fun complete(prefix: String, limit: Int) = emptyList<String>() }
+        val engine = DictionaryEngine(wubi,lookup,english)
+        val result = engine.candidates("lan",true,40,setOf("r_l"),separateMixedGroups=true)
+        assertEquals("然",result.last().text)
+        assertEquals(81,result.size)
+        assertTrue(pages >= 7)
+        assertTrue(engine.candidates("lan",true,40,setOf("r_l"),mode=ChineseInputMode.WUBI,separateMixedGroups=true).all { it.source==Source.WUBI })
+    }
+
+    @Test
+    fun mixedRLRemainsReachableAfterFullExactGroups() {
+        for ((typed, stored) in listOf("lan" to "ran", "ran" to "lan")) {
+            val wubi = "...\n" + (1..40).joinToString("\n") { "五笔$it\t$typed\t100" }
+            val pinyin = "...\n" + (1..200).joinToString("\n") { "精确$it\t$typed\t1000" } +
+                "\n模糊目标\t$stored\t1\n"
+            val engine = DictionaryEngine(StringReader(wubi), StringReader(pinyin))
+            val result = engine.candidates(typed, true, 40, setOf("r_l"), separateMixedGroups = true)
+            assertEquals(40, result.takeWhile { it.source == Source.WUBI }.size)
+            assertTrue("$typed -> $stored", result.any { it.text == "模糊目标" })
+            assertFalse(engine.candidates(typed, false, 40, setOf("r_l"), separateMixedGroups = true).any { it.text == "模糊目标" })
+            assertFalse(engine.candidates(typed, true, 40, emptySet(), separateMixedGroups = true).any { it.text == "模糊目标" })
+            assertTrue(engine.candidates(typed, true, 40, setOf("r_l")).size <= 40)
+        }
+    }
+
+    @Test
     fun eachPairCanBeEnabledIndependentlyInBothDirections() {
         val cases =
             mapOf(

@@ -102,6 +102,7 @@ class DictionaryEngine private constructor(
         allExactWubi: Boolean = false,
         mode: ChineseInputMode = ChineseInputMode.MIXED,
         cancelled: () -> Boolean = { false },
+        separateMixedGroups: Boolean = false,
     ): List<Candidate> {
         if (limit <= 0) return emptyList()
         val raw = code.lowercase(Locale.ROOT).replace('ü', 'v')
@@ -115,13 +116,15 @@ class DictionaryEngine private constructor(
         val resultLimit = if (mode != ChineseInputMode.PINYIN && allExactWubi && key.length == 4) {
             maxOf(limit, compactWubi?.exactCandidateCount(key) ?: wubiExact[key].orEmpty().size)
         } else limit
+        var groupLimit = resultLimit
+        val separateGroups = separateMixedGroups && mode == ChineseInputMode.MIXED
         val result = LinkedHashMap<String, Candidate>()
         BuiltinExactDictionary.lookup(raw)?.let {
             result[it] = Candidate(it, key, Source.BUILTIN)
         }
         fun add(entries: List<Entry>?, source: Source) {
             entries?.forEach {
-                if (result.size < resultLimit)
+                if (result.size < groupLimit)
                     result.putIfAbsent(it.text, Candidate(it.text, it.code, source))
             }
         }
@@ -130,11 +133,14 @@ class DictionaryEngine private constructor(
             else compactWubi.exact(key, resultLimit).forEach { result.putIfAbsent(it.text, it) }
         }
         if (mode != ChineseInputMode.WUBI) {
+            if (separateGroups) groupLimit = result.size + limit
             val segmented = raw.contains('\'') || raw.contains(' ')
             val syllableCode = raw.split(' ', '\'').filter(String::isNotEmpty).joinToString(" ")
             val exactPinyin = matchingPinyin("exact",key,resultLimit,cancelled) { !segmented || it.code == syllableCode }
             add(exactPinyin, Source.PINYIN)
             if (fuzzyPinyin && fuzzyPairs.isNotEmpty()) {
+                if (separateGroups) groupLimit = result.size + limit
+                val exactTexts = exactPinyin.map { it.text }.toSet()
                 // Preserve the existing pairs' matching rules. The optional r/l pair has a
                 // stricter, syllable-aware check below so it cannot turn a final er into el.
                 val selectedPairs = fuzzyPairs - "r_l"
@@ -144,28 +150,30 @@ class DictionaryEngine private constructor(
                     else emptyList()
                 add(
                     matchingPinyin("fuzzy",fuzzyInputKey(raw),resultLimit,cancelled) {
-                        (fuzzyInputKey(it.code, selectedPairs) == selectedKey &&
+                        compact(it.code) != key && it.text !in exactTexts && ((fuzzyInputKey(it.code, selectedPairs) == selectedKey &&
                             (!segmented ||
                                 it.code.split(' ').map { part -> fuzzySyllable(part, selectedPairs) } ==
                                     selectedSyllables)) ||
-                            ("r_l" in fuzzyPairs && matchesRL(raw, it.code, selectedPairs))
+                            ("r_l" in fuzzyPairs && matchesRL(raw, it.code, selectedPairs)))
                     },
                     Source.PINYIN,
                 )
             }
-            if (fuzzyPinyin && result.size < resultLimit && !cancelled()) add(extendedFuzzyEntries(raw, fuzzyPairs, resultLimit, cancelled), Source.PINYIN)
+            if (separateGroups) groupLimit = result.size + limit
+            if (fuzzyPinyin && result.size < groupLimit && !cancelled()) add(extendedFuzzyEntries(raw, fuzzyPairs, resultLimit, cancelled), Source.PINYIN)
             // A dictionary phrase is preferred; otherwise segment into known words/syllables locally.
             if (exactPinyin.isNullOrEmpty() && key.length >= 4) {
-                for (text in composePinyin(raw, cancelled)) if (result.size < resultLimit) {
+                for (text in composePinyin(raw, cancelled)) if (result.size < groupLimit) {
                     result.putIfAbsent(text, Candidate(text, raw, Source.PINYIN))
                 }
             }
         }
+        if (separateGroups) groupLimit = result.size + limit
         if (mode != ChineseInputMode.PINYIN) {
             if (compactWubi == null) add(wubiPrefixes[key], Source.WUBI)
-            else if (result.size < resultLimit) {
+            else if (result.size < groupLimit) {
                 compactWubi.prefix(key, resultLimit).forEach {
-                    if (result.size < resultLimit) result.putIfAbsent(it.text, it)
+                    if (result.size < groupLimit) result.putIfAbsent(it.text, it)
                 }
             }
         }
