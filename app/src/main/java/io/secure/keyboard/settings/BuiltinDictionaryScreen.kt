@@ -28,6 +28,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.SavedStateHandle
+import kotlinx.coroutines.flow.first
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -38,7 +40,7 @@ import kotlinx.coroutines.*
 import top.yukonga.miuix.kmp.basic.*
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-internal class BuiltinDictionaryModel(app: Application): AndroidViewModel(app) {
+internal class BuiltinDictionaryModel(app: Application, private val savedState: SavedStateHandle): AndroidViewModel(app) {
     val repository by lazy { DictionaryRepository(app) }
     var libraries by mutableStateOf<List<DictionaryRepository.Library>>(emptyList())
     var selected by mutableStateOf<DictionaryRepository.Library?>(null)
@@ -57,14 +59,17 @@ internal class BuiltinDictionaryModel(app: Application): AndroidViewModel(app) {
     var filename by mutableStateOf("custom_wubi.dict.yaml")
     var kind by mutableStateOf("wubi")
     var confirmation by mutableStateOf<Pair<String,()->Unit>?>(null)
-    var pendingImportKind="wubi"
+    var pendingImportKind: String
+        get() = savedState["importKind"] ?: "wubi"
+        set(value) { savedState["importKind"] = value }
     var pendingExport: Long?=null
     val unsaved get()=page?.let { text!=it.text } == true
     init { run {} }
-    fun run(message: String?=null,work: ()->Unit) {
-        if(busy) return
-        busy=true
-        viewModelScope.launch {
+    fun run(message: String?=null, waitUntilReady: Boolean=false, work: ()->Unit) {
+        if(busy && !waitUntilReady) return
+        viewModelScope.launch(start=CoroutineStart.UNDISPATCHED) {
+            if (busy) snapshotFlow { busy }.first { !it }
+            busy=true
             try {
                 withContext(Dispatchers.IO) { work() }
                 val result=withContext(Dispatchers.IO) { repository.libraries() to repository.dirty() }
@@ -141,7 +146,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
     val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if(uri!=null) {
             val kind=model.pendingImportKind
-            model.run("文件已导入，编译后生效") {
+            model.run("文件已导入，编译后生效", waitUntilReady=true) {
                 val resolver=model.getApplication<Application>().contentResolver
                 val name=resolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use { if(it.moveToFirst()) it.getString(0) else null } ?: error("无法获取文件名")
                 model.repository.addFile(name,kind,resolver.openInputStream(uri) ?: error("无法打开文件"),replaceExisting=true)

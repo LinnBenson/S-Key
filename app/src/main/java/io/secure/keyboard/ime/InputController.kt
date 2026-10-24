@@ -214,13 +214,17 @@ internal object InputController {
             activeAssistantEditor()?.let { editor ->
                 syncingAssistantEditor = true
                 try {
-                    if (!clearEditorPreview()) return false
-                    val start=minOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(0)
-                    val end=maxOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(start)
-                    val retainedLength = editor.length() - (end - start)
-                    editor.text.replace(start,end,value)
-                    val insertedLength = (editor.length() - retainedLength).coerceAtLeast(0)
-                    editor.setSelection((start + insertedLength).coerceAtMost(editor.length()))
+                    if (previewEditor === editor) {
+                        if (!editorPreview.commit(value)) return false
+                        clearEditorPreview()
+                    } else {
+                        val start=minOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(0)
+                        val end=maxOf(editor.selectionStart,editor.selectionEnd).coerceAtLeast(start)
+                        val retainedLength = editor.length() - (end - start)
+                        editor.text.replace(start,end,value)
+                        val insertedLength = (editor.length() - retainedLength).coerceAtLeast(0)
+                        editor.setSelection((start + insertedLength).coerceAtMost(editor.length()))
+                    }
                 } finally { syncingAssistantEditor = false }
                 aiDraftEpoch++
                 if (aiMode) translation.editDraft(editor.text.toString()) else translation.edit(editor.text.toString())
@@ -231,6 +235,43 @@ internal object InputController {
             val accepted = translation.edit(translation.text + value)
             if (!accepted) toast("原文最多 5000 字符")
             updateTranslationPreview()
+            return accepted
+        }
+        val previewTarget = currentInputConnection
+        if (editorPreview.owns(previewTarget)) {
+            val connection = previewTarget ?: return false
+            val start = editorPreview.startOffset
+            val type = currentInputEditorInfo?.inputType ?: 0
+            val variation = type and android.text.InputType.TYPE_MASK_VARIATION
+            val spaced = settings.autoChineseSpacing && !secret &&
+                type and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT &&
+                variation !in listOf(android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+                    android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, android.text.InputType.TYPE_TEXT_VARIATION_URI)
+            val edit = if (spaced) runCatching {
+                val before = connection.getTextBeforeCursor(editorPreview.length + 2, 0)
+                    ?.toString().orEmpty().dropLast(editorPreview.length)
+                val after = if (start >= 0) connection.getTextAfterCursor(2, 0)?.toString().orEmpty() else ""
+                ChineseSpacing.format(value, before, after)
+            }.getOrElse { ChineseSpacing.format(value) } else ChineseSpacing.Edit(value, false)
+            val output = outputText(edit.text)
+            for (cursor in editorPreview.cursorsOnClear() +
+                listOfNotNull((start + output.length - if (edit.trailingSpace) 1 else 0).takeIf { start >= 0 })) {
+                if (spacingExpectedCursors.size >= 1024) spacingExpectedCursors.removeFirst()
+                spacingExpectedCursors.addLast(cursor)
+            }
+            val wasSyncing = syncingAssistantEditor
+            syncingAssistantEditor = true
+            connection.beginBatchEdit()
+            val accepted = try {
+                editorPreview.commit(output).also { committed ->
+                    if (committed && edit.trailingSpace && start >= 0)
+                        connection.setSelection(start + output.length - 1, start + output.length - 1)
+                }
+            } finally {
+                connection.endBatchEdit()
+                syncingAssistantEditor = wasSyncing
+            }
+            if (accepted) spaceGlossaryCommitted(output.length, glossary, committed = output)
             return accepted
         }
         if (settings.autoChineseSpacing && !secret && value.isNotEmpty()) {
@@ -248,18 +289,9 @@ internal object InputController {
         }
         val output = outputText(value)
         val connection = currentInputConnection ?: return false
-        val previewStart = editorPreview.cursorsOnClear().lastOrNull()
         connection.beginBatchEdit()
-        val accepted = try {
-            // Remove the temporary span explicitly, as the local assistant editor does,
-            // and insert the final text in the same batch.
-            val committed = clearEditorPreview(expectCursorUpdate = true) && connection.commitText(output, 1)
-            if (committed && previewStart != null) {
-                if (spacingExpectedCursors.size >= 1024) spacingExpectedCursors.removeFirst()
-                spacingExpectedCursors.addLast(previewStart + output.length)
-            }
-            committed
-        } finally { connection.endBatchEdit() }
+        val accepted = try { connection.commitText(output, 1) }
+            finally { connection.endBatchEdit() }
         if (accepted) {
             spaceGlossaryCommitted(output.length, glossary, committed = output)
         }

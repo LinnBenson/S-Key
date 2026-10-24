@@ -2871,7 +2871,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         } finally { onMainChecked { settings.editorPreview=false; invoke("clearPending") } }
     }
 
-    fun testEditorPreviewDelayedCallbacksDoNotDropSpacedCommit() {
+    fun testEditorPreviewDirectCommitDoesNotWaitForWorkerOrClearSpan() {
         val host = attachActualHost()
         val settings = SettingsStore(context)
         try {
@@ -2879,44 +2879,18 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             query(true, "wgkq")
             val expected = field<List<String>>("candidateTexts").first()
             val release = gateWorker()
-            onMainChecked {
-                invoke("space")
-                // Remote editors can acknowledge the preview and its removal only after
-                // the final candidate was queued. Neither is an external cursor move.
-                service.session.onUpdateSelection(0, 0, 4, 4, -1, -1)
-                service.session.onUpdateSelection(4, 4, 0, 0, -1, -1)
-            }
-            release.countDown()
-            waitFor("Preview candidate survives delayed cursor acknowledgements") {
-                host.editor.text.toString() == expected
-            }
-            query(true, "wgkq")
-            val movedRelease = gateWorker()
-            onMainChecked {
-                invoke("space")
-                service.session.onUpdateSelection(expected.length, expected.length, expected.length + 4, expected.length + 4, -1, -1)
-                service.session.onUpdateSelection(expected.length + 4, expected.length + 4, expected.length, expected.length, -1, -1)
-                host.editor.setSelection(0)
-                service.session.onUpdateSelection(expected.length, expected.length, 0, 0, -1, -1)
-            }
-            movedRelease.countDown()
-            drainWorker()
-            assertEquals("A genuine cursor move still revokes the queued insertion", expected, host.editor.text.toString())
-        } finally { onMainChecked { settings.editorPreview = false; invoke("clearPending") } }
-    }
-
-    fun testEditorPreviewRemovalCannotRecreateCodeThroughCallback() {
-        val host = attachActualHost()
-        val settings = SettingsStore(context)
-        try {
-            onMainChecked { settings.editorPreview = true; settings.autoChineseSpacing = true }
-            query(true, "wgkq")
-            val expected = field<List<String>>("candidateTexts").first()
-            onMainChecked {
-                host.connection.onComposingCleared = { invoke("refreshCandidates") }
-                invoke("space")
-            }
-            waitFor("Reentrant refresh does not recreate removed code") { host.editor.text.toString() == expected }
+            var cleared = false
+            try {
+                onMainChecked {
+                    host.connection.onComposingCleared = { cleared = true }
+                    invoke("space")
+                    assertEquals("Candidate replaces preview synchronously", expected, host.editor.text.toString())
+                    assertFalse("No separate composing deletion", cleared)
+                    service.session.onUpdateSelection(0, 0, 4, 4, -1, -1)
+                    service.session.onUpdateSelection(4, 4, expected.length, expected.length, -1, -1)
+                    assertEquals(expected, host.editor.text.toString())
+                }
+            } finally { release.countDown() }
         } finally { onMainChecked {
             host.connection.onComposingCleared = null
             settings.editorPreview = false

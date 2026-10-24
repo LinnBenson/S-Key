@@ -39,6 +39,18 @@ internal class EditorPreview {
         return removed
     }
 
+    fun owns(target: InputConnection?): Boolean = target != null && connection === target
+    val length: Int get() = text.length
+    val startOffset: Int get() = start
+
+    /** commitText replaces the composing span itself; never erase it in a separate edit. */
+    fun commit(value: String, cursor: Int = 1): Boolean {
+        val target = connection ?: return false
+        val accepted = runCatching { target.commitText(value, cursor) }.getOrDefault(false)
+        if (accepted) forget()
+        return accepted
+    }
+
     private fun forget() {
         connection = null
         text = ""
