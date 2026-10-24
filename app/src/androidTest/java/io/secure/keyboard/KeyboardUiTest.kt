@@ -1682,27 +1682,33 @@ class KeyboardUiTest : InstrumentationTestCase() {
     }
 
     fun testTenShowHideCyclesRemainUsable() {
-        // Warm dictionary lookup before the first sample; do not confuse first-load
-        // allocations with repeated view lifecycle allocations.
-        typeChinese("nihao")
-        waitFor("dictionary warm-up candidate") { hasImeText("你好") }
-        tapImeDescription("取消待输入内容")
-        val before = memorySnapshot()
-        repeat(10) {
-            tapImeDescription("收起键盘")
-            waitFor("IME hides") { !hasImeDescription("收起键盘") }
-            instrumentation.runOnMainSync {
-                editor.requestFocus()
-                showKeyboard()
+        val settings = SettingsStore(context)
+        val originalPreview = settings.editorPreview
+        // This test uses the keyboard preedit cancel button; inline preview has no such button.
+        settings.editorPreview = false
+        try {
+            // Warm dictionary lookup before the first sample; do not confuse first-load
+            // allocations with repeated view lifecycle allocations.
+            typeChinese("nihao")
+            waitFor("dictionary warm-up candidate") { hasImeText("你好") }
+            tapImeDescription("取消待输入内容")
+            val before = memorySnapshot()
+            repeat(10) {
+                tapImeDescription("收起键盘")
+                waitFor("IME hides") { !hasImeDescription("收起键盘") }
+                instrumentation.runOnMainSync {
+                    editor.requestFocus()
+                    showKeyboard()
+                }
+                waitForKeyboard()
             }
-            waitForKeyboard()
-        }
-        val after = memorySnapshot()
-        reportMemory(before, after)
-        ensureChinese()
-        typeChinese("nihao")
-        tapImeText("你好")
-        waitForHost("你好")
+            val after = memorySnapshot()
+            reportMemory(before, after)
+            ensureChinese()
+            typeChinese("nihao")
+            tapImeText("你好")
+            waitForHost("你好")
+        } finally { settings.editorPreview = originalPreview }
     }
 
     fun testExpandedCandidatesKeepImeHeightAcrossDefaultLightDarkAndLowLayouts() {

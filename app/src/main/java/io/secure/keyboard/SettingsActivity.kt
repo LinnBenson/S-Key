@@ -59,6 +59,13 @@ open class SettingsActivity : ComponentActivity() {
     private var enabledIme by mutableStateOf(false)
     private var selectedIme by mutableStateOf(false)
     private val voiceObserver: (ModelImportCoordinator.State) -> Unit = { voiceState = it }
+    // Keep document callbacks registered while the privacy-sensitive Compose UI is hidden.
+    private val dictionaryPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { builtinModel.importFile(it) }
+    }
+    private val dictionaryExporter = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        builtinModel.exportFile(uri)
+    }
     private val micPicker = registerForActivityResult(ActivityResultContracts.RequestPermission()) { microphone = it }
     private val modelPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         uri?.let { ModelImportTransfer.start(applicationContext, it) }
@@ -206,7 +213,9 @@ open class SettingsActivity : ComponentActivity() {
                     return@Scaffold
                 }
                 if (route == "builtin_dictionaries") {
-                    BuiltinDictionaryScreen(Modifier.padding(padding), builtinModel)
+                    BuiltinDictionaryScreen(Modifier.padding(padding), builtinModel,
+                        onImport={ launch { dictionaryPicker.launch(arrayOf("*/*")) } },
+                        onExport={ filename -> launch { dictionaryExporter.launch(filename) } })
                     return@Scaffold
                 }
                 key(route) {

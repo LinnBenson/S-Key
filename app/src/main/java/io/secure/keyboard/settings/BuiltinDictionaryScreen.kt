@@ -3,8 +3,6 @@ package io.secure.keyboard.settings
 import android.app.Application
 import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,7 +30,6 @@ import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.flow.first
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
 import io.secure.keyboard.dictionaries.DictionaryRepository
 import io.secure.keyboard.dictionaries.DictionarySource
 import io.secure.keyboard.ui.KeyboardIcons
@@ -62,7 +59,9 @@ internal class BuiltinDictionaryModel(app: Application, private val savedState: 
     var pendingImportKind: String
         get() = savedState["importKind"] ?: "wubi"
         set(value) { savedState["importKind"] = value }
-    var pendingExport: Long?=null
+    var pendingExport: Long?
+        get() = savedState["exportId"]
+        set(value) { savedState["exportId"] = value }
     val unsaved get()=page?.let { text!=it.text } == true
     init { run {} }
     fun run(message: String?=null, waitUntilReady: Boolean=false, work: ()->Unit) {
@@ -83,6 +82,24 @@ internal class BuiltinDictionaryModel(app: Application, private val savedState: 
                 status=message ?: if(dirty) "有更改待编译" else "当前词库已应用"
             } catch(e: Exception) { status=e.message ?: "操作失败，当前生效词库未改变" }
             finally { busy=false }
+        }
+    }
+    fun importFile(uri: android.net.Uri) {
+        val kind=pendingImportKind
+        run("文件已导入，编译后生效", waitUntilReady=true) {
+            val resolver=getApplication<Application>().contentResolver
+            val name=resolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use {
+                if(it.moveToFirst()) it.getString(0) else null
+            } ?: error("无法获取文件名")
+            repository.addFile(name,kind,resolver.openInputStream(uri) ?: error("无法打开文件"),replaceExisting=true)
+        }
+    }
+    fun exportFile(uri: android.net.Uri?) {
+        val id=pendingExport
+        pendingExport=null
+        if(uri!=null && id!=null) run("原始文件已导出", waitUntilReady=true) {
+            val resolver=getApplication<Application>().contentResolver
+            repository.export(id,resolver.openOutputStream(uri,"wt") ?: error("无法写入文件"))
         }
     }
     fun open(lib: DictionaryRepository.Library,start: Int=0) {
@@ -141,25 +158,13 @@ internal class BuiltinDictionaryModel(app: Application, private val savedState: 
 }
 private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"拼音"; else->"英文" }
 
-@Composable internal fun BuiltinDictionaryScreen(modifier: Modifier=Modifier,model: BuiltinDictionaryModel=viewModel()) {
+@Composable internal fun BuiltinDictionaryScreen(
+    modifier: Modifier=Modifier,
+    model: BuiltinDictionaryModel,
+    onImport: () -> Unit,
+    onExport: (String) -> Unit,
+) {
     val colors=MiuixTheme.colorScheme
-    val picker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if(uri!=null) {
-            val kind=model.pendingImportKind
-            model.run("文件已导入，编译后生效", waitUntilReady=true) {
-                val resolver=model.getApplication<Application>().contentResolver
-                val name=resolver.query(uri,arrayOf(OpenableColumns.DISPLAY_NAME),null,null,null)?.use { if(it.moveToFirst()) it.getString(0) else null } ?: error("无法获取文件名")
-                model.repository.addFile(name,kind,resolver.openInputStream(uri) ?: error("无法打开文件"),replaceExisting=true)
-            }
-        }
-    }
-    val exporter=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        val id=model.pendingExport; model.pendingExport=null
-        if(uri!=null && id!=null) model.run("原始文件已导出") {
-            val resolver=model.getApplication<Application>().contentResolver
-            model.repository.export(id,resolver.openOutputStream(uri,"wt") ?: error("无法写入文件"))
-        }
-    }
     BackHandler(enabled=model.selected!=null) { model.back() }
     val lib=model.selected
     Column(modifier.fillMaxSize().imePadding()) {
@@ -274,7 +279,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
         } }
         TextField(value=model.filename,onValueChange={model.filename=it},label="文件名")
         Text("同名文件校验通过后将覆盖原内容，编译后生效。",fontSize=12.sp,color=colors.onSurfaceSecondary)
-        TextButton(text="从文件导入",modifier=Modifier.fillMaxWidth(),onClick={model.pendingImportKind=model.kind;model.showAdd=false;picker.launch(arrayOf("*/*"))})
+        TextButton(text="从文件导入",modifier=Modifier.fillMaxWidth(),onClick={model.pendingImportKind=model.kind;model.showAdd=false;onImport()})
         Button(colors=ButtonDefaults.buttonColorsPrimary(),onClick={
             val filename=model.filename;val kind=model.kind
             val content=if(filename.endsWith(".yaml") || filename.endsWith(".yml")) "# 自定义词库\n---\nname: custom\nversion: \"1\"\nsort: by_weight\n...\n" else "# ${if(kind=="english") "单词\\t词频" else "文字\\t编码\\t词频"}\n"
@@ -284,7 +289,7 @@ private fun kindLabel(kind: String)=when(kind) { "wubi"->"五笔"; "pinyin"->"�
     if(model.showMenu && lib!=null) modal({model.showMenu=false}) {
         Text("文件操作",fontSize=20.sp,fontWeight=FontWeight.SemiBold)
         if (!model.repository.protectedFilename(lib.filename)) BasicComponent(title="重命名",onClick={model.showMenu=false;model.guard {model.rename=lib.filename}})
-        BasicComponent(title="导出原始文件",onClick={model.showMenu=false;model.guard {model.pendingExport=lib.id;exporter.launch(lib.filename)}})
+        BasicComponent(title="导出原始文件",onClick={model.showMenu=false;model.guard {model.pendingExport=lib.id;onExport(lib.filename)}})
         if (!model.repository.protectedFilename(lib.filename)) BasicComponent(title="删除文件",onClick={model.showMenu=false;model.confirmation="删除 ${lib.filename}？编译前仍使用旧版词库。" to {
             model.selected=null;model.page=null;model.text="";model.run("文件已删除，请编译后生效") {model.repository.deleteLibrary(lib.id)}
         }})
