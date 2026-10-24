@@ -694,7 +694,7 @@ class RapidTypingTest : InstrumentationTestCase() {
             assertFalse(field<Boolean>("heldVoice"))
             up(7)
         }
-        // Auto-spacing can commit asynchronously; do not assert before its worker completes.
+        // Wait for the dispatched touch-release event to reach the host.
         waitFor("Below the cursor threshold, release remains an ordinary space", 5000) {
             editor.text.toString() == " "
         }

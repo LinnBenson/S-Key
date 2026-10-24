@@ -2482,13 +2482,22 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 settings.autoChineseSpacing = true
                 host.editor.setText("中文")
                 host.editor.setSelection(1)
+                service.session.prefetchSpacingContext()
+            }
+            waitFor("Initial surrounding context") { service.session.spacingContext.has(host.connection) }
+            onMainChecked {
                 invoke("commitInputText", "a")
             }
             waitFor("Spaced middle insertion") { host.editor.text.toString() == "中 a 文" }
             onMainChecked { invoke("commitInputText", "a") }
             waitFor("Word stays contiguous") { host.editor.text.toString() == "中 aa 文" }
             onMainChecked {
+                val old = host.editor.selectionStart
                 host.editor.setSelection(host.editor.length())
+                service.session.onUpdateSelection(old, old, host.editor.length(), host.editor.length(), -1, -1)
+            }
+            waitFor("Moved surrounding context") { service.session.spacingContext.has(host.connection) }
+            onMainChecked {
                 invoke("commitInputText", "123")
             }
             waitFor("Digits spaced") { host.editor.text.toString() == "中 aa 文 123" }
@@ -2928,69 +2937,114 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         } finally { onMainChecked { settings.editorPreview=false; invoke("clearPending") } }
     }
 
-    fun testEditorPreviewSpacingQueuesWithoutBlockingAndPreservesOrder() {
+    fun testEditorPreviewSpacingCommitsImmediatelyWithoutClearingOrQueueing() {
         val host = attachActualHost()
         val settings = SettingsStore(context)
+        onMainChecked { settings.editorPreview = true; settings.autoChineseSpacing = true }
+        query(true, "wgkq")
+        val expected = field<List<String>>("candidateTexts").first()
+        val release = gateWorker()
+        val spacingRelease = gateSpacingWorker()
         try {
-            onMainChecked { settings.editorPreview = true; settings.autoChineseSpacing = true }
-            query(true, "wgkq")
-            val expected = field<List<String>>("candidateTexts").first()
-            val release = gateWorker()
-            try {
-                onMainChecked {
-                    invoke("space")
-                    assertTrue("Spacing waits on the worker without blocking UI", field<Boolean>("spacingPending"))
-                    invoke("type", "!")
-                    assertTrue("Following key stays ordered", field<ArrayDeque<*>>("queuedKeys").isNotEmpty())
-                }
-            } finally { release.countDown() }
-            waitFor("Spaced candidate and queued punctuation committed") { host.editor.text.toString() == expected + "!" }
-            onMainChecked { assertFalse(field<Boolean>("spacingPending")) }
-        } finally { onMainChecked {
-            settings.editorPreview = false
-            settings.autoChineseSpacing = false
-            invoke("clearPending")
-        } }
+            onMainChecked {
+                var cleared = 0
+                host.connection.onComposingCleared = { cleared++ }
+                invoke("space")
+                assertEquals("Candidate replaces preview before returning", expected, host.editor.text.toString())
+                assertEquals("No intermediate empty composition", 0, cleared)
+                invoke("type", "!")
+                assertEquals(expected + "!", host.editor.text.toString())
+                assertTrue(field<ArrayDeque<*>>("queuedKeys").isEmpty())
+            }
+        } finally { release.countDown(); spacingRelease.countDown() }
     }
 
     fun testPreviewSpacingPreservesSurroundingTextAndContinuousChinese() {
         val host = attachActualHost()
         val settings = SettingsStore(context)
-        try {
-            onMainChecked {
-                settings.editorPreview = true; settings.autoChineseSpacing = true
-                host.editor.setText("ab"); host.editor.setSelection(1)
-                service.session.editorPreview.update(host.connection, "ni", 1, 1)
-                assertEquals("anib", host.editor.text.toString())
-                assertTrue(service.session.commitInputText("你"))
-                service.session.clearComposition()
-                assertTrue(service.session.commitInputText("好"))
-            }
-            waitFor("Ordered spacing keeps both surrounding characters") { host.editor.text.toString() == "a 你好 b" }
-            onMainChecked { assertEquals(4, host.editor.selectionStart) }
-        } finally { onMainChecked { settings.autoChineseSpacing = false; settings.editorPreview = false; invoke("clearPending") } }
+        onMainChecked {
+            settings.editorPreview = true; settings.autoChineseSpacing = true
+        }
+        instrumentation.waitForIdleSync()
+        onMainChecked {
+            host.editor.setText("ab"); host.editor.setSelection(1)
+            service.session.onUpdateSelection(0, 0, 1, 1, -1, -1)
+            service.session.prefetchSpacingContext()
+        }
+        waitFor("Spacing context prefetched") { service.session.spacingContext.has(host.connection) }
+        onMainChecked {
+            setField("code", "ni")
+            service.session.editorPreview.update(host.connection, "ni", 1, 1)
+            assertTrue(service.session.editorPreview.owns(host.connection))
+            assertEquals("Host must still own the actual composing span", 1, BaseInputConnection.getComposingSpanStart(host.editor.text))
+            assertEquals(1, service.session.editorPreview.startOffset)
+            var cleared = 0
+            host.connection.onComposingCleared = { cleared++ }
+            assertTrue(service.session.commitInputText("你"))
+            assertEquals("a 你 b", host.editor.text.toString())
+            assertEquals(3, host.editor.selectionStart)
+            service.session.clearComposition()
+            assertTrue(service.session.commitInputText("好"))
+            assertEquals("a 你好 b", host.editor.text.toString())
+            assertEquals(4, host.editor.selectionStart)
+            assertEquals(0, cleared)
+        }
     }
 
-    fun testPreviewSpacingRejectsCommitAfterExternalCursorMove() {
+    fun testPreviewSpacingLateContextCannotMoveExternalCursor() {
         val host = attachActualHost()
         val settings = SettingsStore(context)
-        val release = gateWorker()
+        val release = gateSpacingWorker()
         try {
             onMainChecked {
                 settings.editorPreview = true; settings.autoChineseSpacing = true
                 host.editor.setText("ab"); host.editor.setSelection(1)
                 service.session.editorPreview.update(host.connection, "ni", 1, 1)
+                service.session.prefetchSpacingContext()
                 assertTrue(service.session.commitInputText("你"))
-                host.editor.setSelection(2)
-                service.session.onUpdateSelection(1, 1, 2, 2, -1, -1)
+                assertEquals("a你b", host.editor.text.toString())
+                host.editor.setSelection(0)
+                service.session.onUpdateSelection(2, 2, 0, 0, -1, -1)
             }
-            release.countDown(); drainWorker()
+            release.countDown()
+            val done = CountDownLatch(1)
+            service.session.spacingContext.worker.execute { done.countDown() }
+            assertTrue(done.await(10, TimeUnit.SECONDS))
+            instrumentation.waitForIdleSync()
             onMainChecked {
-                assertEquals("ab", host.editor.text.toString())
-                assertEquals(2, host.editor.selectionStart)
-                assertTrue(host.connection.commits.isEmpty())
+                assertEquals("a你b", host.editor.text.toString())
+                assertEquals(0, host.editor.selectionStart)
+                assertEquals(listOf("你"), host.connection.commits)
             }
-        } finally { release.countDown(); onMainChecked { settings.autoChineseSpacing = false; settings.editorPreview = false; invoke("clearPending") } }
+        } finally { release.countDown() }
+    }
+
+    fun testSlowSpacingPrefetchDoesNotBlockNewCandidates() {
+        val host = attachActualHost()
+        onMainChecked { SettingsStore(context).apply { editorPreview = true; autoChineseSpacing = true } }
+        val release = gateSpacingWorker()
+        try {
+            query(true, "wgkq")
+            onMainChecked {
+                val expected = field<List<String>>("candidateTexts").first()
+                invoke("space")
+                assertEquals(expected, host.editor.text.toString())
+                invoke("type", "a")
+                assertEquals("a", field<String>("code"))
+            }
+            waitFor("Fresh candidates arrive while spacing remains blocked") {
+                field<String>("candidateQuery") == "a" && field<List<String>>("candidateTexts").isNotEmpty()
+            }
+        } finally { release.countDown() }
+    }
+
+    private fun gateSpacingWorker(): CountDownLatch {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        releases.add(release)
+        service.session.spacingContext.worker.execute { started.countDown(); release.await(15, TimeUnit.SECONDS) }
+        assertTrue(started.await(15, TimeUnit.SECONDS))
+        return release
     }
 
     fun testEditorPreviewMissingSpanDoesNotCancelOwnCursorUpdate() {

@@ -14,7 +14,9 @@ import io.secure.keyboard.ime.KeyboardSession.PendingConfirmation
 /** Input composition, commit ordering and editor interaction. */
 internal object InputController {
     internal fun KeyboardSession.clearPendingImpl() {
-        spacingEpoch++; spacingPending = false; spacingTexts.clear(); spacingExpectedCursors.clear()
+        spacingContext.invalidate()
+        queueEpoch++
+        spacingExpectedCursors.clear()
         pendingConfirmation = null
         englishConfirmation = null
         queueReplayPosted = false
@@ -244,15 +246,16 @@ internal object InputController {
             type and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT &&
             variation !in listOf(android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
                 android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, android.text.InputType.TYPE_TEXT_VARIATION_URI)
-        // Spacing needs host context. Use the ordered worker path below even when preedit
-        // owns the composing span; never synchronously query another editor from the UI.
-        if (editorPreview.owns(previewTarget) && !spaced) {
+        // Replace the composing span in one edit. Context is optional: a slow host must
+        // never hold up confirmation, erase preedit first, or patch the cursor afterwards.
+        if (editorPreview.owns(previewTarget) || spaced) {
             val connection = previewTarget ?: return false
-            val start = editorPreview.startOffset
-            val edit = ChineseSpacing.Edit(value, false)
+            val ownsPreview = editorPreview.owns(connection)
+            val start = if (ownsPreview) editorPreview.startOffset else spacingCursor
+            val edit = if (spaced) spacingContext.format(connection, value, start >= 0) else ChineseSpacing.Edit(value, false)
             val output = outputText(edit.text)
-            for (cursor in editorPreview.cursorsOnClear() +
-                listOfNotNull((start + output.length - if (edit.trailingSpace) 1 else 0).takeIf { start >= 0 })) {
+            val end = (start + output.length - if (edit.trailingSpace) 1 else 0).takeIf { start >= 0 }
+            for (cursor in editorPreview.cursorsOnCommit() + listOfNotNull((start + output.length).takeIf { start >= 0 }, end)) {
                 if (spacingExpectedCursors.size >= 1024) spacingExpectedCursors.removeFirst()
                 spacingExpectedCursors.addLast(cursor)
             }
@@ -260,23 +263,23 @@ internal object InputController {
             syncingAssistantEditor = true
             connection.beginBatchEdit()
             val accepted = try {
-                editorPreview.commit(output).also { committed ->
-                    if (committed && edit.trailingSpace && start >= 0)
-                        connection.setSelection(start + output.length - 1, start + output.length - 1)
+                // Batch the optional suffix cursor placement with the replacement so the
+                // host sees the final position, never an empty composing span between edits.
+                (if (ownsPreview) editorPreview.commit(output) else connection.commitText(output, 1)).also { committed ->
+                    if (committed && edit.trailingSpace && end != null)
+                        connection.setSelection(end, end)
                 }
             } finally {
                 connection.endBatchEdit()
                 syncingAssistantEditor = wasSyncing
             }
-            if (accepted) spaceGlossaryCommitted(output.length, glossary, committed = output)
+            if (accepted) {
+                if (spaced) spacingContext.committed(connection, output, edit.trailingSpace)
+                else spacingContext.invalidate()
+                spaceGlossaryCommitted(output.length, glossary, end,
+                    committed = if (spaced) value.takeIf { it.length in 2..4 }?.let(::outputText) else output)
+            } else spacingContext.invalidate()
             return accepted
-        }
-        if (spaced) {
-            if (spacingTexts.size >= 1024) return false
-            if (!clearEditorPreview(expectCursorUpdate = true)) return false
-            spacingTexts.addLast(InputState.SpacedText(value, glossary))
-            if (!spacingPending) commitNextSpacedText()
-            return true
         }
         val output = outputText(value)
         val connection = currentInputConnection ?: return false
@@ -284,52 +287,10 @@ internal object InputController {
         val accepted = try { connection.commitText(output, 1) }
             finally { connection.endBatchEdit() }
         if (accepted) {
+            spacingContext.invalidate()
             spaceGlossaryCommitted(output.length, glossary, committed = output)
-        }
+        } else spacingContext.invalidate()
         return accepted
-    }
-
-    internal fun KeyboardSession.commitNextSpacedTextImpl() {
-        val connection = currentInputConnection ?: run { spacingTexts.clear(); spacingPending=false; return }
-        val pending = spacingTexts.removeFirstOrNull() ?: run { spacingPending=false; replayQueuedKeys(); return }
-        val value = pending.text
-        spacingPending = true
-        val token = spacingEpoch
-        val editor = voiceEditorGeneration
-        val selectionEpoch = spacingSelectionVersion
-        worker.execute {
-            val selection = readVoiceSelection(connection)
-            val edit = runCatching {
-                val before = connection.getTextBeforeCursor(2, 0)?.toString() ?: ""
-                val after = connection.getTextAfterCursor(2, 0)?.toString() ?: ""
-                // Without absolute selection coordinates avoid adding a suffix we cannot place the cursor before.
-                ChineseSpacing.format(value, before, if (selection == null) "" else after)
-            }.getOrElse { ChineseSpacing.format(value) }
-            main.post {
-                if (token != spacingEpoch) return@post
-                if (!active || secret || editor != voiceEditorGeneration || connection !== currentInputConnection ||
-                    selectionEpoch != spacingSelectionVersion) { spacingPending=false; spacingTexts.clear(); queuedKeys.clear(); return@post }
-                val convertedText = outputText(edit.text)
-                if (selection != null) {
-                    if (spacingExpectedCursors.size >= 1024) spacingExpectedCursors.removeFirst()
-                    spacingExpectedCursors.addLast(minOf(selection.first, selection.second) + convertedText.length - if (edit.trailingSpace) 1 else 0)
-                }
-                connection.beginBatchEdit()
-                try {
-                    val accepted = connection.commitText(convertedText, 1)
-                    if (accepted && edit.trailingSpace && selection != null) {
-                        val cursor = minOf(selection.first, selection.second) + convertedText.length - 1
-                        connection.setSelection(cursor, cursor)
-                    }
-                    if (accepted) spaceGlossaryCommitted(convertedText.length, pending.glossary,
-                        selection?.let { minOf(it.first, it.second) + convertedText.length - if (edit.trailingSpace) 1 else 0 },
-                        committed = value.takeIf { it.length in 2..4 }?.let(::outputText))
-                } finally { connection.endBatchEdit() }
-                spacingPending=false
-                if (spacingTexts.isNotEmpty()) commitNextSpacedText() else replayQueuedKeys()
-                refreshCandidates()
-            }
-        }
     }
 
     internal fun KeyboardSession.commitImpl(value: String) {
@@ -360,7 +321,7 @@ internal object InputController {
     internal fun KeyboardSession.dispatchKeyImpl(key: QueuedKey) {
         dismissQuickPasteOnInput()
         if (key != QueuedKey.Backspace) assistantBackspaceTapAt = 0L
-        if (pendingConfirmation != null || englishConfirmation != null || queueReplayPosted || spacingPending) {
+        if (pendingConfirmation != null || englishConfirmation != null || queueReplayPosted) {
             if (queuedKeys.size >= 1024) {
                 if (!queueSaturationNotified) {
                     queueSaturationNotified = true
@@ -509,15 +470,15 @@ internal object InputController {
 
     internal fun KeyboardSession.replayQueuedKeysImpl() {
         if (queueReplayPosted) return
-        while (active && pendingConfirmation == null && englishConfirmation == null && !spacingPending && queuedKeys.isNotEmpty()) {
+        while (active && pendingConfirmation == null && englishConfirmation == null && queuedKeys.isNotEmpty()) {
             val key = queuedKeys.removeFirst()
             applyKey(key)
             if (key == QueuedKey.Backspace || key == QueuedKey.RepeatedBackspace || key == QueuedKey.Enter) {
                 // Host key events are dispatched asynchronously. Let them run before a later commit.
-                val epoch = spacingEpoch
+                val epoch = queueEpoch
                 queueReplayPosted = true
                 main.post {
-                    if (epoch == spacingEpoch) {
+                    if (epoch == queueEpoch) {
                         queueReplayPosted = false
                         replayQueuedKeys()
                     }

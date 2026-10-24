@@ -255,6 +255,7 @@ internal object PanelController {
         }
         // The platform IME helper marks both events SOFT_KEYBOARD and KEEP_TOUCH_MODE.
         // Cursor swipes/backspace must not put the host into hardware-keyboard focus mode.
+        spacingContext.invalidate()
         sendDownUpKeyEvents(key)
     }
 

@@ -112,6 +112,29 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal val contentQueries = LatestTaskMailbox(worker)
     @Volatile internal var destroyed = false
     internal val main = Handler(Looper.getMainLooper())
+    internal val spacingContext = SpacingContext(main)
+    internal val spacingCursor: Int get() = spacingExpectedCursors.lastOrNull() ?: minOf(glossarySelectionStart, glossarySelectionEnd)
+
+    internal fun prefetchSpacingContext() {
+        if (!active || secret || translation.enabled || !settings.autoChineseSpacing) { spacingContext.invalidate(); return }
+        val type = currentInputEditorInfo?.inputType ?: 0
+        val variation = type and android.text.InputType.TYPE_MASK_VARIATION
+        if (type and android.text.InputType.TYPE_MASK_CLASS != android.text.InputType.TYPE_CLASS_TEXT ||
+            variation in listOf(android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+                android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, android.text.InputType.TYPE_TEXT_VARIATION_URI)) {
+            spacingContext.invalidate(); return
+        }
+        val connection = currentInputConnection ?: return
+        val editor = voiceEditorGeneration
+        val selection = spacingSelectionVersion
+        val previewRevision = editorPreview.revision
+        val composing = if (editorPreview.owns(connection)) editorPreview.composingText else ""
+        spacingContext.prefetch(connection, composing) {
+            active && !destroyed && !secret && !translation.enabled && settings.autoChineseSpacing &&
+                currentInputConnection === connection && editor == voiceEditorGeneration &&
+                selection == spacingSelectionVersion && previewRevision == editorPreview.revision
+        }
+    }
     internal var loaded = false
     internal var dictionaryLoadFailed = false
     @Volatile internal var generation = 0
@@ -142,11 +165,9 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var pendingConfirmation by inputState::pendingConfirmation
     internal var queueReplayPosted by inputState::queueReplayPosted
     internal var englishConfirmation by inputState::englishConfirmation
-    internal var spacingPending by inputState::spacingPending
-    internal var spacingEpoch by inputState::spacingEpoch
+    internal var queueEpoch by inputState::queueEpoch
     internal var spacingSelectionVersion by inputState::spacingSelectionVersion
     internal val spacingExpectedCursors by inputState::spacingExpectedCursors
-    internal val spacingTexts by inputState::spacingTexts
     internal val queuedKeys by inputState::queuedKeys
     internal var queueSaturationNotified by inputState::queueSaturationNotified
     internal var candidatePager: io.secure.keyboard.engine.CandidatePager<io.secure.keyboard.engine.PinyinDecoder.Option>? = null
@@ -383,7 +404,8 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
                 if (!settings.quickPaste) quickPasteState.clear()
                 if (active) renderHeader()
             }
-            else if (key == "editorPreview") main.post { syncEditorPreview(); if (active) renderHeader() }
+            else if (key == "editorPreview") main.post { syncEditorPreview(); prefetchSpacingContext(); if (active) renderHeader() }
+            else if (key == "autoChineseSpacing") main.post { spacingContext.invalidate(); prefetchSpacingContext() }
             else if (key == "spaceEnglishGloss" && !settings.spaceEnglishGloss) {
                 // Revoke this generation immediately, even if the switch is turned back on.
                 if (Looper.myLooper() == main.looper) releaseSpaceGlossary()
@@ -590,6 +612,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         aiVoice?.release(); aiVoice=null
         voice?.release()
         voiceEditorWorker.shutdownNow()
+        spacingContext.close()
         worker.shutdownNow()
         main.removeCallbacksAndMessages(null)
     }
@@ -602,6 +625,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         candidatesStart: Int,
         candidatesEnd: Int,
     ) {
+        val previewCursorUpdate = editorPreview.expectsCursor(newSelStart, newSelEnd)
         val ownCursorUpdate = newSelStart == newSelEnd && newSelStart in spacingExpectedCursors
         if (!ownCursorUpdate && previewEditor == null && editorPreview.selectionChanged(newSelStart, newSelEnd, candidatesStart, candidatesEnd,
                 oldSelStart != newSelStart || oldSelEnd != newSelEnd)) {
@@ -618,7 +642,11 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             } else releaseSpaceGlossary()
             val expected = if (newSelStart == newSelEnd) spacingExpectedCursors.indexOf(newSelStart) else -1
             if (expected >= 0) repeat(expected + 1) { spacingExpectedCursors.removeFirst() }
-            else { spacingSelectionVersion++; spacingExpectedCursors.clear() }
+            else if (!previewCursorUpdate) {
+                spacingSelectionVersion++; spacingExpectedCursors.clear()
+                spacingContext.invalidate()
+                prefetchSpacingContext()
+            }
             // This callback describes the HOST editor, not the assistant's local EditText.
             // Delayed host cursor acknowledgements must not discard an inline voice result.
             // Actual editor replacement is still revoked by voiceEditorGeneration/lifecycle;
@@ -717,7 +745,6 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     @JvmOverloads
     fun commitInputText(value: String, glossary: Boolean = false) : Boolean = with(InputController) { commitInputTextImpl(value, glossary) }
 
-    fun commitNextSpacedText() = with(InputController) { commitNextSpacedTextImpl() }
 
     fun commit(value: String) = with(InputController) { commitImpl(value) }
 

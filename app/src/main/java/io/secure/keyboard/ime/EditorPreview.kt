@@ -4,6 +4,12 @@ import android.view.inputmethod.InputConnection
 
 /** Owns only the current editor's temporary composing span, never surrounding text. */
 internal class EditorPreview {
+    var revision = 0L
+        private set
+    val composingText: String get() = text
+    fun expectsCursor(cursor: Int, end: Int) = connection != null && cursor == end &&
+        (cursor in expectedCursors || (start >= 0 && cursor == start + text.length))
+
     private var connection: InputConnection? = null
     private var text = ""
     private var start = -1
@@ -16,6 +22,7 @@ internal class EditorPreview {
         if (connection == null && selectionStart >= 0 && selectionEnd >= 0)
             start = minOf(selectionStart, selectionEnd)
         if (runCatching { target.setComposingText(value, 1) }.getOrDefault(false)) {
+            revision++
             connection = target
             text = value
             if (start >= 0) {
@@ -24,6 +31,8 @@ internal class EditorPreview {
             }
         }
     }
+
+    fun cursorsOnCommit(): List<Int> = expectedCursors.toList()
 
     /** Cursor acknowledgements may arrive after the preview was removed for an ordered commit. */
     fun cursorsOnClear(): List<Int> = if (connection != null && start >= 0)
@@ -52,6 +61,7 @@ internal class EditorPreview {
     }
 
     private fun forget() {
+        revision++
         connection = null
         text = ""
         start = -1

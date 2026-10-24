@@ -14,13 +14,10 @@ internal class InputState {
     var code = ""
     var pendingConfirmation: PendingConfirmation? = null
     var queueReplayPosted = false
+    var queueEpoch = 0
     var englishConfirmation: Int? = null
-    var spacingPending = false
-    var spacingEpoch = 0
     var spacingSelectionVersion = 0
     val spacingExpectedCursors = ArrayDeque<Int>()
-    data class SpacedText(val text: String, val glossary: Boolean)
-    val spacingTexts = ArrayDeque<SpacedText>()
     val queuedKeys = ArrayDeque<QueuedKey>()
     var queueSaturationNotified = false
     var secret = false

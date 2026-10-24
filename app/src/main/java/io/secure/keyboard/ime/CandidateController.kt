@@ -70,6 +70,7 @@ internal object CandidateController {
 
     internal fun KeyboardSession.refreshCandidatesImpl() {
         syncEditorPreview()
+        prefetchSpacingContext()
         cancelCandidateQueries()
         candidatePager = null
         candidatePageLoading = false

@@ -11,7 +11,7 @@ internal fun sessionWorkers(service: OfflineKeyboardService): List<ExecutorServi
     val voiceWorker = session.voice?.let {
         OfflineVoiceSession::class.java.getDeclaredField("worker").apply { isAccessible = true }.get(it) as ExecutorService
     }
-    return listOfNotNull(session.worker, session.emojiWorker, session.voiceEditorWorker,
+    return listOfNotNull(session.worker, session.spacingContext.worker, session.emojiWorker, session.voiceEditorWorker,
         session.aiWorker, session.translationWorker, voiceWorker)
 }
 internal fun awaitStoppedWorkers(workers: List<ExecutorService>) {

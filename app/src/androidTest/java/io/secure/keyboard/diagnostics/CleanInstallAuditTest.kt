@@ -44,15 +44,17 @@ class CleanInstallAuditTest : InstrumentationTestCase() {
                 fixture.set("active", true)
                 fixture.service.session.editorPreview.update(connection, "ni", 0, 0)
                 readsOnMain = 0
-                fixture.service.session.commitInputText("你")
+                fixture.service.session.prefetchSpacingContext()
             }
+            fixture.await("Spacing reads completed off main") { fixture.service.session.spacingContext.has(connection) }
+            instrumentation.checkedMain { fixture.service.session.commitInputText("你") }
             fixture.await("Spaced preview commit reaches host") { fixture.host.commits == 1 }
             instrumentation.sendStatus(0, Bundle().apply { putInt("preview_spacing_main_thread_reads", readsOnMain) })
             assertEquals("Surrounding-text reads must not block the keyboard main thread", 0, readsOnMain)
         } finally { fixture.close() }
     }
 
-    fun testPendingPreviewSpacingCannotCommitAfterEditorEnds() {
+    fun testPreviewSpacingDoesNotLeaveDelayedCommitAfterEditorEnds() {
         val fixture = LifetimeServiceFixture(instrumentation)
         val release = java.util.concurrent.CountDownLatch(1)
         try {
@@ -67,14 +69,14 @@ class CleanInstallAuditTest : InstrumentationTestCase() {
                 fixture.set("active", true)
                 fixture.service.session.editorPreview.update(fixture.host, "ni", 0, 0)
                 assertTrue(fixture.service.session.commitInputText("你"))
-                assertTrue(fixture.service.session.inputState.spacingPending)
+                assertEquals(1, fixture.host.commits)
                 fixture.service.onFinishInputView(false)
                 fixture.service.onFinishInput()
             }
             release.countDown()
             fixture.drain(worker)
             instrumentation.waitForIdleSync()
-            assertEquals("Retired editor must never receive delayed text", 0, fixture.host.commits)
+            assertEquals("Retired editor must never receive another delayed edit", 1, fixture.host.commits)
         } finally { release.countDown(); fixture.close() }
     }
 
