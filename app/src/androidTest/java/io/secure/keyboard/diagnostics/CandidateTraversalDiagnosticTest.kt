@@ -15,7 +15,7 @@ import org.json.JSONObject
 /** Full logical reachability plus actually visited strip/view memory; no eager bind shortcut. */
 @Suppress("DEPRECATION")
 class CandidateTraversalDiagnosticTest : InstrumentationTestCase() {
-    fun testTenThousandCandidatesToEndAndBackThenReleaseNoForcedGc() {
+    fun testTenThousandCandidatesNaturalRecoveryThenSeparateCollectibility() {
         val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as Activity
         val probe = LifetimeMemoryProbe(instrumentation.targetContext, "candidate-traversal")
@@ -23,6 +23,7 @@ class CandidateTraversalDiagnosticTest : InstrumentationTestCase() {
         lateinit var row: LinearLayout
         lateinit var grid: CandidateGrid
         var chosen = ""
+        var retiredLabels = emptyList<java.lang.ref.WeakReference<android.view.View>>()
         try {
             instrumentation.checkedMain {
                 strip = CandidateStrip(activity, Color.BLACK, Color.BLUE) { chosen = it }
@@ -76,6 +77,7 @@ class CandidateTraversalDiagnosticTest : InstrumentationTestCase() {
                 grid.setSelection(0)
                 (row.getChildAt(0) as TextView).performClick()
                 assertEquals("Backward strip reachability", "合成候选0", chosen)
+                retiredLabels = (0 until row.childCount).map { java.lang.ref.WeakReference(row.getChildAt(it)) }
                 strip.updateCandidates(emptyList())
                 grid.updateCandidates(emptyList())
                 chosen = ""
@@ -85,6 +87,17 @@ class CandidateTraversalDiagnosticTest : InstrumentationTestCase() {
             probe.recover(final = true) { JSONObject().put("stripLabels", row.childCount).put("gridLogicalCount", grid.adapter.count).put("gridAttachedCells", grid.childCount) }
             assertEquals(0, row.childCount)
             assertEquals(0, grid.adapter.count)
+            // Separate attribution diagnostic, after the natural 60-second recovery above.
+            probe.observeWeakReferences("cleared_candidate_labels_forced_gc", retiredLabels, true)
+            val memory = android.os.Debug.MemoryInfo().also(android.os.Debug::getMemoryInfo)
+            instrumentation.sendStatus(0, android.os.Bundle().apply {
+                putString("candidate_collectibility", JSONObject()
+                    .put("labels", retiredLabels.size).put("stillReachable", retiredLabels.count { it.get() != null })
+                    .put("forcedGcRequested", true).put("pssKiB", memory.totalPss)
+                    .put("javaUsedBytes", Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory())
+                    .put("nativeAllocatedBytes", android.os.Debug.getNativeHeapAllocatedSize()).toString())
+            })
+            assertEquals("Cleared candidate labels must be collectible", 0, retiredLabels.count { it.get() != null })
         } finally {
             probe.stop()
             instrumentation.checkedMain { activity.finish() }

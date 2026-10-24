@@ -10,6 +10,7 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
+import androidx.lifecycle.viewModelScope
 import io.secure.keyboard.data.ContentStore
 import io.secure.keyboard.data.SettingsStore
 import org.json.JSONObject
@@ -18,7 +19,7 @@ import java.lang.ref.WeakReference
 import java.security.MessageDigest
 import java.util.UUID
 
-/** Test-only stores, injected at super.onCreate before the real SettingsActivity renders. */
+/** Isolated ViewModels, installed at super.onCreate before the production Compose screen renders. */
 internal class SettingsUiFixture(private val instrumentation: Instrumentation) : AutoCloseable {
     val context = IsolatedContext(instrumentation.targetContext)
     val content = ContentStore(context)
@@ -29,6 +30,7 @@ internal class SettingsUiFixture(private val instrumentation: Instrumentation) :
         private set
     val destroyedActivities = mutableListOf<WeakReference<Activity>>()
     private val live = mutableSetOf<Activity>()
+    private val ownedJobs = mutableSetOf<kotlinx.coroutines.Job>()
     private val application = instrumentation.targetContext.applicationContext as Application
     private val actualPreferences = snapshotPreferences()
     private val actualContent = snapshotContent()
@@ -37,8 +39,23 @@ internal class SettingsUiFixture(private val instrumentation: Instrumentation) :
             if (!owns(activity)) return
             live.add(activity)
             if (activity is SettingsActivity) {
-                field("content").set(activity, content)
-                field("config").set(activity, config)
+                val isolatedApp = object : Application() {
+                    init { attachBaseContext(context) }
+                    override fun getApplicationContext(): Context = this
+                }
+                val factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                    @Suppress("UNCHECKED_CAST")
+                    override fun <T : androidx.lifecycle.ViewModel> create(type: Class<T>): T =
+                        when (type) {
+                            io.secure.keyboard.settings.SettingsModel::class.java -> io.secure.keyboard.settings.SettingsModel(isolatedApp) as T
+                            io.secure.keyboard.settings.BuiltinDictionaryModel::class.java -> io.secure.keyboard.settings.BuiltinDictionaryModel(isolatedApp, androidx.lifecycle.SavedStateHandle()) as T
+                            else -> error("Unexpected fixture ViewModel: $type")
+                        }
+                }
+                val settings = androidx.lifecycle.ViewModelProvider(activity, factory)[io.secure.keyboard.settings.SettingsModel::class.java]
+                val dictionaries = androidx.lifecycle.ViewModelProvider(activity, factory)[io.secure.keyboard.settings.BuiltinDictionaryModel::class.java]
+                for (model in listOf(settings, dictionaries))
+                    model.viewModelScope.coroutineContext[kotlinx.coroutines.Job]?.let { ownedJobs.add(it) }
             }
         }
         override fun onActivityStarted(activity: Activity) { if (owns(activity)) current = activity }
@@ -65,6 +82,12 @@ internal class SettingsUiFixture(private val instrumentation: Instrumentation) :
         try {
             instrumentation.runOnMainSync { live.toList().forEach(Activity::finish) }
             instrumentation.waitForIdleSync()
+            val deadline = android.os.SystemClock.uptimeMillis() + 30000
+            while (ownedJobs.any { !it.isCompleted } && android.os.SystemClock.uptimeMillis() < deadline) {
+                android.os.SystemClock.sleep(20)
+                instrumentation.waitForIdleSync()
+            }
+            check(ownedJobs.all { it.isCompleted }) { "ViewModel work must end before isolated files are removed" }
             assertActualDataUnchanged()
         } finally {
             instrumentation.runOnMainSync {
@@ -73,22 +96,25 @@ internal class SettingsUiFixture(private val instrumentation: Instrumentation) :
                 current = null
             }
             // Delete only the UUID-scoped test directory/preferences that this fixture created.
-            context.root.deleteRecursively()
-            context.deleteOwnedPreferences()
+            if (ownedJobs.all { it.isCompleted }) {
+                context.root.deleteRecursively()
+                context.deleteOwnedPreferences()
+            }
+            ownedJobs.clear()
             destroyedActivities.clear()
         }
     }
 
     private fun owns(activity: Activity) = activity is SettingsActivity || activity is MainActivity || activity is VoiceSetupActivity
-    private fun field(name: String) = SettingsActivity::class.java.getDeclaredField(name).apply { isAccessible = true }
     private fun snapshotPreferences(): Map<String, Any?> = instrumentation.targetContext
         .getSharedPreferences("settings", Context.MODE_PRIVATE).all.mapValues { (_, value) ->
             if (value is Set<*>) value.toSet() else value
         }
     private fun snapshotContent(): Map<String, String> {
-        val directory = File(instrumentation.targetContext.noBackupFilesDir, "content")
-        return if (!directory.exists()) emptyMap() else directory.walkTopDown().filter(File::isFile)
-            .associate { it.relativeTo(directory).path to settingsQaSha256(it) }
+        val root = instrumentation.targetContext.noBackupFilesDir
+        return listOf("content", "private-content").flatMap { name ->
+            File(root, name).walkTopDown().filter(File::isFile).map { it.relativeTo(root).path to settingsQaSha256(it) }.toList()
+        }.toMap()
     }
 
     class IsolatedContext(base: Context) : ContextWrapper(base) {

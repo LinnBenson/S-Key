@@ -60,7 +60,7 @@ class SettingsDefaultsTest {
     @Test
     fun requestedProfilesHaveExactDefaultsAndKeepOtherOptions() {
         assertEquals(
-            SettingsStore.LayoutProfile(heightDp = 285, sideGapDp = 0, bottomGapDp = 0),
+            SettingsStore.LayoutProfile(heightDp = 275, sideGapDp = 0, bottomGapDp = 0),
             SettingsStore.defaultLayoutProfile(outer = true, landscape = false),
         )
         assertEquals(

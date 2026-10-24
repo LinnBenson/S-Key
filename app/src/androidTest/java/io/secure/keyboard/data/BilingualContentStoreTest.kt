@@ -94,7 +94,7 @@ class BilingualContentStoreTest : AndroidTestCase() {
         assertTrue(store.aiPresets().isEmpty())
     }
 
-    fun testLegacyChineseFixtureReadsWithoutRewriteAndEnglishWritesPreserveIt() {
+    fun testLegacyMigrationPreservesDictionaryValuesAndEnglishWritesPreserveIt() {
         val longCode = "Legacy NÜ ' " + "x".repeat(80)
         val original = JSONObject()
             .put("dictionary", org.json.JSONArray().put(JSONObject().put("id", "legacy-one")
@@ -111,12 +111,14 @@ class BilingualContentStoreTest : AndroidTestCase() {
         assertEquals(listOf(longCode, "ABC"), chineseRows.map { it.reading })
         assertTrue(store.dictionary(english).isEmpty())
         assertTrue(ContentStore(sandbox).dictionary(english).isEmpty())
-        assertEquals("Opening an old file must not eagerly migrate it", original, contentFile().readText())
+        assertFalse("Private phrase must migrate out of plaintext", JSONObject(contentFile().readText()).has("phrases"))
+        assertEquals("保留常用语", store.phrases().single().text)
         store.addDictionary("iPhone", "IPHONE", english)
         val changed = JSONObject(contentFile().readText())
         assertEquals(JSONObject(original).getJSONArray("dictionary").toString(), changed.getJSONArray("dictionary").toString())
         assertEquals(JSONObject(original).getJSONObject("futureMetadata").toString(), changed.getJSONObject("futureMetadata").toString())
-        assertEquals(JSONObject(original).getJSONArray("phrases").toString(), changed.getJSONArray("phrases").toString())
+        assertFalse(changed.has("phrases"))
+        assertTrue(store.phrases().single().pinned)
         assertSame(chineseRows, store.dictionary())
         assertEquals(listOf("content.json"), contentFile().parentFile!!.listFiles()!!.map { it.name })
     }
@@ -356,8 +358,8 @@ class BilingualContentStoreTest : AndroidTestCase() {
             val corrupt = JSONObject(original).put("englishDictionary", bad).toString()
             contentFile().writeText(corrupt)
             try {
-                store.phrases()
-                fail("Other-category reads must detect English structural corruption")
+                store.dictionary(chinese)
+                fail("Shared dictionary reads must detect English structural corruption")
             } catch (_: ContentStore.ContentReadException) {}
             for (kind in DictionaryKind.entries) {
                 assertTrue(store.dictionaryRevision(kind) > revisions.getValue(kind))

@@ -99,6 +99,8 @@ class RapidTypingTest : InstrumentationTestCase() {
         sandbox.root.mkdirs()
         app = IsolatedApplication(sandbox)
         SettingsStore(context).let {
+            it.editorPreview = false
+            it.autoChineseSpacing = false
             it.englishCompletion = true
             it.englishSpaceSelectsFirst = true
             it.fourCodeAutoCommit = false
@@ -137,10 +139,12 @@ class RapidTypingTest : InstrumentationTestCase() {
 
     override fun tearDown() {
         releases.forEach { it.countDown() }
+        var workers = emptyList<ExecutorService>()
         onMainChecked {
-            if (::harness.isInitialized) harness.close()
+            if (::harness.isInitialized) { workers = io.secure.keyboard.diagnostics.sessionWorkers(service); harness.close() }
             if (::activity.isInitialized) activity.finish()
         }
+        io.secure.keyboard.diagnostics.awaitStoppedWorkers(workers)
         if (::sandbox.isInitialized) sandbox.close()
         super.tearDown()
     }

@@ -5,7 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Debug
 import android.os.Handler
 import android.os.Looper
-import android.test.AndroidTestCase
+import android.test.InstrumentationTestCase
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
@@ -22,7 +22,21 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Emulator/device tests; fixtures are pushed separately, never packaged in production assets. */
 @Suppress("DEPRECATION")
-class OfflineVoiceInstrumentationTest : AndroidTestCase() {
+class OfflineVoiceInstrumentationTest : InstrumentationTestCase() {
+    private val context get() = instrumentation.targetContext
+    private var activity: android.app.Activity? = null
+    override fun setUp() {
+        super.setUp()
+        // Real microphone capture requires a foreground owner; am instrument restarts the app.
+        activity = instrumentation.startActivitySync(android.content.Intent(context, io.secure.keyboard.MainActivity::class.java)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        instrumentation.waitForIdleSync()
+    }
+    override fun tearDown() {
+        activity?.let { onMain { it.finish() } }
+        super.tearDown()
+    }
+
     private val fixtureDir
         get() = File(context.filesDir, "voice-fixtures")
 
@@ -250,6 +264,48 @@ class OfflineVoiceInstrumentationTest : AndroidTestCase() {
         }
     }
 
+    fun testRecognizerReuseAndTrimMemoryDisposal() {
+        checkFixtures()
+        val installed = File(context.noBackupFilesDir, "mandarin-voice-v1").apply { mkdirs() }
+        for (name in listOf("model.int8.onnx", "tokens.txt")) File(fixtureDir, name).copyTo(File(installed, name), overwrite = true)
+        File(installed, "verified").writeText(ModelRepository.MODEL_ID)
+        val repository = ModelRepository(context)
+        assertTrue(repository.verifyInstalled())
+        val marker = File(installed, "verified").readText()
+        assertTrue(repository.verifyInstalled())
+        assertEquals(marker, File(installed, "verified").readText())
+        val session = OfflineVoiceSession(context, object : OfflineVoiceSession.Listener {
+            override fun onState(state: OfflineVoiceSession.State) {}
+            override fun onPreview(text: String, isFinal: Boolean) {}
+            override fun onError(message: String) { fail(message) }
+        })
+        val worker = OfflineVoiceSession::class.java.getDeclaredField("worker").apply { isAccessible = true }
+            .get(session) as java.util.concurrent.ExecutorService
+        val load = OfflineVoiceSession::class.java.getDeclaredMethod("recognizer", ModelRepository::class.java).apply { isAccessible = true }
+        val cached = OfflineVoiceSession::class.java.getDeclaredField("cachedRecognizer").apply { isAccessible = true }
+        try {
+            assertNull("Native engine stays lazy", cached.get(session))
+            val first = worker.submit<Any> { load.invoke(session, repository) }.get(30, TimeUnit.SECONDS)
+            repeat(12) {
+                assertSame(first, worker.submit<Any> { load.invoke(session, repository) }.get(30, TimeUnit.SECONDS))
+            }
+            onMain { session.trimMemory() }; awaitVoiceWorker(session)
+            assertNull("Trim disposes native engine", cached.get(session))
+            val next = worker.submit<Any> { load.invoke(session, repository) }.get(30, TimeUnit.SECONDS)
+            assertNotSame(first, next)
+        } finally {
+            onMain { session.release() }
+            assertTrue(worker.awaitTermination(30, TimeUnit.SECONDS))
+            assertNull("Destroy disposes native engine", cached.get(session))
+        }
+    }
+
+    private fun awaitVoiceWorker(session: OfflineVoiceSession) {
+        val worker = OfflineVoiceSession::class.java.getDeclaredField("worker").apply { isAccessible = true }
+            .get(session) as java.util.concurrent.ExecutorService
+        worker.submit {}.get(30, TimeUnit.SECONDS)
+    }
+
     fun testMicrophoneCancelReleaseSuppressesLateCallbacks() {
         checkFixtures()
         assertEquals(
@@ -304,8 +360,11 @@ class OfflineVoiceInstrumentationTest : AndroidTestCase() {
                 session.release()
             }
             assertTrue("Microphone failed to start within 30 seconds", started)
-            Thread.sleep(1000)
-            assertNull("Microphone lifecycle or stale callback failure", unexpected.get())
+            val worker = OfflineVoiceSession::class.java.getDeclaredField("worker").apply { isAccessible = true }
+                .get(session) as java.util.concurrent.ExecutorService
+            assertTrue("Native cleanup must finish before opening another session", worker.awaitTermination(30, TimeUnit.SECONDS))
+            onMain { /* Drain any revoked callbacks after native cleanup. */ }
+            assertNull("Microphone lifecycle or stale callback failure: ${unexpected.get()}", unexpected.get())
         }
     }
 
@@ -424,7 +483,7 @@ class OfflineVoiceInstrumentationTest : AndroidTestCase() {
                 done.countDown()
             }
         }
-        assertTrue("Main thread did not respond", done.await(10, TimeUnit.SECONDS))
+        if (!done.await(10, TimeUnit.SECONDS)) fail("Main thread did not respond: " + Looper.getMainLooper().thread.stackTrace.joinToString("\n"))
         error.get()?.let { throw AssertionError("Main thread failure", it) }
     }
 

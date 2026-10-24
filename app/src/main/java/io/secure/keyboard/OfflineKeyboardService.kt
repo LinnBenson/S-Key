@@ -21,6 +21,7 @@ class OfflineKeyboardService : InputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) { session.onFinishInputView(finishingInput); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { session.onFinishInput(); super.onFinishInput() }
     override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig); session.onConfigurationChanged(newConfig) }
+    override fun onTrimMemory(level: Int) { super.onTrimMemory(level); if (::session.isInitialized) session.onTrimMemory() }
     override fun onDestroy() { session.onDestroy(); super.onDestroy() }
     override fun onUpdateSelection(oldSelStart: Int,oldSelEnd: Int,newSelStart: Int,newSelEnd: Int,candidatesStart: Int,candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart,oldSelEnd,newSelStart,newSelEnd,candidatesStart,candidatesEnd)

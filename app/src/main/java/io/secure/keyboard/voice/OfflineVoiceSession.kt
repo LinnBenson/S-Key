@@ -53,11 +53,28 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
     @Volatile private var recording = false
     @Volatile private var busy = false
     @Volatile private var released = false
+    // Observable for lifecycle diagnostics; native operations belong exclusively to the worker.
     @Volatile private var activeRecorder: AudioRecord? = null
     // Main-thread-only, bounded restart request while the prior worker releases its native state.
     private val levels = LatestVoiceLevel({ main.postDelayed(it, 50L) }, { main.removeCallbacks(it) }) { id, level ->
         if (!released && generation.get() == id && recording) listener.onLevel(level)
     }
+    // Access only on the single worker, including disposal queued behind active capture.
+    private var cachedRecognizer: OnlineRecognizer? = null
+    private var cachedStamp: List<Long>? = null
+    private fun disposeRecognizer() {
+        val previous = cachedRecognizer
+        cachedRecognizer = null
+        cachedStamp = null
+        previous?.release()
+    }
+
+    fun trimMemory() {
+        if (released) return
+        cancel()
+        worker.execute { disposeRecognizer() }
+    }
+
     private var pendingBegin = false
     private var limitStop: Runnable? = null
 
@@ -97,15 +114,10 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
         // That queued begin belongs to the lifted finger and must never start afterward.
         val stoppedPendingBegin = pendingBegin
         pendingBegin = false
-        // Make the stop flag and AudioRecord.stop atomic with capture's check/start. A lifted
-        // hold must never stop an initialized recorder only for the worker to start it afterward.
-        microphoneGate.stop {
-            recording = false
-            try {
-                activeRecorder?.stop()
-            } catch (_: Exception) {}
-            captureEnvironment.close()
-        }
+        // Reads are non-blocking. Revoke immediately; the capture worker owns native stop
+        // and release, which can block on vendor audio services and must never block the UI.
+        // A start already in progress observes this flag immediately after it returns.
+        recording = false
         limitStop?.let { main.removeCallbacks(it) }
         limitStop = null
         if (stoppedPendingBegin && !released) listener.onState(State.IDLE)
@@ -126,15 +138,40 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
         cancel()
         released = true
         levels.close()
-        worker.shutdown() // Running worker always releases native stream, recorder and recognizer.
+        worker.execute { disposeRecognizer() }
+        worker.shutdown()
     }
 
     private fun emit(id: Long, action: () -> Unit) {
         main.post { if (!released && generation.get() == id) action() }
     }
 
+    /** Worker-confined lazy native owner, independent of microphone availability. */
+    private fun recognizer(repository: ModelRepository): OnlineRecognizer {
+        val stamp = repository.installedStamp()
+        if (cachedStamp != stamp) disposeRecognizer()
+        val engine = cachedRecognizer ?: OnlineRecognizer(
+            config = OnlineRecognizerConfig(
+                featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+                modelConfig = OnlineModelConfig(
+                    zipformer2Ctc = OnlineZipformer2CtcModelConfig(model = repository.modelFile.absolutePath),
+                    tokens = repository.tokensFile.absolutePath,
+                    numThreads = 2,
+                    provider = "cpu",
+                    debug = false,
+                ),
+                endpointConfig = endpointConfig(),
+                enableEndpoint = true,
+                decodingMethod = "greedy_search",
+            )
+        )
+        cachedRecognizer = engine
+        cachedStamp = stamp
+        return engine
+    }
+
     private fun capture(id: Long) {
-        var recognizer: OnlineRecognizer? = null
+        var failed = false
         var stream: OnlineStream? = null
         var recorder: AudioRecord? = null
         val pcm = ShortArray(1600)
@@ -146,28 +183,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             val repository = ModelRepository(context)
             if (!repository.verifyInstalled { generation.get() == id && recording }) return
             if (generation.get() != id || !recording) return
-            val engine =
-                OnlineRecognizer(
-                    config =
-                        OnlineRecognizerConfig(
-                            featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
-                            modelConfig =
-                                OnlineModelConfig(
-                                    zipformer2Ctc =
-                                        OnlineZipformer2CtcModelConfig(
-                                            model = repository.modelFile.absolutePath
-                                        ),
-                                    tokens = repository.tokensFile.absolutePath,
-                                    numThreads = 2,
-                                    provider = "cpu",
-                                    debug = false,
-                                ),
-                            endpointConfig = endpointConfig(),
-                            enableEndpoint = true,
-                            decodingMethod = "greedy_search",
-                        )
-                )
-            recognizer = engine
+            val engine = recognizer(repository)
             val input = engine.createStream()
             stream = input
             if (generation.get() != id || !recording) return
@@ -176,6 +192,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             val mic = MicrophoneCapture.start(context, captureEnvironment, microphoneGate,
                 { generation.get() == id && recording }) { activeRecorder = it } ?: return
             recorder = mic
+            if (generation.get() != id || !recording) return
             val status = MicrophoneStatus(mic)
             val signal = CaptureSignalHealth()
             emit(id) { if (recording) listener.onState(State.LISTENING) }
@@ -252,10 +269,13 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             }
             emit(id) { listener.onPreview(result, true) }
         } catch (e: SecurityException) {
+            failed = true
             emit(id) { listener.onError("麦克风权限不可用，请在语音设置中重新允许") }
         } catch (e: Exception) {
+            failed = true
             emit(id) { listener.onError(e.message ?: "离线识别失败，请重试") }
         } catch (e: LinkageError) {
+            failed = true
             emit(id) { listener.onError("此设备无法加载离线识别引擎") }
         } finally {
             levels.clear()
@@ -267,8 +287,6 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                     recorder?.stop()
                 } catch (_: Exception) {}
                 captureEnvironment.close()
-                // Clear under the same gate before release, so main-thread stop cannot race
-                // native release through a recorder reference captured just before cleanup.
                 activeRecorder = null
             }
             var cleanupFailed = false
@@ -282,7 +300,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             }
             releaseSafely { recorder?.release() }
             releaseSafely { stream?.release() }
-            releaseSafely { recognizer?.release() }
+            if (cleanupFailed || failed) releaseSafely { disposeRecognizer() }
             main.post {
                 busy = false
                 if (!released) {

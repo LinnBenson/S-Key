@@ -1,5 +1,7 @@
 package io.secure.keyboard
 
+import io.secure.keyboard.diagnostics.checkedMain
+
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -65,6 +67,8 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
         super.setUp()
         sandbox = IsolatedContext(context)
         application = IsolatedApplication(sandbox)
+        config.editorPreview = false
+        config.autoChineseSpacing = false
         config.vibration = false
         config.englishCompletion = false
         config.fourCodeAutoCommit = false
@@ -73,7 +77,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
                 Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK,
             ),
         )
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             editor = EditText(activity).apply {
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 showSoftInputOnFocus = false
@@ -92,7 +96,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
 
     override fun tearDown() {
         try {
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 harness?.close()
                 harness = null
                 if (::activity.isInitialized) activity.finish()
@@ -107,7 +111,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     }
 
     fun testAbsentPreferenceDefaultsChineseAndBothUserChoicesSurviveWarmReopen() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertFalse("Opening a default keyboard must not invent a saved selection",
                 prefs.contains("lastChineseLanguage"))
             assertTrue(SettingsStore.DEFAULT_CHINESE_LANGUAGE)
@@ -126,7 +130,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     }
 
     fun testActiveRestartKeepsSymbolPageButHideReopenAndNewEditorRestoreLetters() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             for (chinese in listOf(true, false)) {
                 selectLanguage(chinese)
                 // Clipboard capture can update its deduplication timestamp asynchronously.
@@ -164,7 +168,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     }
 
     fun testColdServiceRecreationAndContentClearRetainEachSavedLanguage() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             for (chinese in listOf(false, true)) {
                 selectLanguage(chinese)
                 enterSecondSymbolPage()
@@ -193,7 +197,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     }
 
     fun testPasswordAndForceAsciiAreTemporaryAndDoNotOverwriteSavedChinese() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             // Make the Chinese choice explicit so this checks persistence as well as defaults.
             selectLanguage(false)
             selectLanguage(true)
@@ -237,7 +241,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
         for ((type, expected) in types) {
             val drawn = CountDownLatch(1)
             val failure = AtomicReference<Throwable?>()
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 config.lastChineseLanguage = true
                 startEditor(type, beforeAttach = {
                     assertEntryState(expected)
@@ -269,7 +273,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     }
 
     fun testNumericPasswordFirstPageAndManualModesSurviveRestartCursorAndReopen() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             config.lastChineseLanguage = true
             startEditor(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD)
             assertSymbolPage(false, false)
@@ -296,7 +300,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     }
 
     fun testSpecialFieldExplicitLanguageChoicePersistsAndIsNeverLocked() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             for (type in listOf(
                 InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
                 InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI,
@@ -340,7 +344,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     }
 
     fun testForceAsciiRetainsInitialDefaultAndAllowsManualChoiceUntilNextOpening() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             config.lastChineseLanguage = true
             startEditor(InputType.TYPE_CLASS_TEXT, EditorInfo.IME_FLAG_FORCE_ASCII)
             assertLetterMode(false)
@@ -364,7 +368,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     }
 
     fun testNullPhoneDateAndUnrelatedTextVariationsUseOrdinaryFallback() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             for (remembered in listOf(true, false)) {
                 config.lastChineseLanguage = remembered
                 for (type in listOf(InputType.TYPE_NULL, InputType.TYPE_CLASS_PHONE,
@@ -448,20 +452,20 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     fun testPasswordLongPressHidesPreviewButStillInsertsAlternate() {
         var heldKey: KeyContainer? = null
         var down = 0L
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             config.longPressSymbols = true
             config.longPressDelay = 200
             startEditor(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             heldKey = key("q")
             down = SystemClock.uptimeMillis()
             touch(requireNotNull(heldKey), MotionEvent.ACTION_DOWN, down)
         }
         SystemClock.sleep(300)
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertNull("Password keys never show text preview windows", field<Any?>("popup"))
             touch(requireNotNull(heldKey), MotionEvent.ACTION_UP, down)
             assertEquals("Long press keeps its original alternate insertion", "1", editor.text.toString())
@@ -471,7 +475,7 @@ class KeyboardLanguageLifecycleTest : InstrumentationTestCase() {
     /** Keep environment/precondition assertions on the instrumentation thread, not Android main. */
     private fun onMainChecked(block: () -> Unit) {
         var failure: Throwable? = null
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             try { block() } catch (error: Throwable) { failure = error }
         }
         failure?.let { throw it }

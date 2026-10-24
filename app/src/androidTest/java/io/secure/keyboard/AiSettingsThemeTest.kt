@@ -69,13 +69,13 @@ class AiSettingsThemeTest : InstrumentationTestCase() {
         try {
             open("behavior")
             tap("黑色主题"); assertEquals("dark", settings.theme)
-            tap("跟随系统深浅色"); assertEquals("system", settings.theme)
+            tap("跟随系统"); assertEquals("system", settings.theme)
             assertTrue(settings.isDark(true)); assertFalse(settings.isDark(false))
-            tap("跟随系统深浅色"); assertEquals("dark", settings.theme)
+            tap("黑色主题"); assertEquals("dark", settings.theme)
             tap("白色主题"); assertEquals("light", settings.theme)
             assertFalse(settings.isDark(true))
             tap("自定义白色主题"); waitFor("主题预览")
-            open("input"); waitFor("原版输入偏好")
+            open("input"); waitFor("输入方式")
             assertNull(find("纯五笔")); assertNull(find("九键拼音")); assertNull(find("拼音设置"))
         } finally {
             settings.theme = theme; settings.manualDark = manual

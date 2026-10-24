@@ -90,7 +90,7 @@ internal object CandidateController {
         if (candidateDictionaryKind?.let { candidateDictionaryRevision != content.dictionaryRevision(it) } == true)
             clearCandidates()
         if (
-            (translation.enabled && !zh && localEditor==null) || (zh && localCode.isEmpty() && localContext.isEmpty()) || !loaded || secret || (!zh && !settings.englishCompletion)
+            (translation.enabled && !zh && localEditor==null) || (zh && localCode.isEmpty() && (localContext.isEmpty() || !settings.chineseAssociation)) || !loaded || secret || (!zh && (!settings.englishCompletion || !settings.englishAssociation))
         ) {
             cancelCandidateQueries()
             clearCandidates()
@@ -175,7 +175,7 @@ internal object CandidateController {
                         localEditor===activeAssistantEditor()
                 ) {
                     if (
-                        secret || (!zh && !settings.englishCompletion) ||
+                        secret || (!zh && (!settings.englishCompletion || !settings.englishAssociation)) ||
                             dictionaryRevision != content.dictionaryRevision(kind) || runtimeRevision != engine.revision
                     ) {
                         // A clear/edit must not resurrect a previously captured user entry.

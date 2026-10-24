@@ -41,7 +41,8 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
         private set
     private var taskBusy by mutableStateOf(false)
     private var loading by mutableStateOf(false)
-    val busy: Boolean get() = taskBusy || loading
+    private var clipboardPolicyWork by mutableIntStateOf(0)
+    val busy: Boolean get() = taskBusy || loading || clipboardPolicyWork > 0
     var pendingBackup by mutableStateOf<ContentStore.BackupPlan?>(null)
     var message by mutableStateOf<String?>(null)
     var edit by mutableStateOf<ContentEdit?>(null)
@@ -126,6 +127,21 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
             task(refreshContent, success, work)
         }
     }
+    /** Accept an already-dispatched choice even if an earlier load is still finishing. */
+    fun setClipboardRetention(value: String) {
+        settings.clipboardRetention = value
+        clipboardPolicyWork++
+        val ticket = generation
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { content.trimClipboard() }
+                if (visible) refresh()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (visible && ticket == generation) message = e.message ?: "操作失败，请重试" }
+            finally { clipboardPolicyWork-- }
+        }
+    }
+
     fun task(refreshContent: Boolean = true, success: (() -> Unit)? = null, work: () -> Unit) {
         if (busy) return
         taskBusy = true

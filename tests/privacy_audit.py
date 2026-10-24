@@ -28,7 +28,9 @@ for handler in ['internal fun KeyboardSession.commitInputTextImpl', 'internal fu
     section = service.split(handler, 1)[1].split('\n    internal fun ', 1)[0]
     assert 'requestAi(' not in section and 'GrokModelCatalog' not in section
 api = (root/'app/src/main/java/io/secure/keyboard/data/ApiConfiguration.kt').read_text()
-assert 'AES/GCM/NoPadding' in api and 'AndroidKeyStore' in api
+keys = (root/'app/src/main/java/io/secure/keyboard/data/StorageKeys.kt').read_text()
+assert 'AES/GCM/NoPadding' in api and 'StorageKeys.get("skey_api_config")' in api
+assert 'AndroidKeyStore' in keys and '@Synchronized fun get' in keys
 assert 'instanceFollowRedirects = false' in api
 assert app.get(android+'usesCleartextTraffic') == 'false'
 assert 'commit(code)' not in service

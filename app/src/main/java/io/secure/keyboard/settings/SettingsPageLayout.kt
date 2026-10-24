@@ -34,7 +34,7 @@ internal fun SettingsSection(title: String, spacedAfter: Boolean = true, content
 }
 
 @Composable
-internal fun HorizontalChoices(options: List<Pair<String, String>>, selectedId: String, modifier: Modifier = Modifier.padding(12.dp), onSelect: (String) -> Unit) {
+internal fun HorizontalChoices(options: List<Pair<String, String>>, selectedId: String, modifier: Modifier = Modifier.padding(12.dp), enabled: Boolean = true, onSelect: (String) -> Unit) {
         Row(
             modifier.fillMaxWidth().selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -46,7 +46,7 @@ internal fun HorizontalChoices(options: List<Pair<String, String>>, selectedId: 
                         .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface.copy(alpha = .06f))
-                        .selectable(selected = selected, role = androidx.compose.ui.semantics.Role.RadioButton) {
+                        .selectable(selected = selected, enabled = enabled, role = androidx.compose.ui.semantics.Role.RadioButton) {
                             onSelect(id)
                         }
                         .padding(horizontal = 6.dp, vertical = 12.dp),

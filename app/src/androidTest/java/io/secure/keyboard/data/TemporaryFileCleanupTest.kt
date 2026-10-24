@@ -17,7 +17,7 @@ class TemporaryFileCleanupTest : AndroidTestCase() {
         try {
             val store = ContentStore(isolated)
             store.addPhrase("synthetic saved phrase")
-            val saved = File(root, "content/content.json").readBytes()
+            val saved = File(root, "private-content/phrases.enc").readBytes()
             File(root, "content/content.tmp").writeText("interrupted synthetic content")
             val stale = File(root, "mandarin-import-123").apply { mkdirs() }
             File(stale, "model.int8.onnx").writeBytes(ByteArray(4096))
@@ -27,7 +27,7 @@ class TemporaryFileCleanupTest : AndroidTestCase() {
             repeat(3) { store.cleanupTemporaryFiles(); ModelRepository(isolated).cleanupInterruptedImports() }
             assertFalse(stale.exists())
             assertFalse(File(root, "content/content.tmp").exists())
-            assertTrue(saved.contentEquals(File(root, "content/content.json").readBytes()))
+            assertTrue(saved.contentEquals(File(root, "private-content/phrases.enc").readBytes()))
             assertTrue(File(installed, "verified").exists())
             assertTrue(unrelated.exists())
         } finally { root.deleteRecursively() }

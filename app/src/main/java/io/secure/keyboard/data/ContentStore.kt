@@ -31,9 +31,66 @@ class ContentStore(context: Context) {
     private val settings = SettingsStore(app)
     private val dir = File(app.noBackupFilesDir, "content").apply { mkdirs() }
     private val file = File(dir, "content.json")
+    private val privateDir = File(app.noBackupFilesDir, "private-content")
+    private val privateFiles = listOf("clipboard", "phrases", "emoji").associateWith {
+        EncryptedContentFile(File(privateDir, "$it.enc"))
+    }
+    private val migrationDone = File(privateDir, "migrated-v1")
+
+    /** Durable encrypted copies precede removal of legacy plaintext; safe to retry after a crash. */
+    private fun migratePrivateContent() {
+        if (migrationDone.exists()) return
+        val root = readLegacy()
+        privateFiles.forEach { (key, target) ->
+            if (!target.exists()) {
+                val rows = if (key == "emoji" && (emojiFile.baseFile.exists() || File(emojiDir, "history.json.bak").exists()))
+                    JSONArray(emojiFile.openRead().bufferedReader().use { it.readText() }) else array(root, key)
+                target.write(rows.toString())
+            } else {
+                // A retry must authenticate its durable copy before deleting legacy plaintext.
+                JSONArray(target.read())
+            }
+        }
+        val hadPrivateContent = privateFiles.keys.any { root.has(it) }
+        privateFiles.keys.forEach { root.remove(it) }
+        if (hadPrivateContent) write(root)
+        deleteVerified(emojiDir)
+        check(migrationDone.createNewFile()) { "无法完成加密内容迁移" }
+    }
+
+    private fun readCategory(key: String): JSONObject {
+        if (key !in privateFiles) { migratePrivateContent(); return readLegacy() }
+        return try {
+            migratePrivateContent()
+            val rows = JSONArray(privateFiles.getValue(key).read())
+            for (index in 0 until rows.length()) {
+                if (key == "emoji") require(rows.get(index) is String)
+                else {
+                    val row = rows.getJSONObject(index)
+                    require(row.get("id") is String && row.get("text") is String)
+                    if (row.has("pinned")) require(row.get("pinned") is Boolean)
+                    if (row.has("copiedAt")) require(row.get("copiedAt") is Number)
+                }
+            }
+            JSONObject().put(key, rows)
+        } catch (e: Exception) { throw ContentReadException(e) }
+    }
+
+    private fun writeCategory(key: String, root: JSONObject) {
+        if (key in privateFiles) privateFiles.getValue(key).write(array(root, key).toString())
+        else write(root)
+    }
+
+    private fun read(): JSONObject {
+        migratePrivateContent()
+        return readLegacy().also { root ->
+            // Bulk backup/restore includes phrases, but never reloads clipboard history.
+            root.put("phrases", array(readCategory("phrases"), "phrases"))
+        }
+    }
+
     private val emojiDir = File(app.noBackupFilesDir, "recent-emoji")
     private val emojiFile = AtomicFile(File(emojiDir, "history.json"))
-    private val emojiMigrationDone = File(emojiDir, "legacy-removed")
     private val emojiEpoch = emojiEpochs.computeIfAbsent(file.canonicalPath) { AtomicLong(0L) }
     fun emojiGeneration(): Long = emojiEpoch.get()
     private val aiPresetEpoch = aiPresetEpochs.computeIfAbsent(file.canonicalPath) { AtomicLong(0L) }
@@ -119,7 +176,7 @@ class ContentStore(context: Context) {
         if (temporary.exists()) deleteVerified(temporary)
     }
 
-    private fun read(): JSONObject {
+    private fun readLegacy(): JSONObject {
         return try {
             if (!file.exists()) {
                 require(!dir.exists() || dir.canRead()) { "Content directory is unreadable" }
@@ -163,6 +220,9 @@ class ContentStore(context: Context) {
     }
 
     private fun write(root: JSONObject) {
+        privateFiles.forEach { (key, target) ->
+            if (root.has(key)) { target.write(root.getJSONArray(key).toString()); root.remove(key) }
+        }
         // Mutators already evicted the changed kind. Preserve every unaffected dictionary's
         // immutable rows across replacement of their shared file, including the other language.
         val existing =
@@ -232,14 +292,14 @@ class ContentStore(context: Context) {
 
     private fun objects(key: String): List<JSONObject> =
         synchronized(lock) {
-            val values = array(read(), key)
+            val values = array(readCategory(key), key)
             (0 until values.length()).map { values.getJSONObject(it) }
         }
 
     private fun mutate(key: String, operation: (MutableList<JSONObject>) -> Unit) =
         synchronized(lock) {
             DictionaryKind.entries.find { it.storageKey == key }?.let { invalidateDictionarySnapshot(it) }
-            val root = read()
+            val root = readCategory(key)
             val values = array(root, key)
             val list = (0 until values.length()).map { values.getJSONObject(it) }.toMutableList()
             if (key == "clipboard") deduplicateClipboard(list)
@@ -261,7 +321,7 @@ class ContentStore(context: Context) {
                 }
             }
             root.put(key, JSONArray(list))
-            write(root)
+            writeCategory(key, root)
         }
 
     private fun contentCharacters(rows: List<JSONObject>): Long = rows.sumOf { row ->
@@ -362,14 +422,14 @@ class ContentStore(context: Context) {
     }
 
     fun trimClipboard() = synchronized(lock) {
-        val root = read()
+        val root = readCategory("clipboard")
         val rows = array(root, "clipboard")
         val list = (0 until rows.length()).map { rows.getJSONObject(it) }.toMutableList()
         val before = rows.toString()
         deduplicateClipboard(list)
         pruneClipboard(list, System.currentTimeMillis())
         val after = JSONArray(list)
-        if (before != after.toString()) { root.put("clipboard", after); write(root) }
+        if (before != after.toString()) { root.put("clipboard", after); writeCategory("clipboard", root) }
         scheduleClipboardCleanup(list)
     }
 
@@ -462,6 +522,7 @@ class ContentStore(context: Context) {
     fun dictionary(kind: DictionaryKind = DictionaryKind.CHINESE): List<DictionaryEntry> =
         synchronized(lock) {
             try {
+                migratePrivateContent()
                 val stamp = dictionaryStamp()
                 // Any unrecognized shared-file replacement may affect either dictionary.
                 if (dictionaryCacheKeys.values.any { key ->
@@ -476,7 +537,7 @@ class ContentStore(context: Context) {
                 // Metadata catches ordinary external corruption/replacement. Deliberately restoring
                 // all metadata after same-size tampering is outside this app-owned-file cache model.
                 if (previous != null) invalidateDictionarySnapshot(kind)
-                val values = array(read(), kind.storageKey)
+                val values = array(readLegacy(), kind.storageKey)
                 val rows = ArrayList<DictionaryEntry>(values.length())
                 for (index in 0 until values.length()) {
                     val item = values.getJSONObject(index)
@@ -662,7 +723,7 @@ class ContentStore(context: Context) {
         BACKUP_KEYS.forEach { root.put(it, plan.clean.getJSONArray(it)) }
         // Validation precedes every mutation; roll back both stores on an I/O failure.
         try {
-            write(root)
+            write(JSONObject(root.toString()))
             plan.configuration?.let(settingsBackup::apply)
         } catch (failure: Exception) {
             runCatching { write(old); if(plan.configuration != null) settingsBackup.apply(previous) }
@@ -717,40 +778,14 @@ class ContentStore(context: Context) {
         }
     }
 
-    /** Separate bounded history. Legacy content is migrated only after a durable new copy. */
     fun recentEmoji(): List<String> = synchronized(lock) {
-        try {
-            if (emojiFile.baseFile.exists() || File(emojiDir, "history.json.bak").exists()) {
-                val rows = JSONArray(emojiFile.openRead().bufferedReader().use { it.readText() })
-                if (!emojiMigrationDone.exists()) {
-                    val legacy = read()
-                    if (legacy.has("emoji")) { legacy.remove("emoji"); write(legacy) }
-                    markEmojiMigrated()
-                }
-                return@synchronized (0 until rows.length()).map { rows.getString(it) }.distinct().take(50)
-            }
-            val root = read()
-            val rows = array(root, "emoji")
-            val values = (0 until rows.length()).map { rows.getString(it) }.distinct().take(50)
-            writeEmoji(values)
-            if (root.has("emoji")) { root.remove("emoji"); write(root) }
-            markEmojiMigrated()
-            values
-        } catch (error: ContentReadException) { throw error }
-        catch (error: Exception) { throw ContentReadException(error) }
-    }
-
-    private fun markEmojiMigrated() {
-        check(emojiMigrationDone.exists() || emojiMigrationDone.createNewFile()) { "无法完成表情记录迁移" }
+        val rows = array(readCategory("emoji"), "emoji")
+        (0 until rows.length()).map { rows.getString(it) }.distinct().take(50)
     }
 
     private fun writeEmoji(values: List<String>) {
-        check(emojiDir.isDirectory || emojiDir.mkdirs()) { "无法保存最近表情" }
-        val output = emojiFile.startWrite()
-        try {
-            output.write(JSONArray(values).toString().toByteArray(Charsets.UTF_8))
-            emojiFile.finishWrite(output)
-        } catch (error: Exception) { emojiFile.failWrite(output); throw error }
+        migratePrivateContent()
+        privateFiles.getValue("emoji").write(JSONArray(values).toString())
     }
 
     /** A clear revokes writes already queued by any keyboard instance. */
@@ -764,9 +799,9 @@ class ContentStore(context: Context) {
     private fun removeCategory(key: String) =
         synchronized(lock) {
             DictionaryKind.entries.find { it.storageKey == key }?.let { invalidateDictionarySnapshot(it) }
-            val root = read()
+            val root = readCategory(key)
             root.remove(key)
-            write(root)
+            writeCategory(key, root)
             purgeCaches()
         }
 
@@ -780,11 +815,7 @@ class ContentStore(context: Context) {
 
     fun clearEmoji() = synchronized(lock) {
         emojiEpoch.incrementAndGet()
-        // Remove legacy history first, so deleting the new file can never resurrect it.
-        val root = read()
-        if (root.has("emoji")) { root.remove("emoji"); write(root) }
         writeEmoji(emptyList())
-        markEmojiMigrated()
         purgeCaches()
     }
 
@@ -803,6 +834,7 @@ class ContentStore(context: Context) {
             suppressCurrentClipboard()
             filesIn(dir).forEach { deleteVerified(it) }
             deleteVerified(emojiDir)
+            deleteVerified(privateDir)
             clearSystemClipboardIfMatching(removedClips)
             purgeCaches()
         }

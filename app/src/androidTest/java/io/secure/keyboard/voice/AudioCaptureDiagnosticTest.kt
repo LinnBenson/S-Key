@@ -47,7 +47,18 @@ class AudioCaptureDiagnosticTest : InstrumentationTestCase() {
                 val ac = sqrt((rms*rms-mean*mean).coerceAtLeast(0.0))
                 instrumentation.sendStatus(0, Bundle().apply { putString("stream", "source=$source samples=$samples reads=$reads empty=$empty mean=$mean rms=$rms ac=$ac clipped=$clipped changes=$changes level=$low..$high\n") })
                 if (samples == 0L) missing.add(source)
-            } finally { pcm.fill(0); runCatching { mic.stop() }; mic.release() }
+            } finally {
+                pcm.fill(0)
+                val stopping = SystemClock.elapsedRealtime()
+                runCatching { mic.stop() }
+                val stopped = SystemClock.elapsedRealtime()
+                mic.release()
+                instrumentation.sendStatus(2, Bundle().apply {
+                    putInt("audio_source", source)
+                    putLong("audio_stop_ms", stopped - stopping)
+                    putLong("audio_release_ms", SystemClock.elapsedRealtime() - stopped)
+                })
+            }
         }
         assertTrue("No microphone samples for sources $missing", missing.isEmpty())
         } finally { instrumentation.runOnMainSync { activity.finish() } }

@@ -36,6 +36,7 @@ class PrivacyMemoryAuditTest : InstrumentationTestCase() {
         val probe = LifetimeMemoryProbe(instrumentation.targetContext, "privacy-panel-audit")
         try {
             fixture.open()
+            io.secure.keyboard.data.SettingsStore(fixture.sandbox).clipboardLimit = 20
             val store = fixture.field<ContentStore>("content")
             // Exclude the emulator’s existing OS clipboard from this synthetic count.
             store.clearClipboard()
@@ -129,8 +130,14 @@ class PrivacyMemoryAuditTest : InstrumentationTestCase() {
         }
         val repo = if (installed.isInstalled()) installed else io.secure.keyboard.voice.ModelRepository(temporary)
         if (!repo.isInstalled()) {
-            instrumentation.sendStatus(0, Bundle().apply { putString("audit_native", "NOT_RUN: no installed pinned model") })
-            return
+            val source = File(context.filesDir, "voice-fixtures")
+            check(File(source, "model.int8.onnx").isFile && File(source, "tokens.txt").isFile) {
+                "Pinned public voice fixtures are required for this audit"
+            }
+            val destination = File(temporary.noBackupFilesDir, "mandarin-voice-v1").apply { mkdirs() }
+            for (name in listOf("model.int8.onnx", "tokens.txt"))
+                File(source, name).copyTo(File(destination, name), overwrite = true)
+            File(destination, "verified").writeText(io.secure.keyboard.voice.ModelRepository.MODEL_ID)
         }
         repo.verifyInstalled()
         val probe = LifetimeMemoryProbe(instrumentation.targetContext, "native-silence-audit")
@@ -181,14 +188,14 @@ class PrivacyMemoryAuditTest : InstrumentationTestCase() {
     }
 
     fun testReportNumericDiagnostics() {
-        val names = listOf("privacy-panel-audit", "assistant-tools-audit", "settings", "service-ownership", "dictionary", "native-silence-audit")
+        val names = listOf("privacy-panel-audit", "assistant-tools-audit", "settings", "service-ownership", "dictionary", "native-silence-audit", "voice-session", "candidate-traversal", "voice-import")
         for (name in names) {
             val file = File(instrumentation.targetContext.filesDir, "lifetime-$name.jsonl")
             if (!file.isFile) continue
             val rows = file.readLines().map { JSONObject(it) }.filter { it.optString("event") != "sampled_peak_tick" }
             for (row in rows) {
-                val safe = JSONObject()
-                for (key in listOf("event", "stage", "cycle", "pssKiB", "javaUsedBytes", "nativeAllocatedBytes", "threadCount", "fdCount", "forcedGcRequested"))
+                val safe = JSONObject().put("probe", name)
+                for (key in listOf("pid", "processStartTicks", "elapsedMillis", "event", "stage", "cycle", "pssKiB", "javaUsedBytes", "nativeAllocatedBytes", "threadCount", "fdCount", "forcedGcRequested"))
                     if (row.has(key)) safe.put(key, row.get(key))
                 val extra = row.optJSONObject("extra")
                 if (extra != null) {

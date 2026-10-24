@@ -1,40 +1,17 @@
 package io.secure.keyboard
 
-import android.content.Intent
-import android.test.InstrumentationTestCase
-import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
-import io.secure.keyboard.diagnostics.checkedMain
-
+/** LazyColumn replaces the retired numbered-page controls. */
 @Suppress("DEPRECATION")
-class SettingsContentPagingTest : InstrumentationTestCase() {
-    fun testManagementPagesBoundViewsAndKeepAllRecords() {
-        SettingsUiFixture(instrumentation).use { fixture ->
-            fixture.config.clipboardLimit = 1000
-            repeat(101) { fixture.content.addClipboard("copy-$it"); fixture.content.addPhrase("phrase-$it") }
-            for (route in listOf("clipboard", "phrases")) {
-                val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, SettingsActivity::class.java)
-                    .putExtra("page", route).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as SettingsActivity
-                instrumentation.waitForIdleSync()
-                instrumentation.checkedMain {
-                    fun all(view: View): List<View> = listOf(view) +
-                        if (view is ViewGroup) (0 until view.childCount).flatMap { all(view.getChildAt(it)) } else emptyList()
-                    fun entries() = all(activity.window.decorView).filter {
-                        it.tag?.toString()?.startsWith(if (route == "clipboard") "anchor:clipboard:" else "anchor:phrase:") == true
-                    }
-                    assertEquals(100, entries().size)
-                    all(activity.window.decorView).filterIsInstance<Button>().single { it.text == "下一页" }.performClick()
-                    assertEquals(1, entries().size)
-                    all(activity.window.decorView).filterIsInstance<Button>().single { it.text == "上一页" }.performClick()
-                    assertEquals(100, entries().size)
-                    activity.finish()
-                }
-                instrumentation.waitForIdleSync()
-            }
-            assertEquals(101, fixture.content.clipboard().size)
-            assertEquals(101, fixture.content.phrases().size)
-            fixture.assertActualDataUnchanged()
-        }
+class SettingsContentPagingTest : ComposeSettingsTest() {
+    fun testManagementListsVirtualizeAndKeepAllPermittedRecords() {
+        fixture.config.clipboardLimit = 100
+        repeat(101) { fixture.content.addClipboard("copy-$it"); fixture.content.addPhrase("phrase-$it") }
+        open("phrases"); reveal("phrase-0")
+        assertTrue("Only visible semantics are materialized", nodes().count { it.text?.toString()?.startsWith("phrase-") == true } < 40)
+        reveal("phrase-100")
+        assertEquals(101, fixture.content.phrases().size)
+        assertEquals(100, fixture.content.clipboard().size)
+        open("clipboard"); reveal("copy-100")
+        assertEquals("Unpinned oldest entry is evicted", "copy-1", fixture.content.clipboard().first().text)
     }
 }

@@ -60,10 +60,10 @@ class SettingsPolicyBackupTest : AndroidTestCase() {
         val store=ContentStore(sandbox); val settings=SettingsStore(sandbox)
         store.addClipboard("pin"); store.setClipboardPinned(store.clipboard().single().id,true)
         store.addClipboard("old")
-        val file=File(root,"content/content.json")
-        val json=JSONObject(file.readText())
-        repeat(2) { json.getJSONArray("clipboard").getJSONObject(it).put("copiedAt",System.currentTimeMillis()-25*3_600_000L) }
-        file.writeText(json.toString())
+        val file=io.secure.keyboard.data.EncryptedContentFile(File(root,"private-content/clipboard.enc"))
+        val json=org.json.JSONArray(file.read())
+        repeat(2) { json.getJSONObject(it).put("copiedAt",System.currentTimeMillis()-25*3_600_000L) }
+        file.write(json.toString())
         settings.clipboardRetention="timed"; settings.clipboardRetentionHours=24
         assertEquals(listOf("pin"),store.clipboard().map { it.text })
         store.addClipboard("fresh")

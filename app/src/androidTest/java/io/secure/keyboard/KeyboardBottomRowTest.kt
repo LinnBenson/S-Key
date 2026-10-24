@@ -594,9 +594,9 @@ class KeyboardBottomRowTest : InstrumentationTestCase() {
             val settings = SettingsStore(context)
             assertEquals(0, settings.keyBorderWidth)
             assertEquals(4, settings.keyHorizontalGap)
-            assertEquals(6, settings.keyVerticalGap)
-            assertEquals(9, settings.keyCornerRadius)
-            assertEquals(9, settings.enterCornerRadius)
+            assertEquals(5, settings.keyVerticalGap)
+            assertEquals(7, settings.keyCornerRadius)
+            assertEquals(30, settings.enterCornerRadius)
             settings.theme = "light"
             val original = bottomRow(true, 260)
             val widths = (0 until original.childCount).map { original.getChildAt(it).width }

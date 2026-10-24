@@ -84,6 +84,14 @@ class AiWritingTest : AndroidTestCase() {
             assertNull(call.responseId)
         }
     }
+    fun testProtocolOverheadDoesNotCountAsOutput() {
+        val input = buildString {
+            repeat(15000) { append(": keepalive padding padding padding padding padding padding padding padding\n\n") }
+            append(stream("正常输出"))
+        }
+        assertTrue(input.length > 1024 * 1024)
+        assertEquals("正常输出", AiWriting.Call().readStream(input.reader()))
+    }
     fun testStreamResponseAndOutputBounds() {
         for (input in listOf("x".repeat(1024*1024+1), "data: ${delta("a".repeat(20001))}\n\n",
             "data: ${complete("a".repeat(20001))}\n\n")) {

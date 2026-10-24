@@ -132,7 +132,7 @@ internal object InputController {
             clearComposition()
             refreshCandidates()
         } else {
-            if (candidateQuery.isEmpty() || !settings.englishCompletion) return false
+            if (candidateQuery.isEmpty() || (!settings.englishCompletion || !settings.englishAssociation)) return false
             val expected = candidateQuery
             activeAssistantEditor()?.let { editor ->
                 if(assistantEnglishPrefix(editor)!=expected) return false
@@ -159,7 +159,7 @@ internal object InputController {
                         !active ||
                             chinese ||
                             secret ||
-                            !settings.englishCompletion ||
+                            (!settings.englishCompletion || !settings.englishAssociation) ||
                             seq != generation ||
                             currentInputConnection !== ic ||
                             prefix != expected ||
@@ -238,21 +238,18 @@ internal object InputController {
             return accepted
         }
         val previewTarget = currentInputConnection
-        if (editorPreview.owns(previewTarget)) {
+        val type = currentInputEditorInfo?.inputType ?: 0
+        val variation = type and android.text.InputType.TYPE_MASK_VARIATION
+        val spaced = settings.autoChineseSpacing && !secret && value.isNotEmpty() &&
+            type and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT &&
+            variation !in listOf(android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+                android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, android.text.InputType.TYPE_TEXT_VARIATION_URI)
+        // Spacing needs host context. Use the ordered worker path below even when preedit
+        // owns the composing span; never synchronously query another editor from the UI.
+        if (editorPreview.owns(previewTarget) && !spaced) {
             val connection = previewTarget ?: return false
             val start = editorPreview.startOffset
-            val type = currentInputEditorInfo?.inputType ?: 0
-            val variation = type and android.text.InputType.TYPE_MASK_VARIATION
-            val spaced = settings.autoChineseSpacing && !secret &&
-                type and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT &&
-                variation !in listOf(android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
-                    android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, android.text.InputType.TYPE_TEXT_VARIATION_URI)
-            val edit = if (spaced) runCatching {
-                val before = connection.getTextBeforeCursor(editorPreview.length + 2, 0)
-                    ?.toString().orEmpty().dropLast(editorPreview.length)
-                val after = if (start >= 0) connection.getTextAfterCursor(2, 0)?.toString().orEmpty() else ""
-                ChineseSpacing.format(value, before, after)
-            }.getOrElse { ChineseSpacing.format(value) } else ChineseSpacing.Edit(value, false)
+            val edit = ChineseSpacing.Edit(value, false)
             val output = outputText(edit.text)
             for (cursor in editorPreview.cursorsOnClear() +
                 listOfNotNull((start + output.length - if (edit.trailingSpace) 1 else 0).takeIf { start >= 0 })) {
@@ -274,18 +271,12 @@ internal object InputController {
             if (accepted) spaceGlossaryCommitted(output.length, glossary, committed = output)
             return accepted
         }
-        if (settings.autoChineseSpacing && !secret && value.isNotEmpty()) {
-            val type = currentInputEditorInfo?.inputType ?: 0
-            val variation = type and android.text.InputType.TYPE_MASK_VARIATION
-            if (type and android.text.InputType.TYPE_MASK_CLASS == android.text.InputType.TYPE_CLASS_TEXT &&
-                variation !in listOf(android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
-                    android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, android.text.InputType.TYPE_TEXT_VARIATION_URI)) {
-                if (spacingTexts.size >= 1024) return false
-                if (!clearEditorPreview(expectCursorUpdate = true)) return false
-                spacingTexts.addLast(InputState.SpacedText(value, glossary))
-                if (!spacingPending) commitNextSpacedText()
-                return true
-            }
+        if (spaced) {
+            if (spacingTexts.size >= 1024) return false
+            if (!clearEditorPreview(expectCursorUpdate = true)) return false
+            spacingTexts.addLast(InputState.SpacedText(value, glossary))
+            if (!spacingPending) commitNextSpacedText()
+            return true
         }
         val output = outputText(value)
         val connection = currentInputConnection ?: return false

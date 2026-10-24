@@ -1,5 +1,7 @@
 package io.secure.keyboard
 
+import io.secure.keyboard.diagnostics.checkedMain
+
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -109,8 +111,11 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         fun reset() { commits.clear(); cursorOffsets.clear(); deletes = 0; afterPrefixRead = null }
     }
 
+    private lateinit var explicitInputPreferences: ExplicitInputPreferences
+
     override fun setUp() {
         super.setUp()
+        explicitInputPreferences = ExplicitInputPreferences(context)
         val settings = SettingsStore(context)
         originalCompletion = settings.englishCompletion
         originalFourCode = settings.fourCodeAutoCommit
@@ -127,7 +132,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         activity = instrumentation.startActivitySync(
             Intent(context, MainActivity::class.java).addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             harness = ServiceHarness()
             service = harness.create(context)
             setField("content", store)
@@ -157,7 +162,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         releases.forEach { it.countDown() }
         if (::connection.isInitialized) connection.afterPrefixRead = null
         if (::service.isInitialized) drainWorker()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             if (::harness.isInitialized) harness.close()
             if (::activity.isInitialized) activity.finish()
         }
@@ -168,7 +173,8 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         settings.vibrationStrength = originalVibrationStrength
         settings.keySound = originalKeySound
         if (::sandbox.isInitialized) sandbox.root.deleteRecursively()
-        super.tearDown()
+        explicitInputPreferences.close()
+            super.tearDown()
     }
 
     fun testActualRankingKeepsBuiltinFirstAndLiteralExactBlockBeforePrefixTail() {
@@ -183,10 +189,10 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         store.addDictionary(exact, "help", english)
         queryEnglish("he")
         val expected = (listOf(baseline.first(), exact, baseline[2], "Hello") + baseline + "Prefix Phrase").distinct()
-        assertEquals(expected, result())
+        assertEquals("First page preserves exact ranking", expected.take(result().size), result())
         tapStrip(exact)
         drainWorker()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertEquals("$exact ", editor.text.toString())
             assertEquals(1, haptics.feedbackCount)
         }
@@ -205,7 +211,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
             assertEquals(listOf(output), result())
             tapStrip(output)
             drainWorker()
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 assertEquals(sample.result, editor.text.toString())
                 assertEquals(output.length + 1, editor.selectionStart)
                 assertEquals(editor.selectionStart, editor.selectionEnd)
@@ -220,22 +226,22 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         store.addDictionary("Prefix Only", "qqqqqa", english)
         SettingsStore(context).fourCodeAutoCommit = true
         queryEnglish("")
-        instrumentation.runOnMainSync { "qqqqq".forEach { type(it.toString()) } }
+        instrumentation.checkedMain { "qqqqq".forEach { type(it.toString()) } }
         awaitResults()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertEquals("qqqqq", editor.text.toString())
             assertEquals("", field<String>("code"))
             assertEquals(listOf("Prefix Only"), field<List<String>>("candidateTexts"))
             field<View>("hideIcon").performClick()
         }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val grid = field<CandidateGrid>("candidateGrid")
             assertEquals("Prefix Only", grid.adapter.getItem(0))
             grid.getChildAt(0).performClick()
         }
         drainWorker()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertEquals("Prefix Only ", editor.text.toString())
             assertFalse(field<Boolean>("candidatesExpanded"))
         }
@@ -250,9 +256,9 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         store.clearDictionary(DictionaryKind.CHINESE)
         tapStrip("English Only")
         drainWorker()
-        instrumentation.runOnMainSync { assertEquals("English Only ", editor.text.toString()) }
+        instrumentation.checkedMain { assertEquals("English Only ", editor.text.toString()) }
         store.addDictionary("中文独立", code, DictionaryKind.CHINESE)
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             resetHost("")
             setField("chinese", true)
             setField("code", code)
@@ -262,19 +268,41 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         assertEquals(listOf("中文独立"), result())
         store.clearDictionary(english)
         tapStrip("中文独立")
-        instrumentation.runOnMainSync { assertEquals("中文独立", editor.text.toString()) }
+        instrumentation.checkedMain { assertEquals("中文独立", editor.text.toString()) }
+    }
+
+    fun testAssociationDisabledCommitsDirectlyWithoutDictionaryLookup() {
+        val settings = SettingsStore(context)
+        val original = settings.englishAssociation
+        try {
+            settings.englishAssociation = false
+            store.addDictionary("Custom", "qqqqq", english)
+            val dictionary = File(sandbox.noBackupFilesDir, "content/content.json")
+            dictionary.writeText("{corrupt: a lookup must fail}")
+            val revision = store.dictionaryRevision(english)
+            instrumentation.checkedMain {
+                resetHost("")
+                setField("chinese", false)
+                "qqqqq".forEach { type(it.toString()) }
+            }
+            // Fresh installs enable spacing; commits may await surrounding-text IPC.
+            waitFor("Direct committed English text") { editor.text.toString() == "qqqqq" }
+            drainWorker()
+            assertTrue(result().isEmpty())
+            assertEquals("No custom dictionary read", revision, store.dictionaryRevision(english))
+        } finally { settings.englishAssociation = original }
     }
 
     fun testCompletionSwitchAndSecretFieldsSuppressAllCustomEnglishSuggestions() {
         store.addDictionary("Custom", "qqqqq", english)
         queryEnglish("qqqqq")
         SettingsStore(context).englishCompletion = false
-        instrumentation.runOnMainSync { invoke("refreshCandidates") }
+        instrumentation.checkedMain { invoke("refreshCandidates") }
         drainWorker()
         assertTrue(result().isEmpty())
         SettingsStore(context).englishCompletion = true
         queryEnglish("qqqqq")
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             service.onCreateInputMethodInterface().startInput(connection, EditorInfo().apply {
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             })
@@ -283,7 +311,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         }
         drainWorker()
         assertTrue(result().isEmpty())
-        instrumentation.runOnMainSync { assertEquals("qqqqq", editor.text.toString()) }
+        instrumentation.checkedMain { assertEquals("qqqqq", editor.text.toString()) }
     }
 
     fun testFortyLetterCodeWorksButLongerTokensAndNonwordBoundariesAreRejected() {
@@ -306,7 +334,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         store.addDictionary("Deleted", "qqqqq", english)
         queryEnglish("qqqqq")
         store.deleteDictionary(store.dictionary(english).single().id, english)
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertFalse(invoke("choose", "Deleted") as Boolean)
             assertTrue(field<List<String>>("candidateTexts").isEmpty())
             assertEquals(0, row.childCount)
@@ -334,7 +362,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
             tapStrip("Private $mutation")
             assertTrue("Mutation must occur after the asynchronous prefix read", changed.await(15, TimeUnit.SECONDS))
             drainWorker()
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 assertEquals("$mutation must not change the actual editor", "qqqqq, suffix", editor.text.toString())
                 assertEquals(5, editor.selectionStart)
                 assertEquals(0, connection.deletes)
@@ -348,7 +376,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
     fun testDeletionAfterLookupButBeforePublicationRejectsCapturedPersonalResult() {
         store.addDictionary("Never Publish", "qqqqq", english)
         queryEnglish("qqqqq")
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             invoke("refreshCandidates")
             val deleted = CountDownLatch(1)
             worker.execute { store.clearDictionary(english); deleted.countDown() }
@@ -356,7 +384,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         }
         drainWorker()
         assertTrue(result().isEmpty())
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertEquals("", field<String>("candidateQuery"))
             assertEquals("qqqqq", editor.text.toString())
         }
@@ -411,21 +439,25 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         val words = (1..55).map { "Prefix $it" }
         store.importDictionary(words.joinToString("\n") { "$it\tqqqqqa" }, kind = english)
         queryEnglish("qqqqq")
-        assertEquals(words, result())
+        assertEquals(words.take(40), result())
         waitFor("English custom tail appended through horizontal scrolling") {
             if (row.childCount < words.size) strip.scrollTo(row.width, 0)
             row.childCount == words.size
         }
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertEquals(words.last(), (row.getChildAt(row.childCount - 1) as TextView).text.toString())
             label(words.last()).performClick()
         }
         drainWorker()
-        instrumentation.runOnMainSync { assertEquals("${words.last()} ", editor.text.toString()) }
+        instrumentation.checkedMain { assertEquals("${words.last()} ", editor.text.toString()) }
         queryEnglish("qqqqq")
-        instrumentation.runOnMainSync { field<View>("hideIcon").performClick() }
-        instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain { field<View>("hideIcon").performClick() }
+        waitFor("Expanded grid loads the remaining candidate page") {
+            val grid = field<CandidateGrid>("candidateGrid")
+            if (grid.adapter.count < words.size) grid.setSelection(grid.adapter.count - 1)
+            field<List<String>>("candidateTexts").size == words.size
+        }
+        instrumentation.checkedMain {
             val grid = field<CandidateGrid>("candidateGrid")
             assertEquals(words.size, grid.adapter.count)
             grid.setSelection(words.lastIndex)
@@ -434,13 +466,13 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
             val grid = field<CandidateGrid>("candidateGrid")
             (0 until grid.childCount).any { (grid.getChildAt(it) as TextView).text.toString() == words.last() }
         }
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val grid = field<CandidateGrid>("candidateGrid")
             (0 until grid.childCount).map { grid.getChildAt(it) as TextView }
                 .first { it.text.toString() == words.last() }.performClick()
         }
         drainWorker()
-        instrumentation.runOnMainSync { assertEquals("${words.last()} ", editor.text.toString()) }
+        instrumentation.checkedMain { assertEquals("${words.last()} ", editor.text.toString()) }
     }
 
     fun testTouchStartedWhileEnglishCustomResultLoadsCannotBecomeAValidTap() {
@@ -449,7 +481,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         val release = gateWorker()
         val down = SystemClock.uptimeMillis()
         lateinit var view: TextView
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             invoke("refreshCandidates")
             view = label("Touch Safe")
             val event = MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, 8f, 8f, 0)
@@ -458,20 +490,20 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         }
         release.countDown()
         awaitResults()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, 8f, 8f, 0)
             view.dispatchTouchEvent(event)
             event.recycle()
         }
         drainWorker()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertEquals("qqqqq", editor.text.toString())
             assertTrue(connection.commits.isEmpty())
             assertEquals(0, haptics.feedbackCount)
             view.performClick()
         }
         drainWorker()
-        instrumentation.runOnMainSync { assertEquals("Touch Safe ", editor.text.toString()) }
+        instrumentation.checkedMain { assertEquals("Touch Safe ", editor.text.toString()) }
     }
 
     private fun startEditor() {
@@ -491,7 +523,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
     }
 
     private fun queryEnglish(text: String, cursor: Int = text.length) {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             resetHost(text, cursor)
             setField("chinese", false)
             invoke("refreshCandidates")
@@ -501,14 +533,14 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
 
     private fun result(): List<String> {
         var values = emptyList<String>()
-        instrumentation.runOnMainSync { values = field<List<String>>("candidateTexts").toList() }
+        instrumentation.checkedMain { values = field<List<String>>("candidateTexts").toList() }
         return values
     }
 
     private fun label(value: String): TextView =
         (0 until row.childCount).map { row.getChildAt(it) as TextView }.first { it.text.toString() == value }
 
-    private fun tapStrip(value: String) = instrumentation.runOnMainSync { label(value).performClick() }
+    private fun tapStrip(value: String) = instrumentation.checkedMain { label(value).performClick() }
 
     private fun awaitResults() = waitFor("latest candidate result, including empty") {
         field<Int>("candidateGeneration") == field<Int>("generation")
@@ -534,7 +566,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
         val end = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < end) {
             var success = false
-            instrumentation.runOnMainSync { success = condition() }
+            instrumentation.checkedMain { success = condition() }
             if (success) return
             SystemClock.sleep(25)
         }
@@ -560,7 +592,7 @@ class EnglishCustomCandidateTest : InstrumentationTestCase() {
     /** Report fixture assertions through JUnit rather than terminating Android's main thread. */
     private fun onMainChecked(block: () -> Unit) {
         var failure: Throwable? = null
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             try { block() } catch (error: Throwable) { failure = error }
         }
         failure?.let { throw it }

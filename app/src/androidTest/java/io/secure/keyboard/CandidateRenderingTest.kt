@@ -100,12 +100,16 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         override fun endBatchEdit() = true
     }
 
+    private var originalPreview = true
+
     override fun setUp() {
         super.setUp()
         val settings = SettingsStore(context)
         originalMode = settings.chineseInputMode
         settings.chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.MIXED
         originalToolbarPins = settings.toolbarPins
+        originalPreview = settings.editorPreview
+        settings.editorPreview = false
         originalSpacing = settings.autoChineseSpacing
         settings.autoChineseSpacing = false
         originalChinese = settings.lastChineseLanguage
@@ -147,6 +151,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
         SettingsStore(context).chineseInputMode = originalMode
         SettingsStore(context).toolbarPins = originalToolbarPins
+        SettingsStore(context).editorPreview = originalPreview
         SettingsStore(context).autoChineseSpacing = originalSpacing
         SettingsStore(context).englishCompletion = originalCompletion
         SettingsStore(context).lastChineseLanguage = originalChinese
@@ -477,15 +482,56 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         }
     }
 
+    fun testDelayedAiPresetMetadataPreservesEditorSelectionAndFocus() {
+        val folder = File(context.cacheDir, "delayed-ai-preset-${java.util.UUID.randomUUID()}").apply { mkdirs() }
+        val isolated = object : android.content.ContextWrapper(context) {
+            override fun getApplicationContext(): android.content.Context = this
+            override fun getNoBackupFilesDir() = folder
+        }
+        val original = field<ContentStore>("content")
+        val store = ContentStore(isolated)
+        store.saveAiPreset(null, "异步预设", "保留原意")
+        val release = gateWorker()
+        try {
+            lateinit var editor: EditText
+            onMainChecked {
+                setField("content", store)
+                invoke("openTool", "ai")
+                editor = field<TextView>("translationTextView") as EditText
+                editor.setText("甲乙丙丁")
+                editor.setSelection(1, 3)
+                editor.requestFocus()
+            }
+            release.countDown()
+            waitFor("Asynchronous preset tab appears") { field<TextView?>("aiCustomTab")?.contentDescription == "异步预设" }
+            onMainChecked {
+                assertSame(editor, field<TextView>("translationTextView"))
+                assertEquals("甲乙丙丁", editor.text.toString())
+                assertEquals(1, editor.selectionStart)
+                assertEquals(3, editor.selectionEnd)
+                assertTrue(editor.hasFocus())
+            }
+        } finally {
+            release.countDown(); drainWorker()
+            onMainChecked { invoke("cancelTransient"); setField("content", original) }
+            folder.deleteRecursively()
+        }
+    }
+
     fun testExpandedCandidatesKeepAssistantEditorAndCursor() {
+        val store = ContentStore(context)
+        val kind = io.secure.keyboard.data.DictionaryKind.ENGLISH
+        store.addDictionary("hello audit fixture", "hel", kind)
+        val fixtureId = store.dictionary(kind).last { it.word == "hello audit fixture" }.id
+        try {
         for (tool in listOf("translate", "ai")) {
             repeat(1) {
                 for (zh in listOf(true, false)) {
                     lateinit var editor: EditText
                     var panelHeight = 0
                     onMainChecked {
-                        invoke("openTool", tool)
                         setField("chinese", zh)
+                        invoke("openTool", tool)
                         editor = field<TextView>("translationTextView") as EditText
                         editor.requestFocus()
                         editor.setText(if (zh) "甲乙丙丁" else "hel tail")
@@ -502,7 +548,15 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                     }
                     instrumentation.waitForIdleSync()
                     onMainChecked {
-                        assertSame(editor, field<TextView>("translationTextView"))
+                        val currentEditor = field<TextView>("translationTextView") as EditText
+                        instrumentation.sendStatus(0, android.os.Bundle().apply {
+                            putString("assistant_selection_audit", org.json.JSONObject()
+                                .put("tool", tool).put("chinese", zh)
+                                .put("expectedStart", if (zh) 1 else 3).put("expectedEnd", 3)
+                                .put("actualStart", currentEditor.selectionStart).put("actualEnd", currentEditor.selectionEnd)
+                                .put("focused", currentEditor.hasFocus()).put("sameEditor", editor === currentEditor).toString())
+                        })
+                        assertSame(editor, currentEditor)
                         assertTrue(editor.isAttachedToWindow)
                         assertTrue(editor.hasFocus())
                         assertEquals(panelHeight, field<View>("box").height)
@@ -535,6 +589,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 }
             }
         }
+        } finally { store.deleteDictionary(fixtureId, kind) }
     }
 
     fun testAssistantEditorsReplaceSelectionAndDeleteAtCursor() {
@@ -1707,7 +1762,8 @@ class CandidateRenderingTest : InstrumentationTestCase() {
                 assertEquals(listOf(""), host.haptics.hostTextAtFeedback)
                 assertFalse(field<Boolean>("candidatesExpanded"))
                 assertFalse(field<ViewGroup>("body").getChildAt(0) is CandidateGrid)
-                assertEquals("收起键盘", field<View>("hideIcon").contentDescription)
+                assertEquals(if (service.session.showsCandidateMode()) "展开候选" else "收起键盘",
+                    field<View>("hideIcon").contentDescription)
                 cell.performClick()
                 assertEquals("Detached old cell must not commit again", 1, host.connection.commits.size)
                 assertEquals(1, host.haptics.effects.size)
@@ -1933,8 +1989,9 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             assertEquals(10, testRow.childCount)
             assertSame(labels[0], testRow.getChildAt(0))
             testStrip.updateCandidates(updated + "last")
-            assertEquals(13, testRow.childCount)
+            assertEquals("Only the initial viewport is attached", 10, testRow.childCount)
             assertSame(labels[0], testRow.getChildAt(0))
+            testStrip.scrollTo(testRow.width, 0)
         }
     }
 
@@ -2871,7 +2928,7 @@ class CandidateRenderingTest : InstrumentationTestCase() {
         } finally { onMainChecked { settings.editorPreview=false; invoke("clearPending") } }
     }
 
-    fun testEditorPreviewDirectCommitDoesNotWaitForWorkerOrClearSpan() {
+    fun testEditorPreviewSpacingQueuesWithoutBlockingAndPreservesOrder() {
         val host = attachActualHost()
         val settings = SettingsStore(context)
         try {
@@ -2879,23 +2936,61 @@ class CandidateRenderingTest : InstrumentationTestCase() {
             query(true, "wgkq")
             val expected = field<List<String>>("candidateTexts").first()
             val release = gateWorker()
-            var cleared = false
             try {
                 onMainChecked {
-                    host.connection.onComposingCleared = { cleared = true }
                     invoke("space")
-                    assertEquals("Candidate replaces preview synchronously", expected, host.editor.text.toString())
-                    assertFalse("No separate composing deletion", cleared)
-                    service.session.onUpdateSelection(0, 0, 4, 4, -1, -1)
-                    service.session.onUpdateSelection(4, 4, expected.length, expected.length, -1, -1)
-                    assertEquals(expected, host.editor.text.toString())
+                    assertTrue("Spacing waits on the worker without blocking UI", field<Boolean>("spacingPending"))
+                    invoke("type", "!")
+                    assertTrue("Following key stays ordered", field<ArrayDeque<*>>("queuedKeys").isNotEmpty())
                 }
             } finally { release.countDown() }
+            waitFor("Spaced candidate and queued punctuation committed") { host.editor.text.toString() == expected + "!" }
+            onMainChecked { assertFalse(field<Boolean>("spacingPending")) }
         } finally { onMainChecked {
-            host.connection.onComposingCleared = null
             settings.editorPreview = false
+            settings.autoChineseSpacing = false
             invoke("clearPending")
         } }
+    }
+
+    fun testPreviewSpacingPreservesSurroundingTextAndContinuousChinese() {
+        val host = attachActualHost()
+        val settings = SettingsStore(context)
+        try {
+            onMainChecked {
+                settings.editorPreview = true; settings.autoChineseSpacing = true
+                host.editor.setText("ab"); host.editor.setSelection(1)
+                service.session.editorPreview.update(host.connection, "ni", 1, 1)
+                assertEquals("anib", host.editor.text.toString())
+                assertTrue(service.session.commitInputText("你"))
+                service.session.clearComposition()
+                assertTrue(service.session.commitInputText("好"))
+            }
+            waitFor("Ordered spacing keeps both surrounding characters") { host.editor.text.toString() == "a 你好 b" }
+            onMainChecked { assertEquals(4, host.editor.selectionStart) }
+        } finally { onMainChecked { settings.autoChineseSpacing = false; settings.editorPreview = false; invoke("clearPending") } }
+    }
+
+    fun testPreviewSpacingRejectsCommitAfterExternalCursorMove() {
+        val host = attachActualHost()
+        val settings = SettingsStore(context)
+        val release = gateWorker()
+        try {
+            onMainChecked {
+                settings.editorPreview = true; settings.autoChineseSpacing = true
+                host.editor.setText("ab"); host.editor.setSelection(1)
+                service.session.editorPreview.update(host.connection, "ni", 1, 1)
+                assertTrue(service.session.commitInputText("你"))
+                host.editor.setSelection(2)
+                service.session.onUpdateSelection(1, 1, 2, 2, -1, -1)
+            }
+            release.countDown(); drainWorker()
+            onMainChecked {
+                assertEquals("ab", host.editor.text.toString())
+                assertEquals(2, host.editor.selectionStart)
+                assertTrue(host.connection.commits.isEmpty())
+            }
+        } finally { release.countDown(); onMainChecked { settings.autoChineseSpacing = false; settings.editorPreview = false; invoke("clearPending") } }
     }
 
     fun testEditorPreviewMissingSpanDoesNotCancelOwnCursorUpdate() {

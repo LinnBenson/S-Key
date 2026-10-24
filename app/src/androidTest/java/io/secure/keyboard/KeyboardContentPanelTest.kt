@@ -224,9 +224,9 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
 
 
     fun testThousandRowsStayVirtualizedAcrossRepeatedOpenAndClose() {
-        SettingsStore(sandbox).clipboardLimit = 1000
+        SettingsStore(sandbox).clipboardLimit = 100
         val values = org.json.JSONArray()
-        repeat(1000) { values.put(org.json.JSONObject().put("id", "fixture-$it").put("text", "copy-$it")) }
+        repeat(100) { values.put(org.json.JSONObject().put("id", "fixture-$it").put("text", "copy-$it")) }
         File(sandbox.noBackupFilesDir, "content/content.json").writeText(
             org.json.JSONObject().put("clipboard", values).toString())
         val samples = mutableListOf<String>()
@@ -236,7 +236,7 @@ class KeyboardContentPanelTest : InstrumentationTestCase() {
             instrumentation.checkedMain {
                 assertTrue("Only viewport rows may be attached", rows().size in 1..30)
                 val list = rows().first().parent as ListView
-                assertEquals(1000, list.count)
+                assertEquals(100, list.count)
                 list.setSelection(999)
             }
             instrumentation.waitForIdleSync()

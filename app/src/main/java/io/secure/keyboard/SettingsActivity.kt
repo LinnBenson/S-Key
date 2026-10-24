@@ -122,6 +122,9 @@ open class SettingsActivity : ComponentActivity() {
     override fun onStop() { settingsVisible = false; model.hide(); ModelImportTransfer.detach(voiceObserver); super.onStop() }
     override fun onResume() {
         super.onResume()
+        // A covering Activity can finish before this Activity reaches onStop. In that case
+        // Android resumes us without another onStart; reclaim the currently visible observer.
+        ModelImportTransfer.attach(voiceObserver)
         microphone = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         val manager = getSystemService(InputMethodManager::class.java)
         enabledIme = manager.enabledInputMethodList.any { it.packageName == packageName }
@@ -475,6 +478,7 @@ open class SettingsActivity : ComponentActivity() {
         }
         Group("中文输入偏好") {
             Toggle("简繁转换", s.traditionalOutput) { s.traditionalOutput = it }
+            Toggle("自动联想", s.chineseAssociation) { s.chineseAssociation = it }
             Toggle("输入框预览", s.editorPreview) { s.editorPreview = it }
             Toggle("自动插入空格", s.autoChineseSpacing) { s.autoChineseSpacing = it }
             Toggle("空格显示英语翻译", s.spaceEnglishGloss) { s.spaceEnglishGloss = it }
@@ -506,6 +510,7 @@ open class SettingsActivity : ComponentActivity() {
         model.revision
         Group("英文输入偏好") {
             Toggle("空格选择首选词", model.settings.englishSpaceSelectsFirst) { model.settings.englishSpaceSelectsFirst = it }
+            Toggle("自动联想", model.settings.englishAssociation) { model.settings.englishAssociation = it }
             Toggle("英文单词补全", model.settings.englishCompletion) { model.settings.englishCompletion = it }
         }
     }
@@ -516,6 +521,7 @@ open class SettingsActivity : ComponentActivity() {
             Toggle("按键声音", s.keySound) { s.keySound = it }
             Toggle("按键振动", s.vibration) { s.vibration = it }
             Range("振动强度", s.vibrationStrength, 1, 100, "%") { s.vibrationStrength = it }
+            Info("将震动强度设为 10% 将尝试使用系统震动")
         }
         Group("手势与长按") {
             Toggle("长按输入符号", s.longPressSymbols) { s.longPressSymbols = it }
@@ -695,16 +701,16 @@ open class SettingsActivity : ComponentActivity() {
         model.revision
         Group(pageTitle(route)) {
             if (route == "clipboard") {
-                HorizontalChoices(listOf("none" to "不保存历史", "timed" to "定时清理", "forever" to "长期保留"), model.settings.clipboardRetention) { id ->
-                    model.task { model.settings.clipboardRetention = id; model.content.trimClipboard() }
+                HorizontalChoices(listOf("none" to "不保存历史", "timed" to "定时清理", "forever" to "长期保留"), model.settings.clipboardRetention, enabled = !model.busy) { id ->
+                    model.setClipboardRetention(id)
                 }
                 if (model.settings.clipboardRetention == "timed") {
-                    Range("保留时间", model.settings.clipboardRetentionHours, 1, 720, "小时") { value ->
+                    Range("保留时间", model.settings.clipboardRetentionHours, 1, 72, "小时") { value ->
                         model.settings.clipboardRetentionHours = value
                         model.task { model.content.trimClipboard() }
                     }
                 }
-                Range("未置顶历史上限", model.settings.clipboardLimit, 1, 1000, "条") { value ->
+                Range("未置顶历史上限", model.settings.clipboardLimit, 1, 100, "条") { value ->
                     model.settings.clipboardLimit = value
                     model.task { model.content.trimClipboard() }
                 }
@@ -821,11 +827,16 @@ open class SettingsActivity : ComponentActivity() {
         var notices by remember { mutableStateOf("正在读取声明…") }
         LaunchedEffect(Unit) {
             notices = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                listOf("SHERPA_ONNX_LICENSE", "ONNXRUNTIME_LICENSE", "ONNXRUNTIME_THIRD_PARTY_NOTICES")
-                    .joinToString("\n\n") { assets.open("voice-licenses/$it").bufferedReader().use { reader -> reader.readText() } } +
-                    "\n\nOpenCC 1.1.9 · 简转繁数据\n" + assets.open("opencc/LICENSE").bufferedReader().use { it.readText() } +
-                    "\n\n" + assets.open("learning/NOTICE.txt").bufferedReader().use { it.readText() } +
-                    "\n\n" + assets.open("learning/LICENSE.txt").bufferedReader().use { it.readText() }
+                fun collect(path: String): List<String> = assets.list(path).orEmpty().flatMap { name ->
+                    val child = if (path.isEmpty()) name else "$path/$name"
+                    if (assets.list(child).orEmpty().isNotEmpty()) collect(child)
+                    else if (name.contains("LICENSE", true) || name.contains("NOTICE", true) ||
+                        name.contains("COPYRIGHT", true) || child == "runtime-licenses/DEPENDENCIES.txt") listOf(child)
+                    else emptyList()
+                }
+                collect("").sorted().joinToString("\n\n") { path ->
+                    "$path\n" + assets.open(path).bufferedReader().use { it.readText() }
+                }
             }
         }
         Group("开源组件") {

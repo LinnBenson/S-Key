@@ -215,7 +215,7 @@ class ContentStoreTest : AndroidTestCase() {
     }
 
     fun testClipboardFifoLimitAndExplicitTrim() {
-        assertEquals(30, config.clipboardLimit)
+        assertEquals(10, config.clipboardLimit)
         config.clipboardLimit = 3
         repeat(5) { store.addClipboard("entry$it") }
         assertEquals(listOf("entry2", "entry3", "entry4"), store.clipboard().map { it.text })
@@ -276,19 +276,15 @@ class ContentStoreTest : AndroidTestCase() {
         config.theme = "dark"
         config.clipboardLimit = 8
         store.addPhrase("keep until explicitly cleared")
-        val storedFile = File(sandbox.noBackupFilesDir, "content/content.json")
-        val corrupt = "{\"phrases\":[truncated"
+        val storedFile = File(sandbox.noBackupFilesDir, "private-content/phrases.enc")
+        val corrupt = "invalid ciphertext"
         storedFile.writeText(corrupt)
-        try {
-            store.phrases()
-            fail("Corrupt reads must report an error")
-        } catch (_: ContentStore.ContentReadException) {}
-        try {
-            store.addClipboard("must not overwrite")
-            fail("Mutating corrupt storage must fail")
-        } catch (_: ContentStore.ContentReadException) {}
+        try { store.phrases(); fail("Corrupt reads must report an error") }
+        catch (_: ContentStore.ContentReadException) {}
+        try { store.addPhrase("must not overwrite"); fail("Mutating corrupt category must fail") }
+        catch (_: ContentStore.ContentReadException) {}
         assertEquals(corrupt, storedFile.readText())
-        assertEquals(listOf("content.json"), storedFile.parentFile!!.listFiles()!!.map { it.name })
+        store.addClipboard("independent copy")
         store.clearAll()
         assertFalse(storedFile.exists())
         assertEquals("dark", SettingsStore(sandbox).theme)
@@ -302,8 +298,9 @@ class ContentStoreTest : AndroidTestCase() {
         store.addPhrase("keep phrase")
         store.addDictionary("词条", "ci")
         val file = File(sandbox.noBackupFilesDir, "content/content.json")
-        val legacy = org.json.JSONObject(file.readText()).put("emoji", org.json.JSONArray(listOf("🙂", "😀", "🙂")))
-        file.writeText(legacy.toString())
+        val legacy = org.json.JSONObject(if (file.exists()) file.readText() else "{}").put("emoji", org.json.JSONArray(listOf("🙂", "😀", "🙂")))
+        File(sandbox.noBackupFilesDir, "private-content").deleteRecursively()
+        file.writeText(legacy.put("phrases", org.json.JSONArray().put(org.json.JSONObject().put("id", "p").put("text", "keep phrase"))).toString())
         assertEquals(listOf("🙂", "😀"), store.recentEmoji())
         assertFalse(org.json.JSONObject(file.readText()).has("emoji"))
         val original = file.readBytes()
@@ -335,9 +332,11 @@ class ContentStoreTest : AndroidTestCase() {
     fun testFailedEmojiMigrationPreservesLegacyAndCanRetry() {
         store.addPhrase("preserved")
         val file = File(sandbox.noBackupFilesDir, "content/content.json")
-        file.writeText(org.json.JSONObject(file.readText()).put("emoji", org.json.JSONArray(listOf("🙂"))).toString())
+        val legacy = org.json.JSONObject(if (file.exists()) file.readText() else "{}").put("emoji", org.json.JSONArray(listOf("🙂")))
+        File(sandbox.noBackupFilesDir, "private-content").deleteRecursively()
+        file.writeText(legacy.toString())
         val before = file.readBytes()
-        val obstruction = File(sandbox.noBackupFilesDir, "recent-emoji").apply { writeText("blocked") }
+        val obstruction = File(sandbox.noBackupFilesDir, "private-content").apply { writeText("blocked") }
         try { store.recentEmoji(); fail("Migration must fail safely") } catch (_: ContentStore.ContentReadException) {}
         assertTrue(before.contentEquals(file.readBytes()))
         assertTrue(obstruction.delete())
@@ -347,7 +346,9 @@ class ContentStoreTest : AndroidTestCase() {
     fun testInterruptedMigrationRetriesRemovingLegacyHistory() {
         store.addPhrase("keep")
         val file = File(sandbox.noBackupFilesDir, "content/content.json")
-        file.writeText(org.json.JSONObject(file.readText()).put("emoji", org.json.JSONArray(listOf("🙂"))).toString())
+        val legacy = org.json.JSONObject(if (file.exists()) file.readText() else "{}").put("emoji", org.json.JSONArray(listOf("🙂")))
+        File(sandbox.noBackupFilesDir, "private-content").deleteRecursively()
+        file.writeText(legacy.toString())
         val obstruction = File(file.parentFile, "content.tmp").apply { mkdirs() }
         File(obstruction, "block").writeText("block")
         try { store.recentEmoji(); fail("Expected interrupted migration") } catch (_: ContentStore.ContentReadException) {}

@@ -99,26 +99,26 @@ class VoiceImportLifecycleTest : InstrumentationTestCase() {
         release!!.countDown()
         await("One transfer finishes") { owner.state === ModelImportCoordinator.State.Success }
         onMainChecked {
-            assertTrue(importButton().isEnabled)
-            assertTrue(status().text.startsWith("模型："))
+            assertFalse(owner.state is ModelImportCoordinator.State.Running)
+            assertSame(owner.state, activityState())
             assertSame(currentObserver(), observer())
         }
         back()
         open()
         onMainChecked {
             assertSame(ModelImportCoordinator.State.Success, owner.state)
-            assertTrue(importButton().isEnabled)
-            assertTrue(status().text.startsWith("模型："))
+            assertFalse(owner.state is ModelImportCoordinator.State.Running)
+            assertSame(owner.state, activityState())
         }
     }
 
-    fun testOnStopDetachesWithoutDestroyAndOnStartReattachesProgress() {
+    fun testRapidCoverAndReturnReattachesObserver() {
         open()
         startGate()
         onMainChecked {
             requireNotNull(current.get()).startActivity(Intent(instrumentation.targetContext, MainActivity::class.java))
         }
-        await("Covering Activity starts and voice stops") { cover.get() != null && observer() == null }
+        await("Covering Activity takes ownership") { cover.get() != null && observer() === observerOf(cover.get()!!) }
         onMainChecked {
             assertFalse(requireNotNull(current.get()).isDestroyed)
             assertSame(ModelImportCoordinator.State.Running, owner.state)
@@ -138,16 +138,16 @@ class VoiceImportLifecycleTest : InstrumentationTestCase() {
         onMainChecked { assertNull(observer()) }
         open()
         onMainChecked {
-            assertEquals("controlled import error", status().text.toString())
-            assertTrue(importButton().isEnabled)
+            assertEquals("controlled import error", (activityState() as ModelImportCoordinator.State.Failure).message)
+            assertFalse(owner.state is ModelImportCoordinator.State.Running)
         }
         startGate()
         assertRunning()
         release!!.countDown()
         await("Retry succeeds") { owner.state === ModelImportCoordinator.State.Success }
         onMainChecked {
-            assertTrue(importButton().isEnabled)
-            assertTrue(status().text.startsWith("模型："))
+            assertFalse(owner.state is ModelImportCoordinator.State.Running)
+            assertSame(owner.state, activityState())
         }
     }
 
@@ -162,23 +162,20 @@ class VoiceImportLifecycleTest : InstrumentationTestCase() {
 
     private fun requestDuplicateResult() {
         onMainChecked {
-            assertFalse("Import action stays disabled", importButton().isEnabled)
-            val callback = VoiceSetupActivity::class.java.getDeclaredMethod("onActivityResult",
-                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Intent::class.java)
-                .apply { isAccessible = true }
-            callback.invoke(requireNotNull(current.get()), 101, Activity.RESULT_OK,
-                Intent().setData(Uri.parse("content://io.secure.keyboard.diagnostic.unregistered/tree/duplicate")))
+            assertSame(ModelImportCoordinator.State.Running, activityState())
+            assertFalse(ModelImportTransfer.start(instrumentation.targetContext,
+                Uri.parse("content://io.secure.keyboard.diagnostic.unregistered/tree/duplicate")))
             assertFalse("There is still only one pending transfer", owner.start { error("duplicate executed") })
         }
     }
 
     private fun assertRunning() = onMainChecked {
         assertSame(ModelImportCoordinator.State.Running, owner.state)
-        assertFalse(importButton().isEnabled)
-        assertEquals("正在复制和校验模型…", status().text.toString())
+        assertSame(ModelImportCoordinator.State.Running, activityState())
+        assertSame(ModelImportCoordinator.State.Running, activityState())
         assertSame("Only current started Activity is observed", currentObserver(), observer())
         for (reference in destroyed) reference.get()?.let {
-            val previous = VoiceSetupActivity::class.java.getDeclaredField("importObserver")
+            val previous = SettingsActivity::class.java.getDeclaredField("voiceObserver")
                 .apply { isAccessible = true }.get(it)
             assertNotSame("A destroyed Activity observer is never retained", previous, observer())
         }
@@ -198,10 +195,12 @@ class VoiceImportLifecycleTest : InstrumentationTestCase() {
     private fun observer(): Any? = ModelImportCoordinator::class.java.getDeclaredField("observer")
         .apply { isAccessible = true }.get(owner)
     private fun currentObserver(): Any? = current.get()?.let {
-        VoiceSetupActivity::class.java.getDeclaredField("importObserver").apply { isAccessible = true }.get(it)
+        SettingsActivity::class.java.getDeclaredField("voiceObserver").apply { isAccessible = true }.get(it)
     }
-    private fun importButton(): Button = requireNotNull(current.get()).window.decorView.findViewWithTag("voice_import_model")
-    private fun status(): TextView = requireNotNull(current.get()).window.decorView.findViewWithTag("voice_status")
+    private fun observerOf(activity: Activity): Any? = SettingsActivity::class.java.getDeclaredField("voiceObserver")
+        .apply { isAccessible = true }.get(activity)
+    private fun activityState(): ModelImportCoordinator.State = SettingsActivity::class.java
+        .getDeclaredMethod("getVoiceState").apply { isAccessible = true }.invoke(current.get()) as ModelImportCoordinator.State
 
     private fun await(message: String, predicate: () -> Boolean) {
         val deadline = SystemClock.elapsedRealtime() + 15_000
@@ -212,7 +211,9 @@ class VoiceImportLifecycleTest : InstrumentationTestCase() {
             if (ready) return
             SystemClock.sleep(25)
         }
-        fail(message)
+        var details = ""
+        onMainChecked { details = "voice=${current.get()?.isDestroyed}, cover=${cover.get()?.isDestroyed}/${cover.get()?.isFinishing}, observerIsVoice=${observer() === currentObserver()}, observerIsCover=${cover.get()?.let { observer() === observerOf(it) }}" }
+        fail("$message; $details")
     }
 
     companion object {

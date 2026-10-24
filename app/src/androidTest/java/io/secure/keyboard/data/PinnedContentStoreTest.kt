@@ -208,12 +208,13 @@ class PinnedContentStoreTest : AndroidTestCase() {
         assertTrue(ContentStore(sandbox).clipboard().single().pinned)
         assertTrue(ContentStore(sandbox).phrases().single().pinned)
         val corrupt = """{"clipboard":[{"id":"c","text":"old copy","pinned":"yes"}]}"""
-        contentFile().writeText(corrupt)
+        val encrypted = EncryptedContentFile(File(sandbox.noBackupFilesDir, "private-content/clipboard.enc"))
+        encrypted.write(org.json.JSONObject(corrupt).getJSONArray("clipboard").toString())
         try {
             store.setClipboardPinned("c", false)
             fail("Malformed pin metadata must not silently overwrite content")
         } catch (_: ContentStore.ContentReadException) {}
-        assertEquals(corrupt, contentFile().readText())
+        assertEquals(org.json.JSONObject(corrupt).getJSONArray("clipboard").toString(), encrypted.read())
     }
 
     fun testPinMutationsPreserveDictionaryOnlySnapshotAndRevision() {

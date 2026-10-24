@@ -1,54 +1,23 @@
-# Packaged JVM runtime and build-wrapper notices
+# Runtime notices
 
-## APK runtime scope
+Original S-Key code is licensed under Apache-2.0; see the root LICENSE and NOTICE.
+Third-party materials retain their own licenses.
 
-The application packages Kotlin Standard Library **2.0.21** and its
-`org.jetbrains:annotations:13.0` dependency. Both pinned Maven POMs declare
-Apache License 2.0. Their binary JARs contain no standalone license or copyright
-files, so explicit readable copies are packaged under
-[`app/src/main/assets/runtime-licenses`](../app/src/main/assets/runtime-licenses/).
-That directory is also retained in the source archive.
+The release resolves Kotlin stdlib 2.2.10 and JetBrains annotations 23.0.0.
+The build generates `assets/runtime-licenses/DEPENDENCIES.txt` from the resolved
+release runtime artifacts, including AndroidX, Compose, Miuix 0.5.1, OkHttp 4.12.0,
+Okio 3.6.0, coroutines and JSpecify. This avoids confusing requested versions with
+resolved versions. The local sherpa-onnx AAR is 1.13.8.
 
-- [Kotlin license](../app/src/main/assets/runtime-licenses/KOTLIN-LICENSE.txt)
-  and [original copyright notice](../app/src/main/assets/runtime-licenses/KOTLIN-COPYRIGHT.txt)
-- [Runtime attributions](../app/src/main/assets/runtime-licenses/NOTICE.txt), including
-  Guava-derived unsigned arithmetic and map capacity, GWT-derived collection base
-  classes, and Boost-derived inverse hyperbolic functions
-- Unchanged upstream [Guava Apache license](../app/src/main/assets/runtime-licenses/KOTLIN-GUAVA-LICENSE.txt),
-  [GWT Apache license](../app/src/main/assets/runtime-licenses/KOTLIN-GWT-LICENSE.txt),
-  and [Boost license](../app/src/main/assets/runtime-licenses/KOTLIN-BOOST-LICENSE.txt)
-- [Annotations original copyright headers](../app/src/main/assets/runtime-licenses/JETBRAINS-ANNOTATIONS-COPYRIGHT.txt),
-  including Sascha Weinreuter's attribution in addition to JetBrains
-- [Pinned provenance and notice hashes](../app/src/main/assets/runtime-licenses/PROVENANCE.txt)
+Full license and copyright texts are under `app/src/main/assets/`; the application
+license page recursively displays all packaged LICENSE, NOTICE and COPYRIGHT files.
+Kotlin license files were fetched from the official v2.2.10 tag. Annotations headers
+were extracted from the 23.0.0 sources JAR, retaining their original wording (with
+normalized line endings). Source URLs and hashes are in runtime-licenses/PROVENANCE.txt.
 
-The matching Kotlin 2.0.21 sources JAR was examined, not the compiler's dependency
-list. `UnsignedKt`, `MathKt__MathJVMKt`, `MapsKt__MapsJVMKt`, `AbstractList`,
-`AbstractMap`, and the `org.jetbrains.annotations` / `org.intellij.lang.annotations`
-classes were confirmed in the existing ARM64 APK's DEX class definitions. This
-build does not shrink the standard library.
-
-ThreeTen is **not included as a runtime notice**: no ThreeTen-derived code or
-attribution was found in the exact 2.0.21 JVM stdlib sources JAR, and the release's
-license inventory and third-party-license directory contain no ThreeTen entry.
-Do not infer newer Kotlin, Kotlin/Native, JavaScript, Wasm, compiler, test, or
-Gradle-distribution dependency licenses apply to this JVM runtime. Re-audit this
-scope when upgrading dependencies. No upstream runtime source files were modified;
-Android tooling converts their JVM bytecode to DEX.
-
-## Official provenance
-
-- [Kotlin 2.0.21 license inventory](https://github.com/JetBrains/kotlin/blob/v2.0.21/license/README.md)
-- [Kotlin 2.0.21 third-party license directory](https://github.com/JetBrains/kotlin/tree/v2.0.21/license/third_party)
-- [Kotlin stdlib 2.0.21 POM](https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.0.21/kotlin-stdlib-2.0.21.pom)
-- [Kotlin stdlib 2.0.21 sources](https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.0.21/kotlin-stdlib-2.0.21-sources.jar)
-- [Annotations 13.0 POM](https://repo.maven.apache.org/maven2/org/jetbrains/annotations/13.0/annotations-13.0.pom)
-- [Annotations 13.0 sources](https://repo.maven.apache.org/maven2/org/jetbrains/annotations/13.0/annotations-13.0-sources.jar)
-- [Guava map-capacity source referenced by Kotlin](https://github.com/google/guava/blob/v28.2/guava/src/com/google/common/collect/Maps.java)
-
-Audited cached binary SHA-256 values:
-
-- `kotlin-stdlib-2.0.21.jar`: `f31cc53f105a7e48c093683bbd5437561d1233920513774b470805641bedbc09`
-- `annotations-13.0.jar`: `ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478`
+The existing Guava, GWT and Boost attributions are retained. Font, dictionary,
+OpenCC, emoji, CC-CEDICT, sherpa-onnx and ONNX Runtime notices remain separate;
+the root Apache license does not override these data licenses.
 
 ## Gradle 8.9 wrapper: source distribution only
 

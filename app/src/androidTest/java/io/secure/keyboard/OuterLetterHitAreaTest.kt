@@ -1,5 +1,7 @@
 package io.secure.keyboard
 
+import io.secure.keyboard.diagnostics.checkedMain
+
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -70,8 +72,11 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
         }
     }
 
+    private lateinit var explicitInputPreferences: ExplicitInputPreferences
+
     override fun setUp() {
         super.setUp()
+        explicitInputPreferences = ExplicitInputPreferences(context)
         SettingsStore(context).let {
             originalCompletion = it.englishCompletion
             originalFourCode = it.fourCodeAutoCommit
@@ -87,7 +92,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
                 Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK,
             ),
         )
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             harness = ServiceHarness()
             service = harness.create(context)
             editor = EditText(activity).apply {
@@ -110,7 +115,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
         val deadline = SystemClock.uptimeMillis() + 60_000
         var ready = false
         while (!ready && SystemClock.uptimeMillis() < deadline) {
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 ready = field<Boolean>("loaded") && root.isAttachedToWindow && key("a").width > 0
             }
             if (!ready) SystemClock.sleep(25)
@@ -120,7 +125,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
 
     override fun tearDown() {
         try {
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 if (::harness.isInitialized) harness.close()
                 if (::activity.isInitialized) activity.finish()
             }
@@ -131,12 +136,13 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
                 it.longPressSymbols = originalLongPress
             }
         } finally {
+            explicitInputPreferences.close()
             super.tearDown()
         }
     }
 
     fun testActualProductionRowHasExactlyUnchangedPixelsAndContentGeometry() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             for (chinese in listOf(true, false)) for (upper in listOf(false, true)) {
                 for (width in listOf(721, 1080, 1801)) for (height in listOf(dp(36), dp(64))) {
                     for (split in listOf(false, true)) {
@@ -213,7 +219,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
     fun testEveryPartOfBothAddedZonesTypesChineseAndEnglish() {
         for (chinese in listOf(true, false)) {
             reset(chinese)
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 val expected = StringBuilder()
                 for (letter in listOf("a", "l")) {
                     val target = key(letter)
@@ -234,7 +240,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
     fun testOneFingerInIndentAndOneOnSameKeyPreserveBothTapsInEitherOrder() {
         for (chinese in listOf(true, false)) for (reverseRelease in listOf(false, true)) {
             reset(chinese)
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 val expected = StringBuilder()
                 for (letter in listOf("a", "l")) for (indentFirst in listOf(false, true)) {
                     val target = key(letter)
@@ -271,7 +277,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
     fun testIndentAndOtherKeysOrRowsPreserveSplitPointerReleaseOrder() {
         for (chinese in listOf(true, false)) for (reverse in listOf(false, true)) {
             reset(chinese)
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 val expected = StringBuilder()
                 for ((edge, other) in listOf("a" to "s", "l" to "k", "a" to "l", "a" to "q", "l" to "p", "a" to "m")) {
                     down(4, center(addedZone(key(edge), edge == "a")))
@@ -287,7 +293,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
 
     fun testAddedZonesDoNotStealAdjacentRowsAndRespectSharedBoundaries() {
         reset(false)
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val a = key("a")
             val l = key("l")
             val left = center(addedZone(a, true))
@@ -316,7 +322,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
         // EditText's InputConnection posts key events to the host. Let that actual host work
         // execute before asserting its result; the synchronous assertion above proves routing.
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertEquals("The row below the right indent remains Delete", "qpaskl", editor.text.toString())
         }
     }
@@ -324,7 +330,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
     fun testExpandedEdgesRespectOneShotShiftAndCapsInChineseAndEnglish() {
         for (chinese in listOf(true, false)) {
             reset(chinese)
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 tap(center(bounds(key("大写"))))
                 val a = key("A")
                 val l = key("L")
@@ -339,7 +345,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
                 } else assertText(false, "Al")
             }
             reset(chinese)
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 tap(center(bounds(key("大写"))))
                 tap(center(bounds(key("单次大写已开启"))))
                 assertTrue("Rapid Shift double tap locks case", field("capsLocked"))
@@ -354,7 +360,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
 
     fun testCancelOfOverlappingIndentTouchesLeavesNoPhantomOrStuckKey() {
         reset(false)
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val a = key("a")
             down(3, center(addedZone(a, true)))
             down(13, center(bounds(a.getChildAt(0))))
@@ -368,7 +374,7 @@ class OuterLetterHitAreaTest : InstrumentationTestCase() {
     }
 
     private fun reset(chinese: Boolean) {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             check(pointers.isEmpty())
             invoke("clearPending")
             editor.setText("")

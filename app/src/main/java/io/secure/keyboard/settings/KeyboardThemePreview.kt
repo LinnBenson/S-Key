@@ -24,7 +24,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 @Composable
 internal fun KeyboardThemePreview(tokens: SettingsStore.ThemeTokens, pins: List<String>, hints: String,
     initialCandidates: Boolean = false, initialShifted: Boolean = false,
-    borderWidth: Int = 0, horizontalGap: Int = 4, verticalGap: Int = 6, cornerRadius: Int = 9, enterCornerRadius: Int = 9) {
+    borderWidth: Int = 0, horizontalGap: Int = 4, verticalGap: Int = 5, cornerRadius: Int = 7, enterCornerRadius: Int = 30) {
     var candidates by remember { mutableStateOf(initialCandidates) }
     var shifted by remember { mutableStateOf(initialShifted) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
@@ -52,7 +52,7 @@ internal fun KeyboardThemePreview(tokens: SettingsStore.ThemeTokens, pins: List<
                 val radius = if (enter) enterCornerRadius else cornerRadius
                 Box(Modifier.weight(weight).fillMaxHeight().padding(horizontal = (horizontalGap / 2f * scale).dp, vertical = (verticalGap / 2f * scale).dp)
                     .clip(RoundedCornerShape((radius * scale).dp)).background(hexColor(background))
-                    .then(if (borderWidth > 0) Modifier.border((borderWidth * scale).dp, hexColor(tokens.hint), RoundedCornerShape((radius * scale).dp)) else Modifier)
+                    .then(if (borderWidth > 0) Modifier.border((borderWidth * scale).dp, hexColor(tokens.divider), RoundedCornerShape((radius * scale).dp)) else Modifier)
                     .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
                     .semantics { contentDescription = "预览按键：$label" }, contentAlignment = Alignment.Center) {
                     if (symbol != null) icon(symbol, foreground, Modifier.fillMaxSize())

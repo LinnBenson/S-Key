@@ -43,14 +43,7 @@ internal data class ApiConfiguration(
 internal class ApiConfigurationStore(context: Context) {
     private val app = context.applicationContext
     private val prefs = context.getSharedPreferences("api_configuration", Context.MODE_PRIVATE)
-    private fun key(): SecretKey {
-        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey("skey_api_config", null) as? SecretKey)?.let { return it }
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-            init(KeyGenParameterSpec.Builder("skey_api_config", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
-        }.generateKey()
-    }
+    private fun key(): SecretKey = StorageKeys.get("skey_api_config")
     fun load(): ApiConfiguration {
         val stored = prefs.getString("encrypted", null) ?: return ApiConfiguration()
         val parts = stored.split(':')

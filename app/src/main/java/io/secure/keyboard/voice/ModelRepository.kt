@@ -23,11 +23,25 @@ class ModelRepository(private val context: Context) {
             tokensFile.length() == TOKENS_SIZE &&
             File(root, "verified").isFile
 
-    fun verifyInstalled(isCurrent: () -> Boolean = { true }): Boolean {
-        if (!isCurrent()) return false
+    private fun stamp() = listOf(modelFile.length(), modelFile.lastModified(), tokensFile.length(), tokensFile.lastModified())
+
+    fun installedStamp(): List<Long> = stamp()
+
+    fun verifyInstalled(isCurrent: () -> Boolean = { true }): Boolean = IMPORT_LOCK.withLock {
+        if (!isCurrent()) return@withLock false
         check(isInstalled()) { "请先导入离线普通话模型" }
-        return verify(modelFile, MODEL_SIZE, MODEL_SHA, isCurrent) &&
-            verify(tokensFile, TOKENS_SIZE, TOKENS_SHA, isCurrent)
+        val before = stamp()
+        val key = root.canonicalPath
+        if (verifiedStamps[key] == before || File(root, "verified").readText() == MODEL_ID + "\n" + before.joinToString(",")) {
+            verifiedStamps[key] = before
+            return@withLock true
+        }
+        if (!verify(modelFile, MODEL_SIZE, MODEL_SHA, isCurrent) ||
+            !verify(tokensFile, TOKENS_SIZE, TOKENS_SHA, isCurrent)) return@withLock false
+        check(before == stamp()) { "模型已更改，请重试" }
+        verifiedStamps[key] = before
+        File(root, "verified").writeText(MODEL_ID + "\n" + before.joinToString(","))
+        true
     }
 
     /** Same lock as import: never delete the live staging directory. No user files are touched. */
@@ -93,6 +107,8 @@ class ModelRepository(private val context: Context) {
                 File(staging, "verified").writeText(MODEL_ID)
                 if (root.exists()) check(root.deleteRecursively()) { "无法清理旧模型" }
                 check(staging.renameTo(root)) { "无法保存模型" }
+                verifiedStamps[root.canonicalPath] = stamp()
+                File(root, "verified").writeText(MODEL_ID + "\n" + stamp().joinToString(","))
             } finally {
                 staging.deleteRecursively()
             }
@@ -137,6 +153,7 @@ class ModelRepository(private val context: Context) {
     private fun ByteArray.hex() = joinToString("") { "%02x".format(it.toInt() and 255) }
 
     companion object {
+        private val verifiedStamps = mutableMapOf<String, List<Long>>()
         private val IMPORT_LOCK = java.util.concurrent.locks.ReentrantLock()
         const val MODEL_ID = "sherpa-onnx-streaming-zipformer-small-ctc-zh-int8-2025-04-01"
         const val MODEL_SIZE = 26342340L

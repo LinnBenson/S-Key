@@ -1,11 +1,11 @@
 OFFLINE KEYBOARD: PACKAGED JVM RUNTIME NOTICES
 
-Kotlin Standard Library 2.0.21
-Artifact: org.jetbrains.kotlin:kotlin-stdlib:2.0.21
+Kotlin Standard Library 2.2.10
+Artifact: org.jetbrains.kotlin:kotlin-stdlib:2.2.10
 Copyright 2010-2024 JetBrains s.r.o. and Kotlin Programming Language contributors.
 License: Apache License, Version 2.0.
 See KOTLIN-LICENSE.txt and the unchanged KOTLIN-COPYRIGHT.txt.
-Official source: https://github.com/JetBrains/kotlin/tree/v2.0.21
+Official source: https://github.com/JetBrains/kotlin/tree/v2.2.10
 
 The JVM standard library includes the following third-party-derived code:
 
@@ -37,12 +37,10 @@ Derived from boost special math functions.
 Copyright Eric Ford & Hubert Holin 2001.
 License: Boost Software License 1.0; see KOTLIN-BOOST-LICENSE.txt.
 
-IntelliJ IDEA Annotations 13.0
-Artifact: org.jetbrains:annotations:13.0
-Copyright 2000-2009 JetBrains s.r.o.
-Copyright 2000-2012 JetBrains s.r.o.
-Copyright 2000-2013 JetBrains s.r.o.
-Copyright 2006 Sascha Weinreuter
+IntelliJ IDEA Annotations 23.0.0
+Artifact: org.jetbrains:annotations:23.0.0
+Copyright 2000-2020 JetBrains s.r.o.
+Copyright 2000-2021 JetBrains s.r.o.
 License: Apache License, Version 2.0; see KOTLIN-LICENSE.txt.
 See JETBRAINS-ANNOTATIONS-COPYRIGHT.txt for original headers and source mapping.
 

@@ -115,10 +115,12 @@ internal class LifetimeServiceFixture(private val instrumentation: Instrumentati
     fun invoke(name: String): Any? = io.secure.keyboard.SessionTestAccess.method(name).apply { isAccessible = true }.invoke(service)
 
     override fun close() {
+        var workers = emptyList<ExecutorService>()
         instrumentation.checkedMain {
-            if (::service.isInitialized) harness.close()
+            if (::service.isInitialized) { workers = sessionWorkers(service); harness.close() }
             if (::activity.isInitialized) activity.finish()
         }
+        awaitStoppedWorkers(workers)
         instrumentation.waitForIdleSync()
         sandbox.close()
     }

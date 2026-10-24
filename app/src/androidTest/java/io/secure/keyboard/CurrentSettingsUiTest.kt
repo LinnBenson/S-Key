@@ -51,6 +51,15 @@ class CurrentSettingsUiTest : InstrumentationTestCase() {
         }
         throw AssertionError("Not clickable: $label")
     }
+    fun testAssociationPreferencesAndVibrationHintAreVisible() {
+        open("input")
+        await("自动联想")
+        await("输入框预览")
+        open("input_english")
+        await("自动联想")
+        open("keyboard")
+        await("将震动强度设为 10% 将尝试使用系统震动")
+    }
     fun testEmojiShortcutAddEditAndDelete() {
         val prefs = instrumentation.targetContext.getSharedPreferences("settings", 0)
         val key = io.secure.keyboard.data.EmojiShortcutStore.KEY

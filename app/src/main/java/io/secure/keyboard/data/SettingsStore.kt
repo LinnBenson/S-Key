@@ -35,11 +35,11 @@ class SettingsStore(context: Context) {
         set(value) { prefs.edit().putBoolean("voiceAutoTranslate", value).apply() }
 
     var editorPreview: Boolean
-        get() = prefs.getBoolean("editorPreview", false)
+        get() = prefs.getBoolean("editorPreview", true)
         set(value) { prefs.edit().putBoolean("editorPreview", value).apply() }
 
     var autoChineseSpacing: Boolean
-        get() = prefs.getBoolean("autoChineseSpacing", false)
+        get() = prefs.getBoolean("autoChineseSpacing", true)
         set(value) { prefs.edit().putBoolean("autoChineseSpacing", value).apply() }
 
     var voiceMode: String
@@ -53,7 +53,7 @@ class SettingsStore(context: Context) {
         get() = prefs.getString("translationTarget", "en") ?: "en"
         set(value) { prefs.edit().putString("translationTarget", value).apply() }
 
-    /** Shared keyboard geometry, in dp; defaults preserve the original key insets. */
+    /** Shared keyboard geometry, in dp; shared by the light and dark themes. */
     var keyBorderWidth: Int
         get() = prefs.getInt("keyDesign_border", 0).coerceIn(0, 4)
         set(value) { prefs.edit().putInt("keyDesign_border", value.coerceIn(0, 4)).apply() }
@@ -61,14 +61,14 @@ class SettingsStore(context: Context) {
         get() = prefs.getInt("keyDesign_horizontal", 4).coerceIn(0, 16)
         set(value) { prefs.edit().putInt("keyDesign_horizontal", value.coerceIn(0, 16)).apply() }
     var keyVerticalGap: Int
-        get() = prefs.getInt("keyDesign_vertical", 6).coerceIn(0, 16)
+        get() = prefs.getInt("keyDesign_vertical", 5).coerceIn(0, 16)
         set(value) { prefs.edit().putInt("keyDesign_vertical", value.coerceIn(0, 16)).apply() }
 
     var keyCornerRadius: Int
-        get() = prefs.getInt("keyDesign_radius", 9).coerceIn(0, 30)
+        get() = prefs.getInt("keyDesign_radius", 7).coerceIn(0, 30)
         set(value) { prefs.edit().putInt("keyDesign_radius", value.coerceIn(0, 30)).apply() }
     var enterCornerRadius: Int
-        get() = prefs.getInt("keyDesign_enterRadius", 9).coerceIn(0, 30)
+        get() = prefs.getInt("keyDesign_enterRadius", 30).coerceIn(0, 30)
         set(value) { prefs.edit().putInt("keyDesign_enterRadius", value.coerceIn(0, 30)).apply() }
 
     fun resetUiDesign() {
@@ -186,17 +186,17 @@ class SettingsStore(context: Context) {
         ?: throw IllegalArgumentException("请输入不透明的六位十六进制颜色，例如 #336699；不支持透明度。")
 
     var clipboardRetention: String
-        get() = prefs.getString("clipboardRetention", "forever")?.takeIf { it in setOf("none", "timed", "forever") } ?: "forever"
+        get() = prefs.getString("clipboardRetention", "timed")?.takeIf { it in setOf("none", "timed", "forever") } ?: "timed"
         set(value) { require(value in setOf("none", "timed", "forever")); prefs.edit().putString("clipboardRetention", value).apply() }
 
     var clipboardRetentionHours: Int
-        get() = prefs.getInt("clipboardRetentionHours", 24).coerceIn(1, 720)
-        set(value) { prefs.edit().putInt("clipboardRetentionHours", value.coerceIn(1, 720)).apply() }
+        get() = prefs.getInt("clipboardRetentionHours", 24).coerceIn(1, 72)
+        set(value) { prefs.edit().putInt("clipboardRetentionHours", value.coerceIn(1, 72)).apply() }
 
     var clipboardLimit: Int
-        get() = prefs.getInt("clipboardLimit", 30)
+        get() = prefs.getInt("clipboardLimit", 10).coerceIn(1, 100)
         set(value) {
-            prefs.edit().putInt("clipboardLimit", value.coerceIn(1, 1000)).apply()
+            prefs.edit().putInt("clipboardLimit", value.coerceIn(1, 100)).apply()
         }
 
     internal var lastClipboardToken: Long
@@ -340,6 +340,14 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("englishSpaceSelectsFirst", false)
         set(value) { prefs.edit().putBoolean("englishSpaceSelectsFirst", value).apply() }
 
+    var chineseAssociation: Boolean
+        get() = prefs.getBoolean("chineseAssociation", true)
+        set(value) { prefs.edit().putBoolean("chineseAssociation", value).apply() }
+
+    var englishAssociation: Boolean
+        get() = prefs.getBoolean("englishAssociation", true)
+        set(value) { prefs.edit().putBoolean("englishAssociation", value).apply() }
+
     var englishCompletion: Boolean
         get() = prefs.getBoolean("englishCompletion", true)
         set(value) {
@@ -426,7 +434,7 @@ class SettingsStore(context: Context) {
         internal fun defaultLayoutProfile(outer: Boolean, landscape: Boolean): LayoutProfile =
             when {
                 outer && landscape -> LayoutProfile(heightDp = 210)
-                outer -> LayoutProfile(heightDp = 285)
+                outer -> LayoutProfile(heightDp = 275)
                 landscape -> LayoutProfile(heightDp = 240, sideGapDp = 120)
                 else -> LayoutProfile(heightDp = 270, sideGapDp = 20)
             }

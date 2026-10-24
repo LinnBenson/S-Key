@@ -16,14 +16,7 @@ import javax.crypto.spec.GCMParameterSpec
 /** Small AES-GCM envelope in noBackupFilesDir. Never stores source text or API secrets. */
 internal class AiConversationStore(context: Context) {
     private val file = AtomicFile(File(context.applicationContext.noBackupFilesDir, "ai_conversation.enc"))
-    private fun key(): SecretKey {
-        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey("skey_ai_conversation", null) as? SecretKey)?.let { return it }
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-            init(KeyGenParameterSpec.Builder("skey_ai_conversation", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
-        }.generateKey()
-    }
+    private fun key(): SecretKey = StorageKeys.get("skey_ai_conversation")
     fun load(): AiConversation? = synchronized(lock) {
         if (!file.baseFile.exists()) return@synchronized null
         try {

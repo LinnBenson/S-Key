@@ -1,5 +1,6 @@
 package io.secure.keyboard.diagnostics
 
+import kotlin.concurrent.withLock
 import android.app.Activity
 import android.app.Application
 import android.content.Intent
@@ -67,7 +68,7 @@ class VoiceImportOwnershipDiagnosticTest : InstrumentationTestCase() {
         probe.sample("before_gate", forcedGc = forcedGc)
         if (!forcedGc) probe.start()
         try {
-            synchronized(lock) {
+            (lock as java.util.concurrent.locks.ReentrantLock).withLock {
                 open()
                 requestImport()
                 waitUntil("Import reaches controlled lock") { pendingImports() >= 1 }
@@ -107,7 +108,7 @@ class VoiceImportOwnershipDiagnosticTest : InstrumentationTestCase() {
                 val coordinator = transfer.getDeclaredField("coordinator").apply { isAccessible = true }.get(null)
                 val observer = coordinator.javaClass.getDeclaredField("observer").apply { isAccessible = true }.get(coordinator)
                 val activity = current.get()
-                val expected = activity?.javaClass?.getDeclaredField("importObserver")?.apply { isAccessible = true }?.get(activity)
+                val expected = activity?.let { io.secure.keyboard.SettingsActivity::class.java.getDeclaredField("voiceObserver").apply { isAccessible = true }.get(it) }
                 data.put("appOwnedObserverAvailable", true)
                     .put("observerPresent", observer != null)
                     .put("observerMatchesCurrentActivityInvariant", observer === expected)
@@ -149,10 +150,8 @@ class VoiceImportOwnershipDiagnosticTest : InstrumentationTestCase() {
 
     private fun requestImport() {
         instrumentation.checkedMain {
-            val callback = VoiceSetupActivity::class.java.getDeclaredMethod("onActivityResult", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Intent::class.java)
-            callback.isAccessible = true
-            callback.invoke(requireNotNull(current.get()), 101, Activity.RESULT_OK,
-                Intent().setData(Uri.parse("content://io.secure.keyboard.diagnostic.unregistered/tree/gated")))
+            io.secure.keyboard.voice.ModelImportTransfer.start(instrumentation.targetContext,
+                Uri.parse("content://io.secure.keyboard.diagnostic.unregistered/tree/gated"))
         }
     }
 

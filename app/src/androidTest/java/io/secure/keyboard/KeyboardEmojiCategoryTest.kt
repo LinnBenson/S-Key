@@ -1,5 +1,7 @@
 package io.secure.keyboard
 
+import io.secure.keyboard.diagnostics.checkedMain
+
 import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
@@ -67,10 +69,10 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
         sandbox.root.deleteRecursively()
         sandbox.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().clear().commit()
         store = ContentStore(sandbox)
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             harness = Harness()
             service = harness.create(context)
-            setField("settings", SettingsStore(sandbox).apply { vibration = false })
+            setField("settings", SettingsStore(sandbox).apply { vibration = false; editorPreview = false; autoChineseSpacing = false })
             setField("content", store)
             connection = RecordingConnection(View(context))
             service.onCreateInputMethodInterface().startInput(
@@ -82,7 +84,7 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
         val deadline = SystemClock.uptimeMillis() + 60_000
         var loaded = false
         while (!loaded && SystemClock.uptimeMillis() < deadline) {
-            instrumentation.runOnMainSync { loaded = field<Boolean>("loaded") }
+            instrumentation.checkedMain { loaded = field<Boolean>("loaded") }
             if (!loaded) SystemClock.sleep(20)
         }
         assertTrue("Packaged emoji groups must finish loading", loaded)
@@ -90,7 +92,7 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
 
     override fun tearDown() {
         try {
-            instrumentation.runOnMainSync { if (::harness.isInitialized) harness.close() }
+            instrumentation.checkedMain { if (::harness.isInitialized) harness.close() }
             sandbox.root.deleteRecursively()
             sandbox.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().clear().commit()
         } finally {
@@ -99,7 +101,7 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
     }
 
     fun testWideCategoryCellsFillExactlyTheEmojiGridBounds() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             for (width in listOf(600, 841)) {
                 showEmoji(width)
                 assertEquals(10, categories.childCount)
@@ -119,7 +121,7 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
     }
 
     fun testNarrowCategoryCellsOverflowHorizontallyWithoutWrappingOrShrinking() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             for (width in listOf(280, 200)) {
                 showEmoji(width)
                 assertEquals(grid.left, bar.left)
@@ -134,7 +136,7 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
     }
 
     fun testRebuildAndFarEndCategoryTapRetainTheScrolledViewport() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             showEmoji(280)
             bar.scrollTo(categories.width - bar.width, 0)
             val farEnd = bar.scrollX
@@ -155,7 +157,7 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
     }
 
     fun testGridSwipesRevealEachSelectedCategoryOnlyAsNeeded() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             setField("emojiCategory", 3)
             showEmoji(210)
             assertEquals(0, bar.scrollX)
@@ -179,7 +181,7 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
     }
 
     fun testExplicitReopeningRestoresSmileysAndTheBeginningOfTheStrip() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             showEmoji(280)
             bar.scrollTo(categories.width - bar.width, 0)
             assertTrue(bar.scrollX > 0)
@@ -195,7 +197,7 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
     }
 
     fun testCategorySelectionAndEmojiInsertionStillUseTheSameGridData() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             showEmoji(600)
             categories.getChildAt(3).performClick()
             layoutBody(600)
@@ -208,18 +210,18 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
             assertEquals(listOf(expected.first()), connection.committed)
         }
         awaitHistory { store.recentEmoji().isNotEmpty() }
-        instrumentation.runOnMainSync { categories.getChildAt(0).performClick(); layoutBody(600) }
+        instrumentation.checkedMain { categories.getChildAt(0).performClick(); layoutBody(600) }
         awaitHistory {
             var ready = false
-            instrumentation.runOnMainSync { ready = grid.adapter.count == 1 }
+            instrumentation.checkedMain { ready = grid.adapter.count == 1 }
             ready
         }
-        instrumentation.runOnMainSync { assertEquals(connection.committed.single(), grid.adapter.getItem(0)) }
+        instrumentation.checkedMain { assertEquals(connection.committed.single(), grid.adapter.getItem(0)) }
     }
 
     fun testPasswordEmojiInsertionDoesNotRecordHistoryOrTouchDiskOnClick() {
         store.useEmoji("😎")
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             setField("secret", true)
             setField("emojiCategory", 1)
             showEmoji(600)
@@ -234,7 +236,7 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
     }
 
     fun testRejectedEmojiDoesNotRecordHistory() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             connection.accepts = false
             setField("emojiCategory", 1)
             showEmoji(600)
@@ -249,7 +251,7 @@ class KeyboardEmojiCategoryTest : InstrumentationTestCase() {
         val writer = field<java.util.concurrent.ExecutorService>("emojiWorker")
         writer.execute(object : Runnable { override fun run() { gate.await(10, java.util.concurrent.TimeUnit.SECONDS) } })
         try {
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 setField("emojiCategory", 1)
                 showEmoji(600)
                 grid.performItemClick(grid.getChildAt(0), 0, grid.adapter.getItemId(0))

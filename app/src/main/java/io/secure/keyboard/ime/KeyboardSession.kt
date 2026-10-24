@@ -189,6 +189,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var aiCustomPresetId: String? = null
     internal var aiCustomPresetName = ""
     internal var aiCustomTab: TextView? = null
+    internal var aiTaskTabs: LinearLayout? = null
     internal var aiCall: io.secure.keyboard.ai.AiWriting.Call? = null
     internal var aiCallFactory: () -> io.secure.keyboard.ai.AiWriting.Call = { io.secure.keyboard.ai.AiWriting.Call() }
     internal var aiConfiguration: () -> io.secure.keyboard.data.ApiConfiguration = { io.secure.keyboard.data.ApiConfigurationStore(this).load() }
@@ -402,7 +403,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
                 clearCandidates()
                 if (active) { renderHeader(); refreshCandidates() }
             }
-            else if (key == "fuzzyPairs" || key == "fuzzyPinyin" || key == "englishCompletion" || key == "emojiShortcuts")
+            else if (key == "fuzzyPairs" || key == "fuzzyPinyin" || key == "englishCompletion" || key == "englishAssociation" || key == "chineseAssociation" || key == "emojiShortcuts")
                 main.post { if (active) refreshCandidates() }
         }
     internal lateinit var profile: SettingsStore.LayoutProfile
@@ -559,6 +560,12 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             setInputView(root)
             refreshCandidates()
         }
+    }
+
+    fun onTrimMemory() {
+        // Revoke queued segments/editor ownership before trimming an active offline session.
+        if (voice != null && !usingAiVoice) cancelVoice()
+        voice?.trimMemory()
     }
 
     fun onDestroy() {

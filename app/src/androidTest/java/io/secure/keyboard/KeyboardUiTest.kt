@@ -1,5 +1,7 @@
 package io.secure.keyboard
 
+import io.secure.keyboard.diagnostics.checkedMain
+
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Activity
 import android.app.Application
@@ -84,8 +86,11 @@ class KeyboardUiTest : InstrumentationTestCase() {
 
     private val imeId = "io.secure.keyboard/.OfflineKeyboardService"
 
+    private lateinit var explicitInputPreferences: ExplicitInputPreferences
+
     override fun setUp() {
         super.setUp()
+        explicitInputPreferences = ExplicitInputPreferences(context)
         (context.applicationContext as Application).registerActivityLifecycleCallbacks(lifecycle)
         previousIme = shell("settings get secure default_input_method").trim()
         val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -119,7 +124,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 }
             )
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             editor =
                 requireNotNull(findEditor(activity.window.decorView)) {
                     "MainActivity test EditText missing"
@@ -129,11 +134,16 @@ class KeyboardUiTest : InstrumentationTestCase() {
         }
         waitFor("test activity window receives focus") {
             var focused = false
-            instrumentation.runOnMainSync { focused = activity.hasWindowFocus() }
+            instrumentation.checkedMain { focused = activity.hasWindowFocus() }
             focused
         }
-        instrumentation.runOnMainSync { showKeyboard() }
-        // Normalize the fixture if its initial attachment raced a previously visible session.
+        // A cold service binding may reject the first show request, and a retained tool
+        // panel must be exited before checking controls that exist only on the key page.
+        waitFor("IME surface attaches") {
+            instrumentation.checkedMain { showKeyboard() }
+            hasImeDescription("返回键盘") || hasImeDescription("切换中文和英文")
+        }
+        if (hasImeDescription("返回键盘")) tapImeDescription("返回键盘")
         waitFor("IME language control and current keyboard page appear") {
             hasImeDescription("切换中文和英文") && (hasImeDescription("ABC") || hasImeDescription("?123"))
         }
@@ -153,7 +163,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
     override fun tearDown() {
         try {
             if (::activity.isInitialized)
-                instrumentation.runOnMainSync {
+                instrumentation.checkedMain {
                     (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
                         .hideSoftInputFromWindow(editor.windowToken, 0)
                     activity.finish()
@@ -180,6 +190,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
             (context.applicationContext as Application).unregisterActivityLifecycleCallbacks(
                 lifecycle
             )
+            explicitInputPreferences.close()
             super.tearDown()
         }
     }
@@ -371,6 +382,19 @@ class KeyboardUiTest : InstrumentationTestCase() {
             finally { bitmap.recycle() }
             saveValidationScreenshot("18-custom-palette-selection-active.png")
             tapImeDescription("选择")
+            waitFor("unselected quick-edit control finishes repainting") {
+                if (quickSelectionEnabled()) return@waitFor false
+                val bounds = imeBounds("选择")
+                val frame = automation.takeScreenshot() ?: return@waitFor false
+                val target = Color.parseColor(colors.getValue("normalKeyBackground"))
+                try {
+                    var hits = 0
+                    for (y in maxOf(0, bounds.top) until minOf(frame.height, bounds.bottom))
+                        for (x in maxOf(0, bounds.left) until minOf(frame.width, bounds.right))
+                            if (frame.getPixel(x, y) == target) hits++
+                    hits >= 2
+                } finally { frame.recycle() }
+            }
             bitmap = requireNotNull(automation.takeScreenshot())
             try { expect(bitmap, imeBounds("选择"), "normalKeyBackground", "text") }
             finally { bitmap.recycle() }
@@ -495,7 +519,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
         prefs.chineseInputMode = io.secure.keyboard.engine.ChineseInputMode.MIXED
         lateinit var web: WebView
         val pageReady = CountDownLatch(1)
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             web =
                 WebView(activity).apply {
                     settings.javaScriptEnabled = true
@@ -539,7 +563,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
             waitFor("WebView HTML input receives focus") {
                 webValue(web, "document.activeElement.id") == "\"fixture\""
             }
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
                     .showSoftInput(web, InputMethodManager.SHOW_IMPLICIT)
             }
@@ -552,7 +576,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
         } finally {
             prefs.editorPreview = oldPreview
             prefs.chineseInputMode = oldMode
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
                     .hideSoftInputFromWindow(web.windowToken, 0)
                 web.destroy()
@@ -563,7 +587,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
     fun testEnglishCompletionInOfflineWebView() {
         lateinit var web: WebView
         val pageReady = CountDownLatch(1)
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             web =
                 WebView(activity).apply {
                     settings.javaScriptEnabled = true
@@ -607,7 +631,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
             waitFor("WebView HTML input receives focus") {
                 webValue(web, "document.activeElement.id") == "\"fixture\""
             }
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
                     .showSoftInput(web, InputMethodManager.SHOW_IMPLICIT)
             }
@@ -655,7 +679,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
             assertEquals("\"hello computer Hello \"", webValue(web))
             saveValidationScreenshot("14-offline-webview-english.png")
         } finally {
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
                     .hideSoftInputFromWindow(web.windowToken, 0)
                 web.destroy()
@@ -733,7 +757,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
     ): String {
         val completed = CountDownLatch(1)
         var value = ""
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             web.evaluateJavascript(script) { result ->
                 value = result
                 completed.countDown()
@@ -817,10 +841,15 @@ class KeyboardUiTest : InstrumentationTestCase() {
 
     fun testQuickEditSelectionVisualLinesPanelHideAndEditorResets() {
         val fixture = "abcdefghij ".repeat(18) + "\n第二行👩‍🚀文字\nlast line"
+        instrumentation.checkedMain {
+            editor.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            editor.setSingleLine(false)
+            editor.setHorizontallyScrolling(false)
+        }
         prepareQuickEditFixture(fixture, 3)
         var expectedDown = 0 to 0
         var expectedUp = 0 to 0
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val layout = requireNotNull(editor.layout)
             assertTrue("Fixture must contain soft-wrapped visual lines", layout.lineCount > 3)
             android.text.Selection.extendDown(editor.text, layout)
@@ -846,7 +875,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
         tapImeDescription("选择")
         tapImeDescription("收起键盘")
         waitFor("Selection keyboard hides") { !hasImeDescription("收起键盘") }
-        instrumentation.runOnMainSync { editor.requestFocus(); showKeyboard() }
+        instrumentation.checkedMain { editor.requestFocus(); showKeyboard() }
         // Showing the same input session preserves its panel. Verify Select is already off
         // in that retained panel, before navigation could itself reset the selection state.
         waitFor("The same editor reopens Quick Edit or the alphabet keyboard") {
@@ -861,7 +890,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
 
         tapImeDescription("选择")
         val previous = editor
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val replacement = EditText(activity).apply {
                 setSingleLine(false)
                 setText("replacement editor")
@@ -879,13 +908,13 @@ class KeyboardUiTest : InstrumentationTestCase() {
         assertFalse("Changing the input target releases selection mode", quickSelectionEnabled())
         tapImeDescription("向右移动")
         waitForSelection(5, 5)
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertEquals("Original editor is never changed by the new target", fixture, previous.text.toString())
         }
     }
 
     private fun prepareQuickEditFixture(text: String, cursor: Int) {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             editor.setText(text)
             editor.setSelection(cursor)
             editor.requestFocus()
@@ -902,7 +931,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
     private fun waitForSelection(start: Int, end: Int) =
         waitFor("native host selection reaches requested endpoints") {
             var matches = false
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 matches = editor.selectionStart == start && editor.selectionEnd == end
             }
             matches
@@ -987,18 +1016,19 @@ class KeyboardUiTest : InstrumentationTestCase() {
     }
 
     fun testExactSymbolPagesInsertLiteralCharactersAndCenterShortRows() {
-        context
-            .getSharedPreferences("settings", Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean("longPressSymbols", false)
-            .commit()
+        val symbolPrefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val symbolKeys = listOf("symbol_keyboard_zh_1", "symbol_keyboard_zh_2", "symbol_keyboard_en_1", "symbol_keyboard_en_2")
+        val savedSymbolPages = symbolKeys.associateWith { symbolPrefs.getString(it, null) }
+        symbolPrefs.edit().apply { symbolKeys.forEach { remove(it) }; putBoolean("longPressSymbols", false) }.commit()
+        // Pi is a configurable symbol, not part of the current built-in layout.
+        io.secure.keyboard.data.SymbolKeyboardStore(context).save(true, true, 0, 0, "π")
         val pages = listOf(
             listOf(
-                listOf("1234567890", "@#${'$'}_&-+（）/", "、.,：；！？"),
+                listOf("1234567890", "@#${'$'}_&-+（）/", ".,、：；！？"),
                 listOf("~`|•《》÷×*§", "“”€¥^°=「」\\", "%‘’™✓［］"),
             ),
             listOf(
-                listOf("1234567890", "@#${'$'}_&-+()/", "*.,:;!?"),
+                listOf("1234567890", "@#${'$'}_&-+()/", ".,*:;!?"),
                 listOf("~`|•<>÷×§∆", "\"'€¥^°={}\\", "%©®™✓[]"),
             ),
         )
@@ -1038,8 +1068,10 @@ class KeyboardUiTest : InstrumentationTestCase() {
                 kotlin.math.abs(it.width() - referenceWidth) <= 2
             })
             assertTrue("Third-row symbols expand like the seven-letter row", shortRow.all { it.width() >= referenceWidth })
-            assertEquals("Page toggle remains at the left edge", fullRow.first().left, imeBounds("=\\<").left)
-            assertEquals("Backspace remains at the right edge", fullRow.last().right, imeBounds("删除").right)
+            assertTrue("Page toggle remains at the left edge within pixel rounding",
+                kotlin.math.abs(fullRow.first().left - imeBounds("=\\<").left) <= 2)
+            assertTrue("Backspace remains at the right edge within pixel rounding",
+                kotlin.math.abs(fullRow.last().right - imeBounds("删除").right) <= 2)
             assertTrue("Return-to-letters key remains available", hasImeDescription("ABC"))
             assertTrue("Enter remains available", hasImeDescription("回车"))
         }
@@ -1054,6 +1086,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
             waitForHost("π")
             tapImeDescription("删除")
             waitForHost("")
+            symbolPrefs.edit().remove("symbol_keyboard_zh_2").commit()
             tapImeDescription("=\\<")
             waitFor("Chinese primary symbol page") { hasImeDescription("1") }
             var expectedHost = ""
@@ -1103,6 +1136,9 @@ class KeyboardUiTest : InstrumentationTestCase() {
                 assertHostEquals(expectedHost, "Page and language controls must not insert text")
             }
         } finally {
+            symbolPrefs.edit().apply {
+                savedSymbolPages.forEach { (key, value) -> if (value == null) remove(key) else putString(key, value) }
+            }.commit()
             if (hasImeDescription("ABC")) {
                 tapImeDescription("ABC")
                 waitForKeyboard()
@@ -1115,8 +1151,10 @@ class KeyboardUiTest : InstrumentationTestCase() {
         val hadHints = prefs.contains("symbolHints")
         val savedHints = prefs.getString("symbolHints", "all")
         val savedLongPress = prefs.getBoolean("longPressSymbols", true)
+        val savedASymbols = prefs.getString("letter_symbols_zh_a", null)
         try {
-            prefs.edit().putBoolean("longPressSymbols", true).commit()
+            // Explicit mapping keeps this hint-mode/hold test independent of default layouts.
+            prefs.edit().putString("letter_symbols_zh_a", "！").putBoolean("longPressSymbols", true).commit()
             for (mode in listOf("all", "digits", "hidden")) {
                 prefs.edit().putString("symbolHints", mode).commit()
                 reopenKeyboardForSettings()
@@ -1185,6 +1223,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
             assertHostEquals("！", "Hiding alphabet hints must not disable long-press punctuation")
         } finally {
             val edit = prefs.edit().putBoolean("longPressSymbols", savedLongPress)
+            if (savedASymbols == null) edit.remove("letter_symbols_zh_a") else edit.putString("letter_symbols_zh_a", savedASymbols)
             if (hadHints) edit.putString("symbolHints", savedHints) else edit.remove("symbolHints")
             edit.commit()
             if (hasImeDescription("收起键盘")) reopenKeyboardForSettings()
@@ -1197,7 +1236,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
         if (hasImeDescription("取消待输入内容")) tapImeDescription("取消待输入内容")
         tapImeDescription("收起键盘")
         waitFor("keyboard hides before settings refresh") { !hasImeDescription("收起键盘") }
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             editor.requestFocus()
             showKeyboard()
         }
@@ -1223,7 +1262,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
         val fixture = "A😀B"
         tapImeDescription("收起键盘")
         waitFor("keyboard hides before cursor fixture installation") { !hasImeDescription("收起键盘") }
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             // Install before reopening: TextView.setText can request input restart.
             editor.setText(fixture)
             editor.setSelection(fixture.length)
@@ -1261,10 +1300,12 @@ class KeyboardUiTest : InstrumentationTestCase() {
         waitFor("candidate ready for ordinary space tap") { hasImeText("你好") }
         tapImeDescription("五笔")
         waitForHost("A你好😀B")
-        assertFalse(
-            "Ordinary space tap commits and clears local composition",
-            hasImeDescription("取消待输入内容"),
-        )
+        waitFor("Ordinary space tap commits and clears local composition") {
+            !hasImeText("nihao")
+        }
+        // Enabled association may keep the candidate toolbar after composition ends.
+        if (hasImeDescription("取消待输入内容")) tapImeDescription("取消待输入内容")
+        waitFor("Association cleared before hiding the keyboard") { hasImeDescription("收起键盘") }
 
         // Exercise host-native DPAD/DEL against multi-codepoint graphemes as well.
         val family = "👨‍👩‍👧‍👦"
@@ -1275,7 +1316,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
         val boundaries = setOf(0, 1, familyEnd, combiningEnd, clusters.length)
         tapImeDescription("收起键盘")
         waitFor("keyboard hides before complex-grapheme fixture") { !hasImeDescription("收起键盘") }
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             editor.setText(clusters)
             editor.setSelection(clusters.length)
             editor.requestFocus()
@@ -1311,7 +1352,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
     private fun waitForSelection(expected: Int) {
         waitFor("synthetic editor cursor reaches grapheme boundary $expected") {
             var correct = false
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 correct = editor.selectionStart == expected && editor.selectionEnd == expected
             }
             correct
@@ -1320,7 +1361,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
 
     private fun assertSelectionAtGraphemeBoundary(boundaries: Set<Int> = setOf(0, 1, 3, 4)) {
         var valid = false
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             valid =
                 editor.selectionStart == editor.selectionEnd &&
                     editor.selectionStart in boundaries
@@ -1330,10 +1371,15 @@ class KeyboardUiTest : InstrumentationTestCase() {
 
     /** Real selected IME + installed model + AudioRecord; silence tests lifecycle, not accuracy. */
     fun testHeldSpaceRealMicrophoneReleaseAndCancelReturnToKeysWithoutSpace() {
-        assertTrue(
-            "Driver must install the verified model into no_backup/mandarin-voice-v1 first",
-            io.secure.keyboard.voice.ModelRepository(context).isInstalled(),
-        )
+        val repository = io.secure.keyboard.voice.ModelRepository(context)
+        if (!repository.isInstalled()) {
+            val assets = context.createPackageContext(context.packageName + ".test", 0).assets
+            val destination = File(context.noBackupFilesDir, "mandarin-voice-v1").apply { mkdirs() }
+            for (name in listOf("model.int8.onnx", "tokens.txt"))
+                assets.open(name).use { input -> File(destination, name).outputStream().use { input.copyTo(it) } }
+            File(destination, "verified").writeText(io.secure.keyboard.voice.ModelRepository.MODEL_ID)
+        }
+        assertTrue("Public test model matches pinned hashes", repository.verifyInstalled())
         assertEquals(
             "Driver must grant RECORD_AUDIO before the real held-space integration test",
             android.content.pm.PackageManager.PERMISSION_GRANTED,
@@ -1462,7 +1508,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
                 }
                 saveValidationScreenshot("05-voice-setup-gating.png")
                 instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-                instrumentation.runOnMainSync { editor.requestFocus(); showKeyboard() }
+                instrumentation.checkedMain { editor.requestFocus(); showKeyboard() }
             }
             waitForKeyboard()
             repeat(2) {
@@ -1486,7 +1532,9 @@ class KeyboardUiTest : InstrumentationTestCase() {
             assertTrue("Resize handle is below key rows", imeBounds("调整悬浮键盘大小").top >= bottomKeys)
             val resizeBounds = imeBounds("调整悬浮键盘大小")
             val density = context.resources.displayMetrics.density
-            assertTrue("Smaller resize artwork retains a 48dp-wide hit target", kotlin.math.abs(resizeBounds.width() - 48 * density) <= 2f)
+            val handleRowWidth = imeBounds("回车").right - imeBounds("?123").left
+            assertTrue("Resize hit target follows the symmetric 17:60:17 handle row",
+                kotlin.math.abs(resizeBounds.width() - handleRowWidth * 17f / 94f) <= 2f)
             assertTrue("Smaller resize artwork retains a 32dp-high hit target", kotlin.math.abs(resizeBounds.height() - 32 * density) <= 2f)
             saveValidationScreenshot("07-floating-small-resize-arrow.png")
             openMoreTool("快捷编辑")
@@ -1539,7 +1587,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
             if (hasImeDescription("收起键盘")) {
                 tapImeDescription("收起键盘")
                 waitFor("smoke cleanup hides keyboard") { !hasImeDescription("收起键盘") }
-                instrumentation.runOnMainSync {
+                instrumentation.checkedMain {
                     editor.requestFocus()
                     showKeyboard()
                 }
@@ -1598,15 +1646,17 @@ class KeyboardUiTest : InstrumentationTestCase() {
         assertEquals("Back must replace the first More slot", "返回键盘", slots.first().first)
         assertEquals("Hide stays the final slot", "收起键盘", slots.last().first)
         assertTrue("Panels must not add a second More button", slots.none { it.first == "更多工具" })
-        val widths = slots.map { it.second.width() }
+        val widths = slots.dropLast(1).map { it.second.width() }
         assertTrue(
-            "Panel toolbar slots must be equal within two pixels",
+            "Panel tool slots shrink equally within two pixels on narrow floating keyboards",
             widths.maxOrNull()!! - widths.minOrNull()!! <= 2,
         )
-        slots.zipWithNext().forEach { (left, right) ->
-            assertTrue("Toolbar slots stay adjacent without overlap or a blank slot",
-                kotlin.math.abs(left.second.right - right.second.left) <= 2)
-        }
+        assertTrue("The separate Hide control retains its full touch target",
+            slots.last().second.width() + 2 >= widths.maxOrNull()!!)
+        val gaps = slots.zipWithNext().map { (left, right) -> right.second.left - left.second.right }
+        assertTrue("Touch slots never overlap", gaps.all { it >= -2 })
+        assertTrue("Current toolbar distributes equal gaps, including before Hide",
+            gaps.maxOrNull()!! - gaps.minOrNull()!! <= 2)
     }
 
     private fun assertKeyTheme(theme: String) {
@@ -1696,7 +1746,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
             repeat(10) {
                 tapImeDescription("收起键盘")
                 waitFor("IME hides") { !hasImeDescription("收起键盘") }
-                instrumentation.runOnMainSync {
+                instrumentation.checkedMain {
                     editor.requestFocus()
                     showKeyboard()
                 }
@@ -1796,7 +1846,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
 
     fun testRepeatedRotationKeepsKeyboardAndLayoutProfileUsable() {
         var originalRotation = UiAutomation.ROTATION_FREEZE_0
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             originalRotation = activity.windowManager.defaultDisplay.rotation
         }
         try {
@@ -1833,7 +1883,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
         assertTrue("Device rotation request failed", automation.setRotation(rotation))
         waitFor("recreated host reaches requested orientation and window focus") {
             var ready = false
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 ready =
                     !activity.isDestroyed &&
                         activity.hasWindowFocus() &&
@@ -1841,15 +1891,18 @@ class KeyboardUiTest : InstrumentationTestCase() {
             }
             ready
         }
-        instrumentation.runOnMainSync {
-            editor.requestFocus()
-            showKeyboard()
+        instrumentation.checkedMain { editor.requestFocus() }
+        // Window focus can precede the new input connection after Activity recreation.
+        // Retry the host's ordinary show request until that connection is attached.
+        waitFor("Rotated host attaches its input method") {
+            instrumentation.checkedMain { showKeyboard() }
+            hasImeDescription("切换中文和英文")
         }
         waitForKeyboard()
         tapImeDescription("更多工具")
         tapImeDescription("布局调整")
         var expectedProfile = ""
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val config = activity.resources.configuration
             expectedProfile =
                 (if (config.smallestScreenWidthDp < 600) "外屏" else "内屏") +
@@ -1961,8 +2014,13 @@ class KeyboardUiTest : InstrumentationTestCase() {
         var previous: List<Rect>? = null
         var stableSince = 0L
         waitFor("IME keys finish their opening animation and stay within the display", 60000) {
-            if (!hasImeDescription("切换中文和英文") || !hasImeDescription("q")) return@waitFor false
-            val bounds = listOf("q", "回车").map { imeBounds(it) }
+            if (!hasImeDescription("切换中文和英文")) return@waitFor false
+            val firstLetter = when {
+                hasImeDescription("q") -> "q"
+                hasImeDescription("Q") -> "Q"
+                else -> return@waitFor false
+            }
+            val bounds = listOf(firstLetter, "回车").map { imeBounds(it) }
             val displayHeight = context.resources.displayMetrics.heightPixels
             val now = SystemClock.uptimeMillis()
             if (bounds.any { it.isEmpty || it.top < 0 || it.bottom > displayHeight } || bounds != previous) {
@@ -1978,7 +2036,7 @@ class KeyboardUiTest : InstrumentationTestCase() {
 
     private fun readHost(): String {
         var text = ""
-        instrumentation.runOnMainSync { text = editor.text.toString() }
+        instrumentation.checkedMain { text = editor.text.toString() }
         return text
     }
 

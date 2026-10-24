@@ -190,7 +190,7 @@ internal object AiWriting {
             val output = StringBuilder()
             val line = StringBuilder()
             val event = StringBuilder()
-            var total = 0
+
             var finished = false
             val started = System.nanoTime()
             var previousCr = false
@@ -257,7 +257,7 @@ internal object AiWriting {
                     dispatch()
                     break
                 }
-                check(++total <= 1024 * 1024) { "AI 响应过大，请缩短原文" }
+                check(line.length + event.length < 1024 * 1024) { "AI 响应过大，请缩短原文" }
                 when (ch) {
                     13 -> { finishLine(); previousCr = true }
                     10 -> { if (!previousCr) finishLine(); previousCr = false }

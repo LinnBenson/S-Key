@@ -725,7 +725,7 @@ internal object KeyboardViewController {
         val horizontal = (settings.keyHorizontalGap * resources.displayMetrics.density / 2f).roundToInt()
         val vertical = (settings.keyVerticalGap * resources.displayMetrics.density / 2f).roundToInt()
         val face = shape(color, if (enter) settings.enterCornerRadius else settings.keyCornerRadius).apply {
-            if (settings.keyBorderWidth > 0) setStroke(dp(settings.keyBorderWidth), muted)
+            if (settings.keyBorderWidth > 0) setStroke(dp(settings.keyBorderWidth), dividerColor)
         }
         return InsetDrawable(face, horizontal, vertical, horizontal, vertical)
     }

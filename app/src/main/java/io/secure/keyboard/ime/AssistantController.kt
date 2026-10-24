@@ -120,6 +120,7 @@ internal object AssistantController {
         sourceCursor=(translationTextView as? EditText)?.selectionStart ?: sourceCursor
         syncingAssistantEditor=true
         aiCustomTab=null
+        aiTaskTabs=null
         assistantResultTitle=null
         aiResultNavigation=null; assistantSourceTitle=null
         translationTextView?.text = ""
@@ -305,37 +306,9 @@ internal object AssistantController {
         val area=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(4),dp(12),dp(4),0) }
         column.addView(area,LinearLayout.LayoutParams(-1,extra))
         val unit=minOf(dp(32),extra/4)
-        fun compact(text: String, selected: Boolean=false, action:()->Unit): TextView = button(text,action).apply {
-            textSize=12f; setPadding(dp(7),0,dp(7),0); setSingleLine(true)
-            ellipsize=android.text.TextUtils.TruncateAt.END
-            background=shape(if(selected) accent else keyBg,9); setTextColor(if(selected) enterText else fg)
-        }
-        val tasks=LinearLayout(this)
+        val tasks=LinearLayout(this).also { aiTaskTabs = it }
         area.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled=false; isFillViewport=true; addView(tasks) },LinearLayout.LayoutParams(-1,unit))
-        io.secure.keyboard.ai.AiWriting.tasks.forEach { (id,name) ->
-            if (id == "custom" && aiCustomPresetName.isEmpty()) return@forEach
-            val title = when(id) {
-                "custom" -> io.secure.keyboard.ai.AiWriting.customTabTitle(aiCustomPresetName)
-                "tone" -> "语气: $aiTone"
-                else -> name
-            }
-            val tab = compact(title, aiTask == id) {}
-            tab.setOnClickListener {
-                if (aiTask == id) {
-                    when(id) {
-                        "custom" -> showCustomAiPresets(tab)
-                        "tone" -> showAiToneChoices(tab)
-                    }
-                } else {
-                    stopAiRequest(); clearComposition(); resetAiConversation(); aiTask = id; translation.invalidate()
-                    if (id == "custom") settings.lastCustomAiPresetId = aiCustomPresetId
-                    getSharedPreferences("settings", MODE_PRIVATE).edit().putString("aiTask", id).apply()
-                    renderBody(false)
-                }
-            }
-            if (id == "custom") { aiCustomTab = tab; tab.contentDescription = aiCustomPresetName }
-            tasks.addView(tab, LinearLayout.LayoutParams(dp(if (id == "custom" || id == "tone") 80 else 58), -1, 1f).apply { rightMargin = dp(5) })
-        }
+        renderAiTaskTabs(tasks)
         val cards=LinearLayout(this)
         area.addView(cards,LinearLayout.LayoutParams(-1,0,1f).apply { topMargin=dp(6) })
         fun card(title:String,source:Boolean): View {
@@ -374,6 +347,40 @@ internal object AssistantController {
         updateAiPreview()
     }
 
+    private fun KeyboardSession.renderAiTaskTabs(tasks: LinearLayout) {
+        tasks.removeAllViews()
+        aiCustomTab = null
+        fun compact(text: String, selected: Boolean=false, action:()->Unit): TextView = button(text,action).apply {
+            textSize=12f; setPadding(dp(7),0,dp(7),0); setSingleLine(true)
+            ellipsize=android.text.TextUtils.TruncateAt.END
+            background=shape(if(selected) accent else keyBg,9); setTextColor(if(selected) enterText else fg)
+        }
+        io.secure.keyboard.ai.AiWriting.tasks.forEach { (id,name) ->
+            if (id == "custom" && aiCustomPresetName.isEmpty()) return@forEach
+            val title = when(id) {
+                "custom" -> io.secure.keyboard.ai.AiWriting.customTabTitle(aiCustomPresetName)
+                "tone" -> "语气: $aiTone"
+                else -> name
+            }
+            val tab = compact(title, aiTask == id) {}
+            tab.setOnClickListener {
+                if (aiTask == id) {
+                    when(id) {
+                        "custom" -> showCustomAiPresets(tab)
+                        "tone" -> showAiToneChoices(tab)
+                    }
+                } else {
+                    stopAiRequest(); clearComposition(); resetAiConversation(); aiTask = id; translation.invalidate()
+                    if (id == "custom") settings.lastCustomAiPresetId = aiCustomPresetId
+                    getSharedPreferences("settings", MODE_PRIVATE).edit().putString("aiTask", id).apply()
+                    renderBody(false)
+                }
+            }
+            if (id == "custom") { aiCustomTab = tab; tab.contentDescription = aiCustomPresetName }
+            tasks.addView(tab, LinearLayout.LayoutParams(dp(if (id == "custom" || id == "tone") 80 else 58), -1, 1f).apply { rightMargin = dp(5) })
+        }
+    }
+
     internal fun KeyboardSession.fillDefaultCustomAiPresetImpl() {
         if (!aiMode || !active || secret) return
         val generation = ++aiPresetLoadGeneration
@@ -395,7 +402,10 @@ internal object AssistantController {
                     getSharedPreferences("settings", MODE_PRIVATE).edit().putString("aiTask", aiTask).apply()
                 }
                 if (aiTask == "custom") { settings.lastCustomAiPresetId = selected?.id; restoreAiConversation() }
-                renderBody(false)
+                // Metadata arrives after the user may already have selected or typed text.
+                // Refresh only tabs; rebuilding the source editor loses selection and preedit.
+                aiTaskTabs?.let { renderAiTaskTabs(it) }
+                updateAiPreview()
             }
         }
     }

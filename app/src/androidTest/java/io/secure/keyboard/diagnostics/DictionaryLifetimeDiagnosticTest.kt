@@ -74,10 +74,10 @@ class DictionaryLifetimeDiagnosticTest : AndroidTestCase() {
     }
 
     fun testNearFourMillionCharactersAndIncrementalValidAccumulationNoForcedGc() {
-        // Three valid files per language remain below existing row limits. No new app cap implied.
-        val first = longFixture("a", 100, 39_000)
-        val second = longFixture("b", 100, 39_000)
-        val third = longFixture("c", 100, 39_000)
+        // Three 1.3-million-character batches together remain below the per-language four-million cap.
+        val first = longFixture("a", 100, 13_000)
+        val second = longFixture("b", 100, 13_000)
+        val third = longFixture("c", 100, 13_000)
         probe.sample("large_fixture_metadata", extra = JSONObject().put("firstCharacters", first.length)
             .put("secondCharacters", second.length).put("thirdCharacters", third.length)
             .put("firstSha256", hash(first)).put("secondSha256", hash(second)).put("thirdSha256", hash(third)))
@@ -87,7 +87,7 @@ class DictionaryLifetimeDiagnosticTest : AndroidTestCase() {
                 probe.stage = "long_${kind.name}_${index + 1}"
                 assertEquals(100, store.importDictionary(fixture, kind = kind))
                 assertEquals((index + 1) * 100, store.dictionary(kind).size)
-                assertEquals("Every valid word preserved", 39_000, store.dictionary(kind).last().word.length)
+                assertEquals("Every valid word preserved", 13_000, store.dictionary(kind).last().word.length)
                 probe.sample("import_and_load_complete", extra = JSONObject().put("storedBytes", contentFile().length()).put("rows", store.dictionary(kind).size))
             }
         }
@@ -158,7 +158,8 @@ class DictionaryLifetimeDiagnosticTest : AndroidTestCase() {
 
 /** All cleanup APIs are redirected, including ContentStore's external-cache purge. */
 internal class LifetimeSandbox(base: Context) : ContextWrapper(base), AutoCloseable {
-    val root = File(base.filesDir, "lifetime-dictionary-fixture")
+    private val identity = java.util.UUID.randomUUID().toString()
+    val root = File(base.filesDir, "lifetime-dictionary-fixture-$identity")
     private val preferenceNames = mutableSetOf<String>()
     override fun getApplicationContext(): Context = this
     override fun getNoBackupFilesDir() = File(root, "no_backup").apply { mkdirs() }
@@ -166,11 +167,14 @@ internal class LifetimeSandbox(base: Context) : ContextWrapper(base), AutoClosea
     override fun getCacheDir() = File(root, "cache").apply { mkdirs() }
     override fun getExternalCacheDirs(): Array<File> = arrayOf(File(root, "external-cache").apply { mkdirs() })
     override fun getSharedPreferences(name: String, mode: Int): SharedPreferences {
-        val privateName = "lifetime-diagnostic-$name"
+        val privateName = "lifetime-diagnostic-$identity-$name"
         preferenceNames.add(privateName)
         return baseContext.getSharedPreferences(privateName, mode)
     }
     override fun close() {
+        // Test paths are one-shot; evict their process cache without touching the OS clipboard.
+        val content = ContentStore(this)
+        ContentStore::class.java.getDeclaredMethod("invalidateDictionarySnapshots").apply { isAccessible = true }.invoke(content)
         root.deleteRecursively()
         preferenceNames.forEach { baseContext.deleteSharedPreferences(it) }
     }

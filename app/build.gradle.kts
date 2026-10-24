@@ -9,8 +9,8 @@ android {
         applicationId = "io.secure.keyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 113
-        versionName = "1.1.7"
+        versionCode = 116
+        versionName = "1.1.10"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
     buildFeatures { compose = true }
@@ -52,3 +52,26 @@ val buildSpaceGlossary by tasks.registering(Exec::class) {
 }
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/spaceGlossary"))
 tasks.named("preBuild").configure { dependsOn(buildSpaceGlossary) }
+
+// Record resolved runtime versions, rather than compiler or requested transitive versions.
+val runtimeNoticeAssets = layout.buildDirectory.dir("generated/runtimeNotices")
+val buildRuntimeNotices by tasks.registering {
+    val runtime = configurations.named("releaseRuntimeClasspath")
+    inputs.files(runtime)
+    outputs.dir(runtimeNoticeAssets)
+    doLast {
+        val target = runtimeNoticeAssets.get().file("runtime-licenses/DEPENDENCIES.txt").asFile
+        target.parentFile.mkdirs()
+        target.writeText("Resolved release runtime dependencies\n\n" +
+            runtime.get().resolvedConfiguration.resolvedArtifacts.map { it.moduleVersion.id.toString() }
+                .distinct().sorted().joinToString("\n") +
+            "\ncom.k2fsa.sherpa.onnx:sherpa-onnx:1.13.8 (local AAR)\n")
+    }
+}
+android.sourceSets.getByName("main").assets.srcDir(runtimeNoticeAssets)
+tasks.named("preBuild").configure { dependsOn(buildRuntimeNotices) }
+
+// Optional public voice fixtures are test-only and never enter production APKs.
+providers.gradleProperty("voiceFixtureDir").orNull?.let {
+    android.sourceSets.getByName("androidTest").assets.srcDir(it)
+}

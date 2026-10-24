@@ -89,6 +89,8 @@ class HiddenPanelLifecycleTest : InstrumentationTestCase() {
         try {
             sandbox = Sandbox(context)
             SettingsStore(sandbox).apply {
+                editorPreview = false
+                autoChineseSpacing = false
                 englishCompletion = false
                 fourCodeAutoCommit = false
                 vibration = false

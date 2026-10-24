@@ -1,5 +1,7 @@
 package io.secure.keyboard
 
+import io.secure.keyboard.diagnostics.checkedMain
+
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -53,6 +55,8 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
         sandbox = IsolatedContext(context)
         application = IsolatedApplication(sandbox)
         SettingsStore(application).apply {
+            editorPreview = false
+            autoChineseSpacing = false
             vibration = false
             englishCompletion = false
             fourCodeAutoCommit = false
@@ -63,7 +67,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
                 Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK,
             ),
         )
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             editor = EditText(activity).apply {
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 showSoftInputOnFocus = false
@@ -93,7 +97,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
 
     override fun tearDown() {
         try {
-            instrumentation.runOnMainSync {
+            instrumentation.checkedMain {
                 harness?.close()
                 harness = null
                 if (::activity.isInitialized) activity.finish()
@@ -108,7 +112,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testSymbolBottomPunctuationIsIndependentAndCentered() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             for (chinese in listOf(true, false)) for (secondary in listOf(false, true)) {
                 selectLanguage(chinese)
                 enterSymbols(secondary)
@@ -144,7 +148,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testFourEnglishSymbolPairsReplaceSelectionAndReturnToLetters() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             selectLanguage(chinese = false)
             val pairs = listOf('"' to '"', '\'' to '\'', '{' to '}', '[' to ']')
             // Unicode outside the insertion/selection must remain byte-for-byte unchanged.
@@ -182,7 +186,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testAssistantPairsPlaceCaretInsideAndKeepHostUntouched() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             selectLanguage(chinese = false)
             val open = io.secure.keyboard.SessionTestAccess.method("openTool", String::class.java).apply { isAccessible = true }
             for (mode in listOf("translate", "ai")) {
@@ -216,7 +220,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testChineseSymbolsEnglishParenthesesAndRightClosersStayLiteralOnSymbolPages() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val cases = listOf(
                 LiteralPage(chinese = true, secondary = false, symbols = "（）"),
                 LiteralPage(chinese = true, secondary = true, symbols = "“”「」‘’［］"),
@@ -240,7 +244,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testEditableRulesApplyImmediatelyAndCountUnicodeCharacters() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val store=io.secure.keyboard.data.SymbolClosureStore(application)
             selectLanguage(false)
             for ((closing,back,expectedCursor) in listOf(Triple("}",0,2),Triple("🙂]",1,3),Triple("🙂]",2,1))) {
@@ -263,7 +267,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testAssistantCustomOffsetKeepsHostUntouched() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val store=io.secure.keyboard.data.SymbolClosureStore(application)
             selectLanguage(false)
             io.secure.keyboard.SessionTestAccess.method("openTool",String::class.java).apply { isAccessible=true }.invoke(service,"ai")
@@ -300,7 +304,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
         val store=io.secure.keyboard.data.SymbolKeyboardStore(application)
         val pages=listOf(Triple(true,false,"①"),Triple(true,true,"🙂"),Triple(false,false,"③"),Triple(false,true,"④"))
         pages.forEach { (chinese,second,symbol) -> store.save(chinese,second,0,0,symbol) }
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             for((chinese,second,symbol) in pages) {
                 assertEquals(symbol,io.secure.keyboard.data.SymbolKeyboardStore(application).rows(chinese,second)[0][0])
                 selectLanguage(chinese);enterSymbols(second)
@@ -323,16 +327,16 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
 
     fun testVisibleSymbolKeyRefreshAndClosureUseEditedSymbol() {
         val store=io.secure.keyboard.data.SymbolKeyboardStore(application)
-        instrumentation.runOnMainSync { selectLanguage(false);enterSymbols(false) }
+        instrumentation.checkedMain { selectLanguage(false);enterSymbols(false) }
         store.save(false,false,1,0,"≤")
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             editor.setText("");editor.setSelection(0);key("≤").performClick()
             assertEquals("≤",editor.text.toString())
         }
         store.save(false,false,1,0,"{")
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             editor.setText("");editor.setSelection(0);key("{").performClick()
             assertEquals("{}",editor.text.toString());assertCursor(1);assertEnglishLetters()
         }
@@ -349,7 +353,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testQuickPasteToolbarPasteDismissAndFinish() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val session = service.session
             val state = session.quickPasteState
             assertTrue(SettingsStore(application).quickPaste)
@@ -376,7 +380,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testQuickPasteExpiresWhileKeyboardStaysOpen() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val session = service.session
             session.quickPasteState.open(System.currentTimeMillis() - 299_500L, "expired preview", 0) {}
             session.renderHeader()
@@ -384,7 +388,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
             session.main.postDelayed(session.quickPasteExpiry, session.quickPasteState.remainingMillis)
         }
         Thread.sleep(800)
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertNull(service.session.quickPasteState.text)
             assertFalse(descendants(root).any { it.contentDescription == "关闭快捷粘贴" })
             assertEquals("", editor.text.toString())
@@ -392,7 +396,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testExpiredQueuedQuickPasteClickDoesNotInsert() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val session = service.session
             session.quickPasteState.open(System.currentTimeMillis() - 299_500L, "expired click", 0) {}
             session.renderHeader()
@@ -406,7 +410,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testAnyInputDismissesQuickPaste() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val session = service.session
             val actions: List<() -> Unit> = listOf(
                 { session.type("a") },
@@ -430,7 +434,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testTraditionalOutputToggleAndHostInsertion() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val session = service.session
             val settings = SettingsStore(application)
             assertFalse(settings.traditionalOutput)
@@ -449,7 +453,7 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testTraditionalClipboardAndAssistantOutput() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             val session = service.session
             SettingsStore(application).traditionalOutput = true
             session.quickPasteState.open(System.currentTimeMillis(), "剪贴板汉字", 0) {}
@@ -469,13 +473,13 @@ class KeyboardEnglishSymbolPairTest : InstrumentationTestCase() {
     }
 
     fun testClearingClipboardRevokesQuickPastePreview() {
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             service.session.quickPasteState.open(System.currentTimeMillis(), "synthetic private clip", 0) {}
             service.session.renderHeader()
             service.session.content.clearClipboard()
         }
         instrumentation.waitForIdleSync()
-        instrumentation.runOnMainSync {
+        instrumentation.checkedMain {
             assertNull(service.session.quickPasteState.text)
             assertFalse(descendants(root).any { it.contentDescription?.startsWith("快捷粘贴：") == true })
         }
