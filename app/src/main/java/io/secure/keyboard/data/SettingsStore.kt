@@ -251,11 +251,12 @@ class SettingsStore(context: Context) {
         else -> systemDark
     }
 
-    /** Independent opt-in for platform keyboard sounds; existing installs stay silent. */
-    var keySound: Boolean
-        get() = prefs.getBoolean("keySound", false)
+    /** Preserve an explicit legacy opt-in; fresh installs default to no sound. */
+    var keySound: String
+        get() = prefs.getString("keySoundType", null)?.let { KeySound.normalize(it) }
+            ?: if (prefs.getBoolean("keySound", false)) "system" else "none"
         set(value) {
-            prefs.edit().putBoolean("keySound", value).apply()
+            prefs.edit().putString("keySoundType", KeySound.normalize(value)).remove("keySound").apply()
         }
 
     var vibration: Boolean

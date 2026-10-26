@@ -1,11 +1,15 @@
 package io.secure.keyboard.ui
 
 import android.media.AudioManager
+import android.media.AudioAttributes
+import android.media.SoundPool
+import android.content.Context
+import io.secure.keyboard.R
 import android.view.View
 
 /** Submit the platform effects before the caller performs its already-validated key action. */
 object KeyboardFeedback {
-    fun perform(view: View, sound: Boolean, vibration: Boolean, strength: Int) {
+    fun perform(view: View, sound: String, vibration: Boolean, strength: Int) {
         KeyboardSounds.perform(view, sound)
         KeyboardHaptics.perform(view, vibration, strength)
     }
@@ -17,21 +21,57 @@ object KeyboardFeedback {
     }
 }
 
-internal object KeyboardSounds {
-    fun perform(view: View, enabled: Boolean) {
-        // Sound is independently opt-in. The default path does not look up a system service.
-        if (!enabled || !view.isShown) return
+internal object KeyboardSounds : KeySoundPlayer()
+
+internal open class KeySoundPlayer {
+    private var pool: SoundPool? = null
+    private val samples = mutableMapOf<String, Int>()
+    private val ready = mutableSetOf<Int>()
+
+    /** Decode off the input path. Never queue a delayed key sound while loading. */
+    fun prepare(context: Context, sound: String) {
+        if (sound == "none" || sound == "system" || pool != null) return
+        try {
+            val created = SoundPool.Builder().setMaxStreams(4).setAudioAttributes(
+                AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+            ).build()
+            pool = created
+            created.setOnLoadCompleteListener { owner, id, status ->
+                if (owner === pool && status == 0) ready.add(id)
+            }
+            mapOf(
+                "bong_001" to R.raw.bong_001, "click_001" to R.raw.click_001,
+                "click_002" to R.raw.click_002, "click_003" to R.raw.click_003,
+                "click_004" to R.raw.click_004, "click_005" to R.raw.click_005,
+            ).forEach { (name, resource) -> samples[name] = created.load(context.applicationContext, resource, 1) }
+        } catch (_: RuntimeException) { release() }
+    }
+
+    fun release() {
+        pool?.release()
+        pool = null
+        samples.clear()
+        ready.clear()
+    }
+
+    fun perform(view: View, sound: String) {
+        if (sound == "none" || !view.isShown) return
         try {
             val audio = view.context.getSystemService(AudioManager::class.java) ?: return
             if (!KeyboardSoundPolicy.canPlay(
                     audio.ringerMode, audio.getStreamVolume(AudioManager.STREAM_SYSTEM),
                     audio.isStreamMute(AudioManager.STREAM_SYSTEM),
                 )) return
-            // The one-argument API also respects the system UI sound switch. Do not use the
-            // volume override, preload/wait for audio, or delay the key action for playback.
-            audio.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD)
+            if (sound == "system") {
+                // The platform effect also respects Android's UI sound switch.
+                audio.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD)
+            } else {
+                val sample = samples[sound] ?: return
+                if (sample in ready) pool?.play(sample, 1f, 1f, 1, 0, 1f)
+            }
         } catch (_: RuntimeException) {
-            // Missing/OEM audio support must never block typing or the independent haptic.
+            // Audio support must never block typing or the independent haptic.
         }
     }
 }

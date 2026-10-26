@@ -407,6 +407,9 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
                 main.removeCallbacks(refreshTheme)
                 main.post(refreshTheme)
             }
+            else if (key == "keySoundType") main.post {
+                io.secure.keyboard.ui.KeyboardSounds.prepare(this, settings.keySound)
+            }
             else if (key == "includeNavigationBar") main.post {
                 if (active) with(PanelController) { applyLiveLayoutImpl() }
             }
@@ -499,6 +502,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
 
     fun onCreate() {
         settings = SettingsStore(this)
+        io.secure.keyboard.ui.KeyboardSounds.prepare(this, settings.keySound)
         loadAssistantWidth()
         chinese = settings.lastChineseLanguage
         content = ContentStore(this)
@@ -665,6 +669,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     }
 
     fun onDestroy() {
+        io.secure.keyboard.ui.KeyboardSounds.release()
         imagePermissionDraft = null
         stopAiRequest()
         translation.close()

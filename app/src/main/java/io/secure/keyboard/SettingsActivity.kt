@@ -212,7 +212,7 @@ open class SettingsActivity : ComponentActivity() {
                 route.startsWith("theme_") -> "behavior"
                 route == "custom_ai" -> "api"
                 route == "symbol_keyboard" -> "layout"
-                route == "feedback" -> "keyboard"
+                route == "feedback" || route == "key_sound" -> "keyboard"
                 route == "home" && initialPage == "dashboard" -> "dashboard"
                 route == "dashboard" || route == "home" || (route == "voice" && initialPage == "voice") -> { finish(); return }
                 else -> "home"
@@ -306,6 +306,7 @@ open class SettingsActivity : ComponentActivity() {
                                 "input_english" -> EnglishSettings()
                                 "input_fuzzy" -> FuzzySettings()
                                 "keyboard", "feedback" -> KeyboardSettings()
+                                "key_sound" -> KeySoundSettings()
                                 "behavior" -> Appearance()
                                 "layout" -> Layouts()
                                 "voice" -> VoiceSettings()
@@ -462,7 +463,7 @@ open class SettingsActivity : ComponentActivity() {
         }
         Group("应用与隐私") {
             Nav("备份与清理", "备份、还原与清理本机内容", "delete") { openPage("cleanup") }
-            Nav("开源声明", "Miuix、图标、词库与语音组件", "dictionary") { openPage("licenses") }
+            Nav("开源声明", "Miuix、图标、词库、音效与语音组件", "dictionary") { openPage("licenses") }
             Nav("关于应用", "版本信息、项目与隐私声明", "settings") { openPage("about") }
         }
     }
@@ -490,7 +491,7 @@ open class SettingsActivity : ComponentActivity() {
             Nav("AI 设置", "Google 翻译 · Grok · 模型选择", "input") { openPage("api") }
             Nav("语音输入", "离线语音 / AI 语音", "voice") { openPage("voice") }
             Nav("备份与清理", "备份、还原与清理本机内容", "delete") { openPage("cleanup") }
-            Nav("开源声明", "Miuix、图标、词库与语音组件", "dictionary") { openPage("licenses") }
+            Nav("开源声明", "Miuix、图标、词库、音效与语音组件", "dictionary") { openPage("licenses") }
             Nav("关于应用", "版本信息、项目与隐私声明", "settings") { openPage("about") }
         }
     }
@@ -663,7 +664,7 @@ open class SettingsActivity : ComponentActivity() {
         model.revision
         val s = model.settings
         Group("按键反馈") {
-            Toggle("按键声音", s.keySound) { s.keySound = it }
+            Nav("按键声音", KeySound.label(s.keySound)) { openPage("key_sound") }
             Toggle("按键振动", s.vibration) { s.vibration = it }
             Range("振动强度", s.vibrationStrength, 1, 100, "%") { s.vibrationStrength = it }
             Info("将震动强度设为 10% 将尝试使用系统震动")
@@ -677,6 +678,28 @@ open class SettingsActivity : ComponentActivity() {
         }
         Group("剪贴板设置") {
             Toggle("快捷粘贴", s.quickPaste) { s.quickPaste = it }
+        }
+    }
+    @Composable private fun KeySoundSettings() {
+        model.revision
+        val view = androidx.compose.ui.platform.LocalView.current
+        val player = remember { io.secure.keyboard.ui.KeySoundPlayer() }
+        DisposableEffect(player) {
+            player.prepare(view.context, "bong_001")
+            onDispose { player.release() }
+        }
+        Group("按键声音") {
+            KeySound.options.forEach { (id, label) ->
+                BasicComponent(title = label, onClick = { model.settings.keySound = id }, rightActions = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (model.settings.keySound == id) UiIcon("check", "已选择")
+                        if (id != "none") IconButton(onClick = { player.perform(view, id) }) {
+                            UiIcon("play", "试听$label")
+                        }
+                    }
+                })
+            }
+            Info("音量跟随系统按键音量；静音或振动模式下不播放。系统音同时受系统触摸提示音开关控制。")
         }
     }
     @Composable private fun Appearance() {
@@ -1146,7 +1169,7 @@ open class SettingsActivity : ComponentActivity() {
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
                 Group("开源组件") {
-                    Info("Miuix、图标、词库与语音组件。选择文件查看完整许可声明。")
+                    Info("Miuix、图标、词库、音效与语音组件。选择文件查看完整许可声明。")
                     error?.let { Info(it) }
                     if (paths.isEmpty() && error == null) Info("正在读取声明目录…")
                     if (selected != null) Action("返回声明列表") { selected = null; chunks = emptyList(); error = null }
@@ -1276,6 +1299,7 @@ open class SettingsActivity : ComponentActivity() {
         "input_english" -> "英文设置"
         "input_fuzzy" -> "模糊拼音"
         "keyboard", "feedback" -> "键盘操作"
+        "key_sound" -> "按键声音"
         "behavior" -> "主题与外观"
         "theme_light" -> "浅色配色"
         "theme_dark" -> "深色配色"

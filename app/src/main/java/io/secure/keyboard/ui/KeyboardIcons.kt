@@ -53,6 +53,7 @@ object KeyboardIcons {
         "settings" -> R.drawable.ic_miuix_settings
         "input" -> R.drawable.ic_miuix_tune
         "keyboard" -> R.drawable.ic_keyboard_keyboard
+        "play" -> R.drawable.ic_keyboard_play
         "check" -> R.drawable.ic_miuix_ok
         else -> R.drawable.ic_miuix_gridview
     }

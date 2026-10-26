@@ -146,6 +146,8 @@ Debug APK 位于 `app/build/outputs/apk/debug/`。`assembleRelease` 生成未签
 
 ## 开源许可与致谢
 
-S Key 原创代码采用 [Apache-2.0](LICENSE)。第三方组件、字体、词库和模型分别遵循各自许可，详见 [NOTICE](NOTICE) 与应用内开源声明。
+S Key 原创代码采用 [Apache-2.0](LICENSE)。第三方组件、字体、词库、音效和模型分别遵循各自许可，详见 [NOTICE](NOTICE) 与应用内开源声明。
 
 感谢 Miuix、Material Symbols、sherpa-onnx，以及开放词库与字体项目。词库来源见[默认词库说明](third_party/open_dictionaries/README.md)，空格键英文释义数据见 [CC-CEDICT](third_party/cc_cedict/README.md)。
+
+内置的六种按键音效来自 [Kenney Interface Sounds](https://kenney.nl/assets/interface-sounds)，采用 CC0 1.0，许可声明随应用提供。

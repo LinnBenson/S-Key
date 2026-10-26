@@ -6,3 +6,7 @@ Third-party code, models, fonts, dictionaries and emoji data retain their own
 licenses and attribution. This license does not relicense those materials.
 See third_party/ and app/src/main/assets/ for full notices and license texts.
 The application Open Source Licenses page displays the packaged notices.
+
+Keyboard sound effects: Kenney Interface Sounds 1.0, CC0 1.0.
+https://kenney.nl/assets/interface-sounds
+See app/src/main/assets/audio-licenses/ for attribution and license notice.

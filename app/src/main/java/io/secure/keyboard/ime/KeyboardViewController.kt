@@ -513,6 +513,7 @@ internal object KeyboardViewController {
     }
 
     internal fun KeyboardSession.renderKeysImpl() {
+        io.secure.keyboard.ui.KeyboardSounds.prepare(this, settings.keySound)
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(column, FrameLayout.LayoutParams(-1, -1))
         val letterSymbols = io.secure.keyboard.data.LetterSymbolStore(this)

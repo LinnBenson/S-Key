@@ -1,0 +1,9 @@
+Kenney Interface Sounds 1.0
+Author: Kenney (https://kenney.nl)
+Source: https://kenney.nl/assets/interface-sounds
+License: CC0 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Included unchanged: bong_001.ogg, click_001.ogg, click_002.ogg,
+click_003.ogg, click_004.ogg, click_005.ogg.
+See KENNEY-LICENSE.txt for the original distribution notice.

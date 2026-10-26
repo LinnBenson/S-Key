@@ -18,6 +18,12 @@ FORBIDDEN_PARTS = {".git", ".gradle", ".gradle-home", ".kotlin", "build", "__pyc
 FORBIDDEN_SUFFIXES = {".aar", ".apk", ".aab", ".dex", ".so", ".onnx", ".wav", ".mp3", ".ogg", ".jks", ".keystore", ".pem", ".key", ".p12", ".pyc"}
 
 
+KEY_SOUND_ASSETS = {
+    "app/src/main/res/raw/" + name + ".ogg"
+    for name in ("bong_001", "click_001", "click_002", "click_003", "click_004", "click_005")
+}
+
+
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -45,7 +51,8 @@ def main():
             continue
         if any(part in FORBIDDEN_PARTS for part in relative.parts):
             continue
-        if path.is_symlink() or path.suffix.lower() in FORBIDDEN_SUFFIXES:
+        if path.is_symlink() or (path.suffix.lower() in FORBIDDEN_SUFFIXES
+                                 and relative.as_posix() not in KEY_SOUND_ASSETS):
             raise ValueError(f"Refusing forbidden source-package file: {relative}")
         if path.suffix.lower() == ".jar" and relative.as_posix() != "gradle/wrapper/gradle-wrapper.jar":
             raise ValueError(f"Unexpected binary: {relative}")
