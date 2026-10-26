@@ -6,8 +6,8 @@ android {
         applicationId = "io.secure.keyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 187
-        versionName = "1.3.1"
+        versionCode = 188
+        versionName = "1.3.2"
     }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -51,6 +51,8 @@ val buildSpaceGlossary by tasks.registering(Exec::class) {
     commandLine("python3", "scripts/build_space_glossary.py")
     inputs.file(rootProject.file("scripts/build_space_glossary.py"))
     inputs.dir(rootProject.file("third_party/cc_cedict"))
+    inputs.dir(rootProject.file("third_party/space_glossary"))
+    inputs.file(rootProject.file("third_party/open_dictionaries/skey_english.tsv"))
     outputs.dir(layout.buildDirectory.dir("generated/spaceGlossary"))
 }
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/spaceGlossary"))

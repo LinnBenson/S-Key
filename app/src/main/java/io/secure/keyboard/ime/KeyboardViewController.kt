@@ -828,10 +828,15 @@ internal object KeyboardViewController {
                         }
             }
         if (isSpace && key is TextView) {
-            key.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE)
             key.setSingleLine(true)
+            // Auto-size measures against the real width only without horizontal scrolling.
+            key.setHorizontallyScrolling(false)
             key.ellipsize = android.text.TextUtils.TruncateAt.END
             key.setPadding(dp(12), 0, dp(12), 0)
+            // Shrink a longer English gloss to fit instead of cutting it off; ellipsize only below 10sp.
+            key.setAutoSizeTextTypeUniformWithConfiguration(
+                10, labelSize, 1, android.util.TypedValue.COMPLEX_UNIT_SP,
+            )
             spaceGlossLabel = key
             updateSpaceGlossLabel()
         }

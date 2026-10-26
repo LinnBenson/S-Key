@@ -1,0 +1,23 @@
+S Key space-key English glossary
+
+Derived from CC-CEDICT, a community-maintained Chinese-English dictionary published by MDBG.
+Source: https://www.mdbg.net/chinese/dictionary?page=cc-cedict
+Snapshot: 2026-10-23T09:11:46Z (pinned in third_party/cc_cedict, verified by SHA-256)
+License: Creative Commons Attribution-ShareAlike 4.0 International.
+https://creativecommons.org/licenses/by-sa/4.0/
+Referenced work: CEDICT, Copyright (C) 1997, 1998 Paul Andrew Denisowski.
+
+S Key modifications (changes were made):
+- Only words of 2-4 Han characters are kept (the keyboard never looks up other lengths).
+- Prefer a concise, complete common sense; retain full source definitions when no safe short
+  sense is available. Do not cut clauses at prepositions or delete words solely for length.
+  Remove display annotations, expand sb/sth to someone/something, and keep proper-name spelling.
+- third_party/space_glossary/overrides.tsv provides curated corrections and common missing words,
+  including fixes for incomplete definitions. Overrides follow CC-CEDICT traditional forms.
+  The overrides are licensed under CC BY-SA 4.0 as part of this derived glossary.
+- English word frequencies from third_party/open_dictionaries/skey_english.tsv
+  (CC BY-SA 4.0 / SCOWL) are used only to rank candidate senses; no text from that list is
+  copied into the glossary.
+No contextual disambiguation is performed. The derived glossary data is distributed under
+CC BY-SA 4.0.
+Rebuild: python3 scripts/build_space_glossary.py

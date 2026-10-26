@@ -1,0 +1,1053 @@
+# S Key space-key gloss overrides.
+# Format: <simplified word, 2-4 Han characters><TAB><English gloss, <=4 words, <=24 chars>
+# "-" as the gloss removes the word. Each line also applies to the traditional forms of the word
+# found in CC-CEDICT. Lines were written by S Key contributors after reviewing the ~3000 most
+# frequent words of third_party/open_dictionaries/skey_pinyin.tsv; they fix senses the automatic
+# picker chooses poorly and add common compositional words that CC-CEDICT does not list.
+# License: CC BY-SA 4.0 (same as the CC-CEDICT-derived glossary they are merged into).
+一个	one
+不是	is not
+呵呵	hehe
+哈哈	haha
+嘿嘿	hehe
+哈哈哈	hahaha
+还是	or
+不过	but
+一下	a bit
+都是	all are
+还有	also
+觉得	feel
+不会	won't
+很多	many
+不要	don't
+也是	also
+看看	have a look
+通过	through
+一起	together
+一直	always
+产品	product
+只有	only
+多少	how many
+一般	usually
+谢谢	thanks
+不错	not bad
+生活	life
+目前	currently
+方面	aspect
+选择	choose
+项目	project
+我的	my
+你的	your
+两个	two
+准备	prepare
+管理	manage
+肯定	definitely
+这是	this is
+起来	get up
+作为	as
+结果	result
+好的	OK
+设计	design
+活动	activity
+必须	must
+当然	of course
+给我	give me
+一次	once
+特别	especially
+只要	as long as
+个人	personal
+有点	a bit
+给你	for you
+了解	understand
+吃饭	eat
+同学	classmate
+处理	handle
+关于	about
+原来	originally
+包括	include
+中的	in
+一种	a kind of
+提高	improve
+其中	among them
+存在	exist
+增加	increase
+人家	others
+完全	completely
+还要	still want
+正在	in progress
+建议	suggest
+空间	space
+不行	no way
+开发	develop
+全部	all
+到了	arrived
+这次	this time
+程序	program
+让我	let me
+本来	originally
+好了	done
+具体	specific
+办法	way
+提出	put forward
+我是	I am
+来说	for
+作用	effect
+各种	various
+真正	truly
+领导	leader
+操作	operate
+没事	it's okay
+下来	come down
+另外	besides
+修改	modify
+行业	industry
+有关	related
+以上	above
+才能	only then
+有没有	is there
+设置	settings
+妈妈	mom
+明白	understand
+产生	produce
+上面	above
+合作	cooperate
+代表	represent
+我也	me too
+这一	this
+那样	like that
+广告	ad
+股票	stock
+也有	also have
+也不	not either
+不断	constantly
+确定	confirm
+销售	sales
+麻烦	trouble
+左右	about
+中心	center
+应用	apply
+表现	performance
+根本	at all
+经过	pass through
+都有	all have
+帮助	help
+家里	at home
+资源	resources
+突然	suddenly
+刚刚	just now
+是个	is a
+一天	one day
+明显	obvious
+教育	education
+上的	on
+就会	will
+深圳	Shenzhen
+利用	use
+不到	less than
+先生	Mr.
+博客	blog
+不想	don't want
+有个	there is a
+地区	region
+楼主	OP
+工程	project
+自然	natural
+还在	still
+规定	rule
+心里	in one's heart
+那是	that is
+更新	update
+密码	password
+很好	very good
+讨论	discuss
+通知	notice
+以下	below
+我想	I think
+还没	not yet
+检查	check
+随便	whatever
+发表	publish
+相当	quite
+怎么样	how about
+实际	actual
+报告	report
+质量	quality
+坚持	insist
+我就	I'll
+新的	new
+是啊	yeah
+便宜	cheap
+让人	make one
+关键	key
+培训	training
+意见	opinion
+都会	will all
+看了	saw
+到底	after all
+看着	watching
+绝对	absolutely
+来了	coming
+太多	too many
+愿意	be willing
+机构	organization
+考试	exam
+一年	one year
+配置	configure
+成本	cost
+升级	upgrade
+一家	a family
+帖子	post
+那就	then
+错误	error
+厉害	awesome
+加入	join
+更多	more
+分别	respectively
+一位	one
+早上	morning
+意义	meaning
+你是	you are
+运行	run
+收入	income
+不知	don't know
+去了	went
+不乖	naughty
+您的	your
+解释	explain
+形式	form
+无论	no matter
+本人	myself
+不然	otherwise
+开心	happy
+时代	era
+文字	text
+担心	worry
+三个	three
+一张	a sheet
+前面	front
+的事	thing
+宣传	promote
+马甲	vest
+回复	reply
+放在	put in
+会有	there will be
+是在	is in
+也就	just
+对象	partner
+针对	aimed at
+运动	sports
+都在	all are
+让你	let you
+我在	I'm at
+失败	fail
+旅游	travel
+期间	period
+一条	one
+不敢	dare not
+恢复	restore
+试试	try
+再说	besides
+成了	became
+都要	all need
+很快	soon
+维护	maintain
+身边	around
+最大	biggest
+否则	otherwise
+登录	log in
+也会	will also
+问问	ask
+平时	usually
+很大	very big
+做好	do well
+也要	also need
+宝贝	baby
+完善	improve
+很难	very hard
+访问	visit
+我要	I want
+就像	just like
+真实	real
+反映	reflect
+符合	match
+感受	feel
+一边	one side
+都不	none
+熟悉	familiar
+我不	I don't
+专门	specially
+投入	invest
+对了	by the way
+一份	a copy
+帮我	help me
+做了	did
+咱们	we
+输入	input
+宝宝	baby
+很少	rarely
+沟通	communicate
+暂时	temporarily
+成绩	grades
+最高	highest
+数字	number
+买了	bought
+点击	click
+人物	character
+提升	improve
+态度	attitude
+兄弟	brother
+更多的	more
+没人	nobody
+连接	connect
+值得	worth
+中文	Chinese
+请问	excuse me
+有了	got it
+配合	cooperate
+从来	ever
+评论	comment
+即可	then
+女生	girl
+性能	performance
+还能	can still
+提示	hint
+用于	used for
+行动	action
+最大的	biggest
+它的	its
+就在	right at
+发挥	bring into play
+老大	boss
+追求	pursue
+不好意思	sorry
+不太	not very
+当前	current
+多了	more
+教授	professor
+看过	have seen
+加油	go for it
+不懂	don't understand
+旁边	beside
+创新	innovation
+内存	memory
+辛苦	hard
+使得	make
+你要	you want
+人才	talent
+走了	gone
+才是	is really
+又是	again
+大盘	market index
+主动	proactive
+改善	improve
+就能	can
+不去	not go
+群众	the masses
+提前	in advance
+处于	be in
+好吧	OK
+嘻嘻	hee hee
+不可	must not
+带着	with
+酒店	hotel
+并不是	is not
+技能	skill
+不了	unable
+自身	self
+你说	you say
+轻松	relaxed
+参考	reference
+帐号	account
+好看	good-looking
+一段	a section
+让他	let him
+避免	avoid
+推广	promote
+也没	didn't either
+心中	in one's heart
+自我	self
+格式	format
+站在	stand on
+距离	distance
+两人	two people
+一句	a sentence
+我说	I say
+不在	not here
+附件	attachment
+现代	modern
+一旦	once
+推进	advance
+给他	give him
+忘了	forgot
+建筑	building
+一场	one
+想想	think about
+就行	will do
+出了	happened
+一块	a piece
+通常	usually
+广大	vast
+干吗	why
+就不	won't
+作出	make
+一片	a piece
+不多	not many
+就好	will be fine
+正好	just right
+坐在	sit on
+保存	save
+刺激	exciting
+从事	engage in
+做出	make
+老子	I
+基于	based on
+很有	very
+强大	powerful
+流程	process
+两天	two days
+过了	passed
+这位	this one
+开放	open
+一只	one
+微软	Microsoft
+成长	grow
+会不会	will it
+取消	cancel
+发送	send
+一套	a set
+角色	role
+深入	in-depth
+想要	want
+一名	one
+令人	make one
+商务	business
+说了	said
+面试	interview
+万元	10k yuan
+交通	traffic
+仅仅	only
+跟我	with me
+两年	two years
+不说	not say
+都能	all can
+找个	find a
+高度	height
+近期	recently
+个月	months
+是我	it's me
+为啥	why
+还会	will still
+一声	a sound
+记忆	memory
+很久	long time
+体验	experience
+而言	in terms of
+一生	lifetime
+对我	to me
+我还	I still
+老人	old man
+补充	add
+定位	locate
+队伍	team
+早点	earlier
+做的	made
+天下	the world
+生意	business
+很多人	many people
+死了	dead
+帮你	help you
+年代	decade
+跟你	with you
+晚安	good night
+而不是	rather than
+第三	third
+一是	firstly
+都没	none
+界面	interface
+渠道	channel
+你在	you are
+脸上	on the face
+一把	one
+他说	he said
+两次	twice
+一件	one
+开会	meeting
+一部	one
+说过	said
+先进	advanced
+表演	perform
+落实	implement
+算是	count as
+作业	homework
+看不到	can't see
+最好的	best
+破坏	destroy
+法师	mage
+二是	secondly
+吃了	ate
+出差	business trip
+还不	not yet
+家长	parent
+见过	have seen
+更好	better
+本次	this time
+和你	with you
+公告	announcement
+写的	written
+你也	you too
+输出	output
+做法	practice
+打印	print
+但我	but I
+早就	long ago
+两种	two kinds
+一项	one
+本站	this site
+我去	damn
+整合	integrate
+两个人	two people
+放假	holiday
+被人	by someone
+中华	China
+有事	busy
+太大	too big
+四个	four
+地说	saying
+这款	this model
+也能	can also
+他是	he is
+不见	missing
+不算	not count
+这就	right away
+病人	patient
+说的	said
+多少钱	how much
+优惠	discount
+看你	look at you
+三年	three years
+一批	a batch
+本网	this site
+要去	going to
+才会	only then
+又有	also have
+这么多	so many
+我家	my home
+比我	than me
+一看	look
+要不要	do you want
+也在	also at
+岁的	years old
+管理员	admin
+频道	channel
+临时	temporary
+生存	survive
+丈夫	husband
+素质	quality
+片子	movie
+伤心	sad
+播放	play
+劳动	labor
+各项	each item
+实习	internship
+难得	rare
+投诉	complain
+高校	university
+最低	lowest
+某个	some
+机关	agency
+说是	said to be
+是指	refers to
+那就是	that is
+和我	with me
+答应	agree
+担任	serve as
+很高	very high
+研发	R&D
+没法	can't
+锻炼	exercise
+把我	me
+将在	will
+总体	overall
+稍微	slightly
+典型	typical
+积分	points
+请您	please
+物品	item
+退出	exit
+您好	hello
+快点	hurry up
+等着	wait
+党的	party's
+他在	he is
+主机	host
+我看	I think
+电源	power supply
+手中	in hand
+也很	also very
+心灵	soul
+五一	May Day
+一段时间	a while
+品质	quality
+接收	receive
+通信	communication
+部署	deploy
+大多	mostly
+要有	must have
+没钱	broke
+上了	got on
+还行	not bad
+一款	a model
+你会	you will
+浏览	browse
+眼前	before one's eyes
+恐怕	I'm afraid
+下了	got off
+例子	example
+激动	excited
+哈哈哈哈	hahaha
+不出	not out
+给予	give
+较高	higher
+好不好	OK?
+难度	difficulty
+你有	you have
+时刻	moment
+后台	backend
+年前	years ago
+做什么	do what
+一台	one
+打工	work
+等于	equals
+家伙	guy
+问我	ask me
+我市	our city
+大幅	sharply
+运营	operate
+走到	walk to
+很好的	very good
+是吗	really?
+让她	let her
+几十	dozens
+不停	nonstop
+的新	new
+本书	this book
+板块	sector
+块钱	yuan
+买的	bought
+在这	here
+很容易	very easy
+对你	to you
+年的	year
+十年	ten years
+不像	unlike
+药物	medicine
+哪有	where
+这个问题	this question
+有关部门	authorities
+把它	it
+似的	as if
+对此	about this
+又要	again
+看好	optimistic about
+好吗	OK?
+按钮	button
+的心	heart
+是要	must
+你不	you don't
+爱你	love you
+来的	came
+这部	this
+你看	look
+给她	give her
+才有	only then
+策划	plan
+新疆	Xinjiang
+涨停	limit up
+看完	finish watching
+在我	in my
+一下子	all at once
+默认	default
+是你	it's you
+把你	you
+这也是	this is also
+最重要的	most important
+都很	all very
+之所以	the reason why
+两位	two
+很大的	very big
+引进	introduce
+接下来	next
+这点	this point
+越来越多	more and more
+只会	only
+一篇	an article
+等你	wait for you
+破解	crack
+拿着	holding
+我也是	me too
+的一种	a kind of
+成人	adult
+一代	generation
+的基础上	on the basis of
+魔兽	Warcraft
+眼神	look
+做过	have done
+姓名	name
+不让	not allow
+放到	put in
+的钱	money
+已有	existing
+这句话	this sentence
+东东	stuff
+一本	one
+好啊	sure
+所说	said
+大厦	building
+你还	you still
+一群	a group
+你能	can you
+是呀	yes
+抱着	holding
+亿元	100M yuan
+床上	in bed
+算法	algorithm
+很喜欢	really like
+会在	will be in
+没有任何	no
+等我	wait for me
+干啥	what for
+全是	all
+去看	go see
+这两天	these days
+是吧	right?
+当你	when you
+亲爱	dear
+实用	practical
+这张	this
+想着	thinking of
+你不是	aren't you
+有关规定	regulations
+就说	just say
+叫我	call me
+三星	Samsung
+有一种	there is a
+都说	everyone says
+和他	with him
+将其	it
+人都	people all
+本周	this week
+可以用	can use
+之处	place
+没啥	nothing
+请你	please
+住在	live in
+虚拟	virtual
+要做	will do
+对他	to him
+去过	have been
+一番	a bit
+是谁	who
+终端	terminal
+话说	so
+一堆	a pile of
+更有	even more
+登陆	log in
+它是	it is
+我有	I have
+比较好	better
+回事	matter
+外地	other places
+第四	fourth
+三大	three major
+这两个	these two
+这段	this
+广西	Guangxi
+告诉记者	told reporters
+你想	you want
+找你	look for you
+没了	gone
+是对	is right
+是最	is the most
+的博客	blog
+一辆	one
+做个	make a
+哪天	someday
+也不知道	don't know
+但在	but in
+一颗	one
+不高	not high
+我又	I again
+不信	don't believe
+不做	don't do
+写了	wrote
+去吧	go ahead
+跟他	with him
+我很	I'm very
+董事长	chairman
+一支	one
+是很	is very
+玩玩	have fun
+三是	thirdly
+我没	I didn't
+当我	when I
+还得	still have to
+更好的	better
+得了	come on
+一步	one step
+手上	on hand
+跑到	run to
+对着	facing
+不爽	annoyed
+有一天	one day
+得多	much more
+给人	give people
+还不是	isn't it
+很不错	very good
+有过	have had
+把他	him
+哎呀	oops
+图标	icon
+礼拜	week
+好事	good thing
+天地	world
+奖金	bonus
+阿姨	auntie
+看上去	looks
+回报	return
+字体	font
+宠物	pet
+迅雷	Thunder
+语音	voice
+江湖	jianghu
+他的	his
+她的	her
+来看	come and see
+是一种	is a kind of
+三国	Three Kingdoms
+中医	Chinese medicine
+控股	holding
+跌停	limit down
+考研	grad school exam
+师兄	senior schoolmate
+师姐	senior schoolmate
+师弟	junior schoolmate
+师妹	junior schoolmate
+评选	select
+原材料	raw materials
+过年	Chinese New Year
+来着	past-action particle
+老人家	elderly person
+班主任	head teacher
+呼呼	whoosh
+偷拍	sneak photo
+户型	floor plan
+人缘	popularity
+琉璃	colored glaze
+费力	strenuous
+有识之士	people of insight
+学妹	junior schoolmate
+学弟	junior schoolmate
+学长	senior schoolmate
+学姐	senior schoolmate
+二维码	QR code
+内卷	rat race
+对不起	sorry
+微信	WeChat
+京东	JD.com
+故宫	Forbidden City
+朋友圈	WeChat Moments
+红包	red envelope
+躺平	lie flat
+阿里巴巴	Alibaba
+手机号	phone number
+白沙	Baisha
+网购	online shopping
+直播	livestream
+健身	work out
+点赞	like
+扫码	scan code
+截图	screenshot
+充值	top up
+付钱	pay
+转账	transfer money
+退款	refund
+差评	bad review
+好评	good review
+客服	customer service
+# Additional fixes after reviewing ranks 3000-6000 for long or wrong senses.
+罢了	that's all
+黄河	Yellow River
+机型	model
+签约	sign a contract
+中药	Chinese medicine
+演唱会	concert
+选用	choose
+车子	car
+匹配	match
+回帖	reply
+澳门	Macau
+光驱	CD drive
+保安	security guard
+李宇春	Li Yuchun
+黑龙江	Heilongjiang
+有无	whether
+能否	whether
+下车	get off
+骂人	swear
+总有	always
+一说	one view
+打牌	play cards
+语文	Chinese
+是不是	whether
+用力	exert force
+请假	ask for leave
+研制	develop
+# Frequent words whose CC-CEDICT senses are all too long for the key; short glosses by S Key contributors.
+支持	support
+情况	situation
+金山	Jinshan
+曼联	Manchester United
+中关村	Zhongguancun
+报考	apply for exam
+拆迁	demolish and relocate
+谁知道	who knows
+称之为	call it
+看懂	understand
+入选	be selected
+射门	shoot at goal
+粽子	zongzi
+后缀	suffix
+前缀	prefix
+中石化	Sinopec
+中国石化	Sinopec
+工商银行	ICBC
+批复	official reply
+表妹	cousin
+表哥	cousin
+表姐	cousin
+表弟	cousin
+堂弟	cousin
+中秋节	Mid-Autumn Festival
+期末	end of term
+楼房	building
+复试	second-round exam
+乙肝	hepatitis B
+测算	estimate
+修行	spiritual practice
+厅长	department head
+唐僧	Xuanzang
+毫不犹豫	without hesitation
+意甲	Serie A
+八字	birth chart
+春运	Spring Festival travel
+两会	Two Sessions
+二十多	over 20
+纪委	discipline commission
+二号	2nd
+蒙牛	Mengniu
+二氧化碳	carbon dioxide
+党政	Party and government
+才怪	no way
+岂不	wouldn't it
+三聚氰胺	melamine
+围观	crowd around
+松江	Songjiang
+得起	can afford
+少林	Shaolin
+老哥	bro
+广交会	Canton Fair
+一见钟情	love at first sight
+一卡通	smart card
+汇丰	HSBC
+汇丰银行	HSBC
+偷情	have an affair
+真题	past exam papers
+充分考虑	fully consider
+反腐倡廉	fight corruption
+抗日战争	Anti-Japanese War
+葡萄糖	glucose
+随口	offhand
+换届	change of term
+反之	conversely
+病虫害	pests and diseases
+二十世纪	20th century
+洗漱	wash up
+摄氏度	degrees Celsius
+落成	completed
+教职工	staff
+告一段落	come to an end
+酒水	drinks
+榜单	ranking list
+弹琴	play the piano
+此致	regards
+同乡	fellow townsman
+回见	see you
+竞猜	guess
+长效	long-acting
+退房	check out
+错字	typo
+看穿	see through
+欧莱雅	L'Oréal
+农家乐	farm stay
+点对点	peer-to-peer
+多愁善感	sentimental
+耳熟能详	familiar
+蚊香	mosquito coil
+外派	send abroad
+百强	top 100
+按理说	in theory
+首都机场	Capital Airport
+采风	collect folk material
+拜师	become an apprentice
+水煮鱼	poached spicy fish
+古树	ancient tree
+一应俱全	all available
+得不偿失	not worth it
+二氧化硫	sulfur dioxide
+大学本科	undergraduate
+坠毁	crash
+水底	underwater
+功不可没	invaluable
+古今中外	all times and places
+登高	climb high
+候车	wait for a bus
+吃苦耐劳	hardworking
+恼羞成怒	angry from shame
+安居乐业	live in peace
+腊肉	cured meat
+赶集	go to market
+工资卡	salary card
+深究	look into
+数控机床	CNC machine tool
+另存	save as
+甲烷	methane
+任重道远	long way to go
+不谋而合	agree by chance
+患得患失	anxious about gains
+师母	teacher's wife
+与世隔绝	isolated
+婆媳	in-laws
+治标	treat symptoms
+精打细算	budget carefully
+一劳永逸	once and for all
+姐弟恋	older-woman romance
+南北朝	Nanbeichao era
+头等舱	first class
+阴差阳错	by chance
+教辅	study guide
+价廉物美	cheap and good
+欲言又止	hesitate to speak
+行驶证	vehicle license
+名胜古迹	scenic spots
+胸有成竹	confident
+说来说去	after all
+见外	stand on ceremony
+坠楼	fall from a building
+
+# Complete concise definitions for previously truncated or omitted entries.
+大义灭亲	put justice above family
+镇宁县	Zhenning County
+异事	something unusual
+中央企业	central state enterprise
+奉劝	advise earnestly
+伤痕累累	covered in wounds
