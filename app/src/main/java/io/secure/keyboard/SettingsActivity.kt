@@ -693,13 +693,15 @@ open class SettingsActivity : ComponentActivity() {
                 BasicComponent(title = label, onClick = { model.settings.keySound = id }, rightActions = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (model.settings.keySound == id) UiIcon("check", "已选择")
-                        if (id != "none") IconButton(onClick = { player.perform(view, id) }) {
+                        if (id != "none") IconButton(onClick = { player.perform(view, id, model.settings.keySoundVolume) }) {
                             UiIcon("play", "试听$label")
                         }
                     }
                 })
             }
-            Info("音量跟随系统按键音量；静音或振动模式下不播放。系统音同时受系统触摸提示音开关控制。")
+        }
+        Group("音效音量") {
+            Range("音量", model.settings.keySoundVolume, 0, 100, "%") { model.settings.keySoundVolume = it }
         }
     }
     @Composable private fun Appearance() {

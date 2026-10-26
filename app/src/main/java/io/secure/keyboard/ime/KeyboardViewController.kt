@@ -509,6 +509,7 @@ internal object KeyboardViewController {
                 settings.keySound,
                 settings.vibration && vibrate,
                 settings.vibrationStrength,
+                settings.keySoundVolume,
             )
     }
 

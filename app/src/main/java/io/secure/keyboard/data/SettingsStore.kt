@@ -259,6 +259,10 @@ class SettingsStore(context: Context) {
             prefs.edit().putString("keySoundType", KeySound.normalize(value)).remove("keySound").apply()
         }
 
+    var keySoundVolume: Int
+        get() = prefs.getInt("keySoundVolume", 100).coerceIn(0, 100)
+        set(value) { prefs.edit().putInt("keySoundVolume", value.coerceIn(0, 100)).apply() }
+
     var vibration: Boolean
         get() = prefs.getBoolean("vibration", true)
         set(value) {

@@ -9,8 +9,8 @@ import android.view.View
 
 /** Submit the platform effects before the caller performs its already-validated key action. */
 object KeyboardFeedback {
-    fun perform(view: View, sound: String, vibration: Boolean, strength: Int) {
-        KeyboardSounds.perform(view, sound)
+    fun perform(view: View, sound: String, vibration: Boolean, strength: Int, soundVolume: Int) {
+        KeyboardSounds.perform(view, sound, soundVolume)
         KeyboardHaptics.perform(view, vibration, strength)
     }
 
@@ -55,7 +55,7 @@ internal open class KeySoundPlayer {
         ready.clear()
     }
 
-    fun perform(view: View, sound: String) {
+    fun perform(view: View, sound: String, volume: Int) {
         if (sound == "none" || !view.isShown) return
         try {
             val audio = view.context.getSystemService(AudioManager::class.java) ?: return
@@ -67,8 +67,10 @@ internal open class KeySoundPlayer {
                 // The platform effect also respects Android's UI sound switch.
                 audio.playSoundEffect(AudioManager.FX_KEYPRESS_STANDARD)
             } else {
+                val gain = volume.coerceIn(0, 100) / 100f
+                if (gain == 0f) return
                 val sample = samples[sound] ?: return
-                if (sample in ready) pool?.play(sample, 1f, 1f, 1, 0, 1f)
+                if (sample in ready) pool?.play(sample, gain, gain, 1, 0, 1f)
             }
         } catch (_: RuntimeException) {
             // Audio support must never block typing or the independent haptic.
