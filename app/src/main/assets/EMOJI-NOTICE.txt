@@ -1,0 +1,4 @@
+Emoji data: Unicode Emoji 16.0, fully-qualified sequences from official emoji-test.txt.
+Source: https://unicode.org/Public/emoji/16.0/emoji-test.txt
+License: Unicode License v3, see UNICODE-LICENSE.txt.
+Rendered by the Android device's installed emoji font; newer sequences may appear as fallback glyphs on older devices.

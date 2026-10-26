@@ -1,0 +1,4 @@
+Traditional-to-Simplified dictionary data from OpenCC ver.1.1.9
+https://github.com/BYVoid/OpenCC/tree/ver.1.1.9
+Copyright OpenCC contributors. Apache License 2.0; see LICENSE.txt.
+For alternatives, the first canonical mapping is used, with longest phrase precedence.

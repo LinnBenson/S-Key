@@ -1,0 +1,38 @@
+S KEY DICTIONARY SOURCES AND MODIFICATIONS (2026-10-24)
+
+skey_wubi86.tsv: converted from rime/rime-wubi wubi86.dict.yaml.
+Revision 152a0d3f3efe40cae216d1e3b338242446848d07.
+https://github.com/rime/rime-wubi
+License: GNU LGPL version 3. See LICENSE-WUBI-LGPL-3.0.txt and LICENSE-GPL-3.0.txt.
+Original authors include Wozy, Chen Xing, Yu Yuwei and Gong Chen;
+original attribution comments are preserved in the converted TSV.
+
+skey_pinyin.tsv: converted from rime/rime-pinyin-simp pinyin_simp.dict.yaml.
+Revision 0c6861ef7420ee780270ca6d993d18d4101049d0.
+https://github.com/rime/rime-pinyin-simp
+License: Apache-2.0. See LICENSE-PINYIN-APACHE-2.0.txt.
+Upstream notes derivation from Android Open Source Project PinyinIME.
+
+skey_english.tsv: recovered english_frequency.tsv from LinnBenson/S-Key,
+revision 4b0e4957de249026fac5a0cd3638f9aa2ed904b0.
+Adapted FrequencyWords / OpenSubtitles data by Hermit Dave and contributors,
+filtered using SCOWL by Kevin Atkinson and contributors.
+License: CC-BY-SA-4.0; accompanying SCOWL notices also apply.
+See ENGLISH-NOTICE.txt, ENGLISH-FREQUENCYWORDS-README.txt,
+ENGLISH-SCOWL-COPYRIGHT.txt and LICENSE-ENGLISH-CC-BY-SA-4.0.txt.
+
+Changes: converted YAML to text/code/integer-weight TSV; YAML schema metadata
+and unused stem columns removed. Original entry order and integer weights
+preserved. One fractional Wubi weight (chi, zzxx, 450.5) rounded down to 450.
+English entries and counts unchanged; attribution/conversion comments added.
+
+Complete original sources, hashes, conversion changes and converted data:
+third_party/open_dictionaries/ in the source distribution.
+Reproduce with scripts/convert_open_dictionaries.py, followed by
+scripts/build_dictionary_catalog.py. Preserve notices and applicable licenses
+when distributing these datasets or modifications.
+
+skey_wubi86_high.tsv, skey_pinyin_high.tsv and skey_english_high.tsv are initially
+empty, locally editable priority sources. All six files can be replaced by a
+validated same-name import and recompiled. Successful compilation replaces the
+runtime snapshot; no previous dictionary is used as a fallback.

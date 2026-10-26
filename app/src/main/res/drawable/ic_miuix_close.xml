@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Miuix contributors, Apache-2.0. Generated from official Regular artwork. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="1047.6" android:viewportHeight="1047.6">
+  <group android:scaleY="-1.0" android:translateY="1047.6">
+    <path android:fillColor="#FF000000" android:fillType="nonZero" android:pathData="M523.8  593.3 L832.7  903.9 Q845.0  916.5  857.1  916.3 Q869.2  916.2  881.2  903.9 L897.5  887.6 Q909.6  875.6  909.7  863.8 Q909.9  852.0  897.5  839.1 L588.6  528.4 L898.8  218.3 Q911.0  206.6  911.3  194.8 Q911.7  182.9  898.8  170.5 L881.0  152.7 Q858.2  129.9  833.6  153.8 L523.8  463.6 L213.1  154.7 Q201.5  142.7  189.2  142.5 Q177.0  142.3  164.6  154.7 L148.6  171.0 Q136.3  182.7  136.3  194.9 Q136.3  207.1  148.2  219.2 L458.9  528.4 L149.1  839.1 Q137.1  852.0  137.1  863.8 Q137.1  875.6  149.1  887.6 L165.5  903.9 Q178.4  916.5  190.0  916.5 Q201.6  916.5  214.0  903.9 Z" />
+  </group>
+</vector>

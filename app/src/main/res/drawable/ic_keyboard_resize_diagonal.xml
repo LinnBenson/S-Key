@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Custom six-dot resize grip, selected option D. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+  <path android:fillColor="#FF000000" android:pathData="M16.6,6a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0Z" />
+  <path android:fillColor="#FF000000" android:pathData="M10.6,12a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0Z" />
+  <path android:fillColor="#FF000000" android:pathData="M16.6,12a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0Z" />
+  <path android:fillColor="#FF000000" android:pathData="M4.6,18a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0Z" />
+  <path android:fillColor="#FF000000" android:pathData="M10.6,18a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0Z" />
+  <path android:fillColor="#FF000000" android:pathData="M16.6,18a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0Z" />
+</vector>

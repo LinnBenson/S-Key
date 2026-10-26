@@ -1,0 +1,15 @@
+Miuix 0.5.1, Miuix Icons Regular: Copyright Miuix contributors. Apache-2.0.
+https://github.com/miuix-kotlin-multiplatform/miuix
+Material Symbols Rounded: Copyright Google LLC. Apache-2.0.
+https://github.com/google/material-design-icons
+AndroidX and Compose: Copyright The Android Open Source Project. Apache-2.0.
+https://android.googlesource.com/platform/frameworks/support/
+Full Apache-2.0 text: KOTLIN-LICENSE.txt.
+Exact resolved versions: DEPENDENCIES.txt.
+
+Kotlinx coroutines 1.8.0: Copyright JetBrains s.r.o. Apache-2.0.
+https://github.com/Kotlin/kotlinx.coroutines/tree/1.8.0
+JSpecify 1.0.0: Copyright The JSpecify Authors. Apache-2.0.
+https://github.com/jspecify/jspecify/tree/v1.0.0
+Guava listenablefuture 1.0: Copyright Google Inc. Apache-2.0.
+https://github.com/google/guava

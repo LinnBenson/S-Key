@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.SKey.Settings" parent="Base.Theme.SKey.Settings">
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+    </style>
+    <style name="Theme.SKey.Settings.Dialog" parent="Base.Theme.SKey.Settings.Dialog">
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>

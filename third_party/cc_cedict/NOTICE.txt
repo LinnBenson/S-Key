@@ -1,0 +1,8 @@
+CC-CEDICT — community-maintained Chinese–English dictionary, published by MDBG.
+Source: https://www.mdbg.net/chinese/dictionary?page=cc-cedict
+Snapshot: 2026-10-23T09:11:46Z
+License: Creative Commons Attribution-ShareAlike 4.0 International.
+https://creativecommons.org/licenses/by-sa/4.0/
+Referenced work: CEDICT, Copyright (C) 1997, 1998 Paul Andrew Denisowski.
+S Key modifications: selected complete English senses, preserved case and punctuation, split semicolons only outside parentheses, resolved Chinese cross-references with cycle limits, and indexed simplified and traditional forms. Ordinary pinyin readings precede capitalized proper-name readings; source sense order is otherwise retained. Single characters and metadata are excluded. No contextual disambiguation is claimed. Derived glossary data is distributed under CC BY-SA 4.0.
+Rebuild: python3 scripts/build_space_glossary.py

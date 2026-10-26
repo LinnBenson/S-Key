@@ -1,0 +1,90 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.jks
+.gradle-home/
+
+# Restored from the lossless source archive
+/app/src/main/assets/fonts/OfflineKeyboardCjkSupplement.ttf
+
+# Downloaded hash-verified dependency; source includes the bootstrap script.
+/app/libs/*.aar
+
+# Local release artifacts and private signing material
+/releases/
+*.apk
+*.idsig
+*.p12
+*.keystore
+keystore-password.txt
+
+.kotlin/
+
+# Test results belong in the outer workspace diagnostics/, not in source control.
+/diagnostics/
+/test-results/
+/test-reports/
+/reports/
+/deliverables/
+/TEST_RESULTS.md
+/docs/verification/
+/docs/*-review-*.txt
+**/REPORT.md
+**/REPORT.txt
+__pycache__/
+*.pyc
+
+# Keep local test suites outside the source repository.
+/app/src/test/
+/app/src/androidTest/
+/tests/
+/local-tests/
+/scripts/generate_floating_options.py
+/scripts/verify_source_package.py
+
+# Local product history and release notes are kept outside the repository.
+/REQUIREMENTS.md
+/docs/releases/
+/local-docs/
+
+# Workspace-only material, even if accidentally copied into this repository.
+/key/
+/package/
+/AGENTS.md
+*.code-workspace
+.DS_Store
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*.tmp
+*~
+
+# Private credentials and machine-specific configuration.
+store-password.txt
+*-password.txt
+release-certificate.pem
+certificate-info.txt
+*.key
+*.pem
+*.pfx
+.env
+.env.*
+!.env.example
+!.env.sample
+credentials.json
+secrets.json
+keystore.properties
+signing.properties
+
+# Generated delivery bundles, checksums and diagnostic output.
+*.aab
+*.zip
+SHA256SUMS.txt
+*.apk.sha256
+*.aab.sha256
+*.zip.sha256
+*.log
+/screenshots/

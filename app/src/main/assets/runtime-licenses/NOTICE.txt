@@ -1,0 +1,52 @@
+OFFLINE KEYBOARD: PACKAGED JVM RUNTIME NOTICES
+
+Kotlin Standard Library 2.2.10
+Artifact: org.jetbrains.kotlin:kotlin-stdlib:2.2.10
+Copyright 2010-2024 JetBrains s.r.o. and Kotlin Programming Language contributors.
+License: Apache License, Version 2.0.
+See KOTLIN-LICENSE.txt and the unchanged KOTLIN-COPYRIGHT.txt.
+Official source: https://github.com/JetBrains/kotlin/tree/v2.2.10
+
+The JVM standard library includes the following third-party-derived code:
+
+1. Unsigned integer division and remainder
+Source: libraries/stdlib/jvm/src/kotlin/util/UnsignedJVM.kt
+Based on Guava's UnsignedLongs implementation.
+Copyright 2011 The Guava Authors
+License: Apache License, Version 2.0; see KOTLIN-GUAVA-LICENSE.txt.
+
+2. Initial map-capacity calculation
+Source: libraries/stdlib/jvm/src/kotlin/collections/MapsJVM.kt
+Based on Guava's com.google.common.collect.Maps.capacity.
+Copyright (C) 2007 The Guava Authors
+License: Apache License, Version 2.0; see KOTLIN-GUAVA-LICENSE.txt.
+Referenced upstream source:
+https://github.com/google/guava/blob/v28.2/guava/src/com/google/common/collect/Maps.java
+
+3. Read-only collection base classes
+Sources: libraries/stdlib/src/kotlin/collections/AbstractList.kt and AbstractMap.kt
+Based on GWT AbstractList and AbstractMap.
+Copyright 2007 Google Inc.
+Kotlin's license inventory describes the GWT-derived collection code as
+(C) 2007-08 Google Inc.
+License: Apache License, Version 2.0; see KOTLIN-GWT-LICENSE.txt.
+
+4. Inverse hyperbolic math functions
+Source: libraries/stdlib/jvm/src/kotlin/util/MathJVM.kt
+Derived from boost special math functions.
+Copyright Eric Ford & Hubert Holin 2001.
+License: Boost Software License 1.0; see KOTLIN-BOOST-LICENSE.txt.
+
+IntelliJ IDEA Annotations 23.0.0
+Artifact: org.jetbrains:annotations:23.0.0
+Copyright 2000-2020 JetBrains s.r.o.
+Copyright 2000-2021 JetBrains s.r.o.
+License: Apache License, Version 2.0; see KOTLIN-LICENSE.txt.
+See JETBRAINS-ANNOTATIONS-COPYRIGHT.txt for original headers and source mapping.
+
+These are the runtime components addressed by this notice. Font, dictionary,
+emoji, sherpa-onnx, and ONNX Runtime notices are supplied separately with their
+assets. Build-only compiler and Gradle dependencies are not represented as APK
+runtime dependencies here. The Gradle wrapper is covered in the source package.
+No changes were made to these third-party runtime sources; the build converts
+JVM bytecode to Android DEX.

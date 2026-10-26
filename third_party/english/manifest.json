@@ -1,0 +1,73 @@
+{
+  "format": "lowercase ASCII word, tab, positive integer corpus occurrence count",
+  "entry_count": 25000,
+  "ranking": "descending occurrence count, then ascending word",
+  "runtime": "packaged static asset; no network, learning, context, or next-word prediction",
+  "license": "CC-BY-SA-4.0; retain accompanying SCOWL notices",
+  "upstream_sources": {
+    "en_50k.txt": {
+      "url": "https://raw.githubusercontent.com/hermitdave/FrequencyWords/525f9b560de45753a5ea01069454e72e9aa541c6/content/2018/en/en_50k.txt",
+      "sha256": "5351ff405b1126ef555791dd4d9798a48e3e9a501a9fc481a9da957752cfb458"
+    },
+    "scowl-2020.12.07.tar.gz": {
+      "url": "https://downloads.sourceforge.net/wordlist/scowl-2020.12.07.tar.gz",
+      "sha256": "5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc"
+    }
+  },
+  "scowl_members": [
+    "scowl-2020.12.07/final/american-words.10",
+    "scowl-2020.12.07/final/american-words.20",
+    "scowl-2020.12.07/final/american-words.35",
+    "scowl-2020.12.07/final/american-words.40",
+    "scowl-2020.12.07/final/american-words.50",
+    "scowl-2020.12.07/final/american-words.55",
+    "scowl-2020.12.07/final/american-words.60",
+    "scowl-2020.12.07/final/british-words.10",
+    "scowl-2020.12.07/final/british-words.20",
+    "scowl-2020.12.07/final/british-words.35",
+    "scowl-2020.12.07/final/british-words.40",
+    "scowl-2020.12.07/final/british-words.50",
+    "scowl-2020.12.07/final/british-words.55",
+    "scowl-2020.12.07/final/british-words.60",
+    "scowl-2020.12.07/final/british_z-words.10",
+    "scowl-2020.12.07/final/british_z-words.20",
+    "scowl-2020.12.07/final/british_z-words.35",
+    "scowl-2020.12.07/final/british_z-words.40",
+    "scowl-2020.12.07/final/british_z-words.50",
+    "scowl-2020.12.07/final/british_z-words.55",
+    "scowl-2020.12.07/final/british_z-words.60",
+    "scowl-2020.12.07/final/english-words.10",
+    "scowl-2020.12.07/final/english-words.20",
+    "scowl-2020.12.07/final/english-words.35",
+    "scowl-2020.12.07/final/english-words.40",
+    "scowl-2020.12.07/final/english-words.50",
+    "scowl-2020.12.07/final/english-words.55",
+    "scowl-2020.12.07/final/english-words.60"
+  ],
+  "scowl_allowed_count": 79643,
+  "calendar_eligibility_exceptions": [
+    "april",
+    "august",
+    "december",
+    "february",
+    "friday",
+    "january",
+    "july",
+    "june",
+    "march",
+    "may",
+    "monday",
+    "november",
+    "october",
+    "saturday",
+    "september",
+    "sunday",
+    "thursday",
+    "tuesday",
+    "wednesday"
+  ],
+  "allowed_count_after_calendar_exceptions": 79659,
+  "frequency_intersection_count": 31182,
+  "asset_bytes": 326889,
+  "asset_sha256": "e818b1f3ea72bc7a391abaa171f717bc5d2f90397fdeef60cad8862202a6d290"
+}
