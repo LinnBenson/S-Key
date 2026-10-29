@@ -597,7 +597,7 @@ open class SettingsActivity : ComponentActivity() {
             Text("API KEY 设置", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 color = MiuixTheme.colorScheme.onSurfaceSecondary,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp))
-            HorizontalChoices(listOf("google" to "Google") + AiProviders.options, apiProvider,
+            HorizontalChoices(listOf("google" to "Google") + AiProviders.options.filter { it.first != "gemini" }, apiProvider,
                 modifier = Modifier.padding(bottom = 16.dp), equalWidth = true) {
                 apiProvider = it
             }
@@ -624,6 +624,20 @@ open class SettingsActivity : ComponentActivity() {
                         Info("请选择支持 Responses API 的对话模型，也可手动填写模型 ID。")
                     }
                 }
+            }
+        }
+        if (apiProvider == "google") {
+            Group("Gemini 对话接口") {
+                field("接口地址（包含 /v1beta）", draft.geminiUrl) { model.apiModels = emptyList(); model.updateApi(model.apiDraft.copy(geminiUrl = it)) }
+                field("Gemini API Key", draft.geminiKey, true) { model.apiModels = emptyList(); model.updateApi(model.apiDraft.copy(geminiKey = it)) }
+                field("模型 ID", draft.geminiModel) { model.updateApi(model.apiDraft.copy(geminiModel = it)) }
+                Action("获取可用模型", model.apiReady) { model.fetchApiModels("gemini") }
+                model.apiModels.filter { model.apiModelsProvider == "gemini" }.forEach { id -> Choice(id, draft.geminiModel == id, enabled = model.apiReady) { model.updateApi(model.apiDraft.copy(geminiModel = id)) } }
+            }
+            Group("Gemini 语音接口") {
+                field("语音识别端点（完整 HTTPS 地址）", draft.geminiVoiceUrl) { model.updateApi(model.apiDraft.copy(geminiVoiceUrl = it)) }
+                field("Gemini 语音 API Key", draft.geminiVoiceKey, true) { model.updateApi(model.apiDraft.copy(geminiVoiceKey = it)) }
+                field("语音模型 ID", draft.geminiVoiceModel) { model.updateApi(model.apiDraft.copy(geminiVoiceModel = it)) }
             }
         }
         if (apiProvider == "grok") {

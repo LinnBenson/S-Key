@@ -8,7 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import io.secure.keyboard.data.ApiConfiguration
-import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executors
@@ -178,22 +177,9 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         check(current(id)) { "已取消" }
         val c=config.resolvedVoice()
         require(c.voiceKey.isNotBlank()) { "请配置语音 API 密钥" }
-        val boundary="skey-voice-${java.util.UUID.randomUUID()}"
-        val model=c.voiceModel
-        require(!model.contains('\r') && !model.contains('\n')) { "语音模型格式无效" }
-        val prefix=("--$boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n$model\r\n"+
-            "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\nContent-Type: audio/wav\r\n\r\n").toByteArray()
-        val suffix="\r\n--$boundary--\r\n".toByteArray()
-        val body = send(id, c.voiceUrl, mapOf("Authorization" to "Bearer ${c.voiceKey}"),
-            "multipart/form-data; boundary=$boundary", (prefix.size+44+count+suffix.size).toLong(), { out ->
-                out.write(prefix); out.write(wavHeader(count))
-                var offset=0
-                while(offset<count) {
-                    check(current(id)) { "已取消" }
-                    val n=minOf(8192,count-offset); out.write(pcm,offset,n); offset+=n
-                }
-                out.write(suffix)
-            }) { status ->
+        val adapter = VoiceProviderAdapters.get(c.voiceProvider)
+        val body = adapter.upload(c.voiceModel, pcm, count) { check(current(id)) { "已取消" } }.use { upload ->
+            send(id, c.voiceUrl, adapter.headers(c.voiceKey), upload.contentType, upload.size, upload.write) { status ->
                 when(status) {
                     401,403 -> "语音 API 鉴权失败，请检查密钥与权限"
                     400,404 -> "语音端点或模型不可用，请检查语音 API 配置"
@@ -201,8 +187,9 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
                     else -> "语音识别失败（HTTP $status）"
                 }
             }
-        return (io.secure.keyboard.data.NetworkJson.objectValue(body).opt("text") as? String)?.trim().orEmpty().also {
-            check(it.isNotEmpty() && it.length<=20000) { "未识别到有效文字，请重试" }
+        }
+        return adapter.transcript(body).also {
+            check(it.isNotEmpty() && it.length <= 20000) { "未识别到有效文字，请重试" }
         }
     }
 

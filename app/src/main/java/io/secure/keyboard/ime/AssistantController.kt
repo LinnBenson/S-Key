@@ -224,7 +224,7 @@ internal object AssistantController {
         }
         val preparing = translation.busy && aiCall == null
         assistantResultTitle?.text = if (preparing) "准备中" else if (translation.busy) "生成中" else "AI 结果"
-        assistantSourceTitle?.text = aiConversation?.let { "续聊 ${it.id.take(4)}" } ?: "原文"
+        assistantSourceTitle?.text = aiSourceLabel()
         aiResultNavigation?.text = if (aiResults.isEmpty()) "0/0" else "${aiResultIndex + 1}/${aiResults.size}"
 
         syncAssistantText(translationTextView, translation.text)
@@ -364,7 +364,7 @@ internal object AssistantController {
             } else { translationResultView=text; bindResultCopy(card, text) }
             return card
         }
-        addAssistantCards(cards, card("原文",true), card("AI 结果",false))
+        addAssistantCards(cards, card(aiSourceLabel(),true), card("AI 结果",false))
         if (aiGalleryOpen) {
             val galleryRow = LinearLayout(this).apply { setPadding(dp(4), dp(8), dp(4), 0) }
             galleryRow.addView(AssistantImages.Gallery(this), LinearLayout.LayoutParams(0, dp(64), 1f))
@@ -590,8 +590,15 @@ internal object AssistantController {
         refresh()
     }
 
+    private fun KeyboardSession.aiSourceLabel(): String {
+        val provider = if (aiTask == "custom" && io.secure.keyboard.data.AiProviders.valid(aiCustomProvider)) aiCustomProvider else aiDisplayProvider
+        val prefix = if (aiConversation == null) "原文" else "续聊"
+        return if (provider.isEmpty()) prefix else "$prefix ${io.secure.keyboard.data.AiProviders.label(provider)}"
+    }
+
     internal fun KeyboardSession.effectiveAiConfigurationImpl(): io.secure.keyboard.data.ApiConfiguration {
         val original = aiConfiguration()
+        aiDisplayProvider = original.aiProvider
         val config = if (aiTask == "custom" && io.secure.keyboard.data.AiProviders.valid(aiCustomProvider)) original.copy(aiProvider = aiCustomProvider) else original
         val model = io.secure.keyboard.ai.AiPromptStore(this).resolveModel(aiTask, aiTone, aiCustomModel, config.chatModel, config.aiProvider)
         return config.withChatModel(model)
@@ -612,7 +619,7 @@ internal object AssistantController {
         io.secure.keyboard.data.ConversationIo.executor.execute { runCatching { store.select(null) } }
         aiConversation = null
         aiResults.clear(); aiResultIndex = -1
-        assistantSourceTitle?.text = "原文"
+        assistantSourceTitle?.text = aiSourceLabel()
     }
 
     private data class ConversationRow(val key: String, val title: String, val deadline: Long)
@@ -769,7 +776,7 @@ internal object AssistantController {
         aiConversationGeneration.incrementAndGet()
         io.secure.keyboard.data.ConversationIo.executor.execute { runCatching { store.remove(key) } }
         aiConversation=null
-        assistantSourceTitle?.text="原文"
+        assistantSourceTitle?.text=aiSourceLabel()
     }
 
     private fun KeyboardSession.normalizeAiSearchScope(saved: io.secure.keyboard.ai.AiConversation) = runCatching {
@@ -797,7 +804,7 @@ internal object AssistantController {
                 val scope = expectedScope ?: runCatching { aiScope(effectiveAiConfiguration()) }.getOrNull()
                 aiConversationRevision = snapshot.second
                 aiConversation = saved?.takeIf { scope != null && it.valid(System.currentTimeMillis(), scope) }
-                assistantSourceTitle?.text = aiConversation?.let { "续聊 ${it.id.take(4)}" } ?: "原文"
+                assistantSourceTitle?.text = aiSourceLabel()
             }
         }
         return aiConversationRevision
@@ -902,7 +909,7 @@ internal object AssistantController {
                 preview.close(); aiPreviewDelivery=null
                 aiCall=null; aiTaskRunnable=null
                 if (failed) {
-                    if(expired) { aiConversation = null; assistantSourceTitle?.text = "原文" }
+                    if(expired) { aiConversation = null; assistantSourceTitle?.text = aiSourceLabel() }
                     if(oldResult.isNotEmpty()) translation.complete(token,oldResult) else translation.complete(token,result,true)
                     updateAiPreview(); toast(result)
                     return@post

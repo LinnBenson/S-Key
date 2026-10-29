@@ -8,23 +8,26 @@ internal class AiPromptStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("ai_builtin_prompts", Context.MODE_PRIVATE)
     data class Prompt(val id: String, val title: String, val default: String)
     fun read(id: String): String = prefs.getString(id, definition(id).default) ?: definition(id).default
-    fun save(id: String, text: String, modelId: String? = null, openaiModelId: String? = null) {
+    fun save(id: String, text: String, modelId: String? = null, openaiModelId: String? = null, geminiModelId: String? = null) {
         definition(id)
         require(text.length <= 12000) { "提示词不能超过 12000 字符" }
         val normalizedModel = modelId?.let(::normalizeModel)
         val normalizedOpenaiModel = openaiModelId?.let(::normalizeModel)
+        val normalizedGeminiModel = geminiModelId?.let(::normalizeModel)
         val changed = read(id) != text || (normalizedModel != null && model(id) != normalizedModel) ||
-            (normalizedOpenaiModel != null && model(id, "openai") != normalizedOpenaiModel)
+            (normalizedOpenaiModel != null && model(id, "openai") != normalizedOpenaiModel) ||
+            (normalizedGeminiModel != null && model(id, "gemini") != normalizedGeminiModel)
         prefs.edit().putString(id, text).apply {
             if (normalizedModel != null) putString("model_$id", normalizedModel)
             if (normalizedOpenaiModel != null) putString("model_openai_$id", normalizedOpenaiModel)
+            if (normalizedGeminiModel != null) putString("model_gemini_$id", normalizedGeminiModel)
         }.apply()
         if (changed) conversations.clearAsync()
     }
     fun model(id: String, provider: String = "grok"): String {
         definition(id)
         require(io.secure.keyboard.data.AiProviders.valid(provider))
-        return prefs.getString(if (provider == "openai") "model_openai_$id" else "model_$id", "").orEmpty()
+        return prefs.getString(if (provider == "grok") "model_$id" else "model_${provider}_$id", "").orEmpty()
     }
     fun saveModel(id: String, model: String) = save(id, read(id), model)
     fun resolveModel(task: String, tone: String, customModel: String, fallback: String, provider: String = "grok"): String =

@@ -231,6 +231,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var aiTaskTabs: LinearLayout? = null
     internal var aiCall: io.secure.keyboard.ai.AiWriting.Call? = null
     internal var aiCallFactory: () -> io.secure.keyboard.ai.AiWriting.Call = { io.secure.keyboard.ai.AiWriting.Call() }
+    internal var aiDisplayProvider = ""
     internal var aiConfiguration: () -> io.secure.keyboard.data.ApiConfiguration = { io.secure.keyboard.data.ApiConfigurationStore(this).load() }
     internal var aiTaskRunnable: Runnable? = null
     internal var aiPreviewDelivery: io.secure.keyboard.ai.LatestPreview? = null

@@ -676,15 +676,12 @@ class ContentStore(context: Context) {
 
     internal fun writeEncryptedBackup(output: java.io.OutputStream, password: CharArray) {
         val api = ApiConfigurationStore(app).load()
-        val fields = listOf(api.googleUrl, api.googleKey, api.googleModel, api.grokUrl, api.grokKey,
-            api.grokModel, api.voiceUrl, api.voiceKey, api.voiceModel, api.openaiUrl, api.openaiKey, api.openaiModel, api.openaiVoiceUrl, api.openaiVoiceKey, api.openaiVoiceModel, api.aiProvider, api.voiceProvider)
-        require(fields.all { it.length <= 16384 }) { "AI 配置内容过长" }
         SensitiveBackupBuffer().use { buffer ->
             val data = java.io.DataOutputStream(buffer)
             data.writeInt(0)
             writeBackup(buffer)
             buffer.setContentLength(buffer.size() - 4)
-            fields.forEach { data.writeUTF(it) }
+            ApiConfigurationCodec.write(data, api)
             buffer.encrypt(output, password)
         }
     }
@@ -696,12 +693,7 @@ class ContentStore(context: Context) {
                 val length = data.readInt()
                 require(length > 0 && length <= plain.size - 4)
                 require(data.skipBytes(length) == length)
-                fun field(): String = data.readUTF().also { require(it.length <= 16384) }
-                var api = ApiConfiguration(field(), field(), field(), field(), field(), field(), field(), field(), field())
-                if (data.available() > 0) api = api.copy(openaiUrl = field(), openaiKey = field(), openaiModel = field(),
-                    openaiVoiceUrl = field(), openaiVoiceKey = field(), openaiVoiceModel = field(), aiProvider = field(), voiceProvider = field())
-                require(AiProviders.valid(api.aiProvider) && AiProviders.valid(api.voiceProvider))
-                require(data.read() == -1)
+                val api = ApiConfigurationCodec.read(data)
                 val plan = prepareBackup(java.io.ByteArrayInputStream(plain, 4, length))
                 BackupPlan(plan.clean, plan.configuration,
                     plan.summary.replace("和 API 密钥不变", "不变") + "\nAI 设置的接口地址、密钥和模型配置将替换为备份中的内容。", api)

@@ -96,13 +96,13 @@ internal fun CurrentInformation(context: Context) {
 }
 
 internal fun apiState(config: ApiConfiguration, index: Int): String {
-    val key = when(index) { 0 -> config.googleKey; 1 -> config.chatKey; else -> if (config.voiceProvider == "openai") config.openaiVoiceKey else config.voiceKey }
+    val key = when(index) { 0 -> config.googleKey; 1 -> config.chatKey; else -> when (config.voiceProvider) { "gemini" -> config.geminiVoiceKey; "openai" -> config.openaiVoiceKey; else -> config.voiceKey } }
     if (key.isBlank()) return "未配置"
     return try {
         when(index) {
             0 -> config.validatedGoogle()
             1 -> { config.validatedChat(); require(config.chatModel.isNotBlank()) }
-            else -> { val voice = config.resolvedVoice(); require(!voice.voiceModel.contains('\r') && !voice.voiceModel.contains('\n')) }
+            else -> { val voice = config.resolvedVoice(); require(voice.voiceModel.isNotBlank()); require(!voice.voiceModel.contains('\r') && !voice.voiceModel.contains('\n')) }
         }
         "未检测"
     } catch (_: Exception) { "配置不完整或无效" }
@@ -110,14 +110,13 @@ internal fun apiState(config: ApiConfiguration, index: Int): String {
 
 private fun checkVoice(config: ApiConfiguration, call: VoiceHttpRequest) {
     val c = config.resolvedVoice()
-    val boundary = "skey-check-${java.util.UUID.randomUUID()}"
-    val prefix = ("--$boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n${c.voiceModel}\r\n" +
-        "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"check.wav\"\r\nContent-Type: audio/wav\r\n\r\n").toByteArray()
-    val suffix = "\r\n--$boundary--\r\n".toByteArray()
+    val adapter = VoiceProviderAdapters.get(c.voiceProvider)
     val silence = ByteArray(32000)
-    val result = call.execute(c.voiceUrl, mapOf("Authorization" to "Bearer ${c.voiceKey}"),
-        "multipart/form-data; boundary=$boundary", (prefix.size + 44 + silence.size + suffix.size).toLong(), {
-            it.write(prefix); it.write(AiVoiceSession.wavHeader(silence.size)); it.write(silence); it.write(suffix)
-        }, { "HTTP $it" })
-    check(NetworkJson.objectValue(result).opt("text") is String)
+    try {
+        adapter.upload(c.voiceModel, silence, silence.size) {}.use { upload ->
+            val result = call.execute(c.voiceUrl, adapter.headers(c.voiceKey), upload.contentType, upload.size,
+                upload.write, { "HTTP $it" })
+            adapter.validateResponse(result)
+        }
+    } finally { silence.fill(0) }
 }
