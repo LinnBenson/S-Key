@@ -30,7 +30,8 @@ internal open class KeySoundPlayer {
 
     /** Decode off the input path. Never queue a delayed key sound while loading. */
     fun prepare(context: Context, sound: String) {
-        if (sound == "none" || sound == "system" || pool != null) return
+        if (sound == "none" || sound == "system") { release(); return }
+        if (pool != null) return
         try {
             val created = SoundPool.Builder().setMaxStreams(4).setAudioAttributes(
                 AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
@@ -49,14 +50,16 @@ internal open class KeySoundPlayer {
     }
 
     fun release() {
-        pool?.release()
+        val previous = pool
         pool = null
         samples.clear()
         ready.clear()
+        previous?.release()
     }
 
     fun perform(view: View, sound: String, volume: Int) {
-        if (sound == "none" || !view.isShown) return
+        if (sound == "none") { release(); return }
+        if (!view.isShown) return
         try {
             val audio = view.context.getSystemService(AudioManager::class.java) ?: return
             if (!KeyboardSoundPolicy.canPlay(

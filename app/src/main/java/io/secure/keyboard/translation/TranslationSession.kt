@@ -15,6 +15,7 @@ internal class TranslationSession(private val onInvalidate: () -> Unit = {}) {
     val resultOrError: String get() = result.ifEmpty { errorMessage }
     var revision = 0; private set
     var busy = false; private set
+    val awaitingFirstText: Boolean get() = busy && result.isBlank()
     fun edit(value: String): Boolean {
         if (value.length > 5000) return false
         text = value; invalidate(); return true

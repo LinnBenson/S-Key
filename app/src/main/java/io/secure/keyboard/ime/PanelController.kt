@@ -8,6 +8,7 @@ import android.widget.*
 import kotlin.math.*
 import io.secure.keyboard.data.ClipboardCapturePolicy
 import io.secure.keyboard.data.ContentStore
+import io.secure.keyboard.data.LayoutLimits
 import io.secure.keyboard.ui.FloatingResize
 import io.secure.keyboard.ui.KeyboardFeedback
 import io.secure.keyboard.ui.ContentEntryRow
@@ -786,11 +787,11 @@ internal object PanelController {
             ) {
                 saveProfile(profile.copy(floatingWidthDp = it))
             }
-            slider("高度", 200, 500, profile.floatingHeightDp.coerceAtMost(500)) {
+            slider("高度", LayoutLimits.HEIGHT.first, LayoutLimits.HEIGHT.last, profile.floatingHeightDp.coerceIn(LayoutLimits.HEIGHT)) {
                 saveProfile(profile.copy(floatingHeightDp = it))
             }
         } else {
-            slider("高度", 200, 500, profile.heightDp.coerceAtMost(500)) {
+            slider("高度", LayoutLimits.HEIGHT.first, LayoutLimits.HEIGHT.last, profile.heightDp.coerceIn(LayoutLimits.HEIGHT)) {
                 saveProfile(profile.copy(heightDp = it))
             }
             slider(
@@ -801,7 +802,7 @@ internal object PanelController {
             ) {
                 saveProfile(profile.copy(sideGapDp = it))
             }
-            slider("底部留白", 0, 160, profile.bottomGapDp.coerceAtMost(160)) {
+            slider("底部留白", LayoutLimits.BOTTOM_GAP.first, LayoutLimits.BOTTOM_GAP.last, profile.bottomGapDp.coerceIn(LayoutLimits.BOTTOM_GAP)) {
                 saveProfile(profile.copy(bottomGapDp = it))
             }
         }
@@ -809,6 +810,11 @@ internal object PanelController {
             saveProfile(profile.copy(popupHeightDp = it))
         }
     }
+
+    internal fun KeyboardSession.layoutBottomPxImpl(height: Int): Int =
+        if (profile.floating) FloatingResize.clampBottom(dp(profile.floatingYDp),
+            floatingScreenHeightPx(), height, dp(LayoutLimits.FLOATING_BOTTOM_GAP)) + navigationBottomGapPx
+        else dp(profile.bottomGapDp).coerceIn(0, resources.displayMetrics.heightPixels / 3) + navigationBottomGapPx
 
     /** Screen bounds independent of the IME height; exclude system bars, never the IME itself. */
     internal fun KeyboardSession.floatingScreenHeightPxImpl(): Int {
@@ -848,9 +854,7 @@ internal object PanelController {
                 dp(profile.floatingXDp).coerceIn(0, (usable - width).coerceAtLeast(0))
             else side
         val bottom =
-            dp(if (profile.floating) profile.floatingYDp else profile.bottomGapDp)
-                .coerceIn(0, if (profile.floating) FloatingResize.maxBottom(floatingScreenHeightPx(), h)
-                    else resources.displayMetrics.heightPixels / 3) + navigationBottomGapPx
+            layoutBottomPx(h)
         lp.height = h
         lp.width = width
         lp.leftMargin = left

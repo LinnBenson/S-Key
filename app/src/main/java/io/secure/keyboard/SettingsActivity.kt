@@ -81,17 +81,28 @@ open class SettingsActivity : ComponentActivity() {
         if (uri != null) backupRequest = uri to true
     }
 
+    private fun discardBackupRequest() {
+        val pending = backupRequest
+        backupRequest = null
+        if (pending?.second == true) CanceledBackupDocument.discard(applicationContext, pending.first)
+    }
+
+    override fun onDestroy() {
+        discardBackupRequest()
+        super.onDestroy()
+    }
+
     @Composable private fun BackupPasswordDialog(request: Pair<Uri, Boolean>) {
         var password by remember { mutableStateOf("") }
         var confirmation by remember { mutableStateOf("") }
         val exporting = request.second
         val protect = remember(model.revision) { model.settings.screenshotProtection }
-        Dialog(onDismissRequest = { backupRequest = null }, properties = DialogProperties(
+        Dialog(onDismissRequest = { discardBackupRequest() }, properties = DialogProperties(
             usePlatformDefaultWidth = false, securePolicy = if (protect) androidx.compose.ui.window.SecureFlagPolicy.SecureOn else androidx.compose.ui.window.SecureFlagPolicy.SecureOff)) {
             Card(settingsDialogModifier()) {
                 Column(settingsDialogContentModifier(), verticalArrangement = Arrangement.spacedBy(SettingsDialogSpacing)) {
                     Text(if (exporting) "设置备份密码" else "输入备份密码", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    if (!exporting) Text("验证密码后预览备份内容，确认后才会还原。")
+                    if (!exporting) Text("验证密码后预览备份内容，确认后才会还原。新备份会还原截屏保护等偏好；旧备份缺失的偏好保持当前值。")
                     @Composable fun secret(label: String, value: String, update: (String) -> Unit) {
                         TextField(value = value, onValueChange = { if (it.length <= 1024) update(it) }, label = label,
                             singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -102,7 +113,7 @@ open class SettingsActivity : ComponentActivity() {
                     secret("密码", password) { password = it }
                     if (exporting) secret("再次输入密码", confirmation) { confirmation = it }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        TextButton(text = "取消", modifier = Modifier.weight(1f), onClick = { backupRequest = null })
+                        TextButton(text = "取消", modifier = Modifier.weight(1f), onClick = { discardBackupRequest() })
                         Button(modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColorsPrimary(),
                             enabled = password.isNotEmpty() && (!exporting || password == confirmation), onClick = {
                                 val secret = password.toCharArray()
@@ -317,7 +328,7 @@ open class SettingsActivity : ComponentActivity() {
                                 }
                                 "cleanup", "recovery" -> {
                                   Group("本机内容") {
-                                    Info("包含：AI 接口地址、密钥和模型配置、中文和英文自定义词库、常用语、自定义 AI、主题颜色、主题 UI 设计、4 个布局配置、剪贴板保留设置、工具栏、符号自动闭合、符号键盘、字母长按符号、内置 AI 提示词、快捷 emoji 表情。")
+                                    Info("包含：输入、语音、声音振动及隐私偏好、AI 接口地址、密钥和模型配置、中文和英文自定义词库、常用语、自定义 AI、主题颜色、主题 UI 设计、4 个布局配置、剪贴板保留设置、工具栏、符号自动闭合、符号键盘、字母长按符号、内置 AI 提示词、快捷 emoji 表情。")
                                     Action("备份数据", !model.busy) {
                                         launch { backupPicker.launch("S-Key-backup-${java.time.LocalDate.now()}.skeybackup") }
                                     }
@@ -796,9 +807,9 @@ open class SettingsActivity : ComponentActivity() {
         val p = s.profile(outer, landscape)
         fun save(value: SettingsStore.LayoutProfile) = s.saveProfile(outer, landscape, value)
         Group("尺寸与留白") {
-            Range("键盘高度", p.heightDp, 200, 700, "dp") { save(p.copy(heightDp = it)) }
+            Range("键盘高度", if (p.floating) p.floatingHeightDp else p.heightDp, LayoutLimits.HEIGHT.first, LayoutLimits.HEIGHT.last, "dp") { save(if (p.floating) p.copy(floatingHeightDp = it) else p.copy(heightDp = it)) }
             Range("两侧留白", p.sideGapDp, 0, 300, "dp") { save(p.copy(sideGapDp = it)) }
-            Range("底部留白", p.bottomGapDp, 0, 300, "dp") { save(p.copy(bottomGapDp = it)) }
+            Range("底部留白", p.bottomGapDp, LayoutLimits.BOTTOM_GAP.first, LayoutLimits.BOTTOM_GAP.last, "dp") { save(p.copy(bottomGapDp = it)) }
             Range("次面板高度", p.popupHeightDp, 110, 450, "dp") { save(p.copy(popupHeightDp = it)) }
         }
         Group("布局形态") {
@@ -1080,7 +1091,7 @@ open class SettingsActivity : ComponentActivity() {
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     AiEditorToggle("联网搜索", "允许 AI 按需搜索网页", edit.webSearch) { model.edit = edit.copy(webSearch = it) }
-                                    AiEditorToggle("X 搜索", "允许 AI 按需搜索 X 帖子；OpenAI 会忽略此项", edit.xSearch) { model.edit = edit.copy(xSearch = it) }
+                                    AiEditorToggle("X 搜索", "允许 AI 按需搜索 X 帖子；OpenAI 和 Gemini 会忽略此项", edit.xSearch) { model.edit = edit.copy(xSearch = it) }
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     SettingRange("会话有效期", edit.retentionHours, 0, 720, "小时",

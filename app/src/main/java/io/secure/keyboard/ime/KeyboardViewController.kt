@@ -219,9 +219,7 @@ internal object KeyboardViewController {
                 dp(profile.floatingXDp).coerceIn(0, (usable - width).coerceAtLeast(0))
             else side
         val bottom =
-            dp(if (profile.floating) profile.floatingYDp else profile.bottomGapDp)
-                .coerceIn(0, if (profile.floating) FloatingResize.maxBottom(floatingScreenHeightPx(), h)
-                    else resources.displayMetrics.heightPixels / 3) + navigationBottomGapPx
+            layoutBottomPx(h)
         root.addView(
             box,
             FrameLayout.LayoutParams(width, h, Gravity.BOTTOM or Gravity.START).apply {
@@ -668,7 +666,7 @@ internal object KeyboardViewController {
                         translationExtraAtStart = if (resizing) translationExtraHeightPx() else 0
                         resizeStart = FloatingResize.Bounds(
                             pxToDp(bounds.width.toFloat()), pxToDp((bounds.height - translationExtraAtStart).toFloat()),
-                            pxToDp(bounds.leftMargin.toFloat()), pxToDp(bounds.bottomMargin.toFloat()),
+                            pxToDp(bounds.leftMargin.toFloat()), pxToDp((bounds.bottomMargin - navigationBottomGapPx).coerceAtLeast(0).toFloat()),
                         )
                         true
                     }
@@ -685,6 +683,7 @@ internal object KeyboardViewController {
                                     pxToDp(resources.displayMetrics.widthPixels.toFloat()),
                                     minOf(700, pxToDp((resources.displayMetrics.heightPixels * 3 / 4).toFloat())),
                                     pxToDp((floatingScreenHeightPx() - translationExtraAtStart).toFloat()),
+                                    io.secure.keyboard.data.LayoutLimits.FLOATING_BOTTOM_GAP,
                                 )
                                 original.copy(
                                     floatingWidthDp = bounds.width,

@@ -213,7 +213,7 @@ internal object AiWriting {
                 }
                 check(status==200) { when(status) {
                     401,403 -> "${io.secure.keyboard.data.AiProviders.label(c.aiProvider)} 鉴权失败，请检查密钥和模型权限"
-                    400,404,410 -> if (previousResponseId != null) "会话已失效或接口不支持续聊，请清空原文后重新生成" else "模型或接口不支持 Responses API，请检查 API 配置"
+                    400,404,410 -> if (previousResponseId != null) "会话已失效或接口不支持续聊，请清空原文后重新生成" else if (c.aiProvider == "gemini") "Gemini 请求无效或模型、Interactions API 端点不可用，请检查 API 配置" else "请求无效或模型、Responses API 端点不可用，请检查 API 配置"
                     429 -> "请求过于频繁或额度不足，请稍后重试"
                     else -> "生成失败（HTTP $status），请稍后重试"
                 } }

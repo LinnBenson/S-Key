@@ -8,6 +8,7 @@ import org.json.JSONObject
 /** Export an explicit allowlist. Credentials, clipboard, session state and revision tokens never enter it. */
 internal class SettingsBackup(private val context: Context) {
     private val groups = linkedMapOf(
+        "preferences" to ("settings" to preferenceKeys),
         "aiConversationPolicy" to ("settings" to setOf("aiConversationHours")),
         "theme" to ("settings" to setOf("theme", "manualDark", "themeTokens_light", "themeTokens_dark", "symbolHints", "candidateTextSize", "expandedCandidateTextSize")),
         "uiDesign" to ("settings" to setOf("keyDesign_border", "keyDesign_horizontal", "keyDesign_vertical", "keyDesign_radius", "keyDesign_enterRadius")),
@@ -20,13 +21,22 @@ internal class SettingsBackup(private val context: Context) {
         "longPress" to ("settings" to (setOf("longPressSymbols", "longPressDelay", "swipeUpSymbols") + listOf("zh", "en").flatMap { lang -> ('a'..'z').map { "letter_symbols_${lang}_$it" } })),
         "prompts" to ("ai_builtin_prompts" to AiPromptStore.prompts.flatMap { if (it.id in setOf("common", "custom_common")) listOf(it.id) else listOf(it.id, "model_${it.id}", "model_openai_${it.id}", "model_gemini_${it.id}") }.toSet()),
     )
-    fun snapshot(): JSONObject = JSONObject().also { root -> groups.forEach { (group, spec) ->
-        val all = context.getSharedPreferences(spec.first, 0).all
-        root.put(group, JSONObject().also { values -> spec.second.forEach { key -> all[key]?.let { values.put(key, it) } } })
-    } }
+    fun snapshot(): JSONObject = JSONObject().also { root ->
+        groups.forEach { (group, spec) ->
+            val values = JSONObject()
+            if (group == "preferences") {
+                // Persist effective defaults as explicit values, including disabled protection.
+                preferenceValues(SettingsStore(context)).forEach { (key, value) -> values.put(key, value) }
+            } else {
+                val all = context.getSharedPreferences(spec.first, 0).all
+                spec.second.forEach { key -> all[key]?.let { values.put(key, it) } }
+            }
+            root.put(group, values)
+        }
+    }
     fun validate(root: JSONObject) {
         val keys = root.keys().asSequence().toSet()
-        require(keys.all { it in groups } && keys.containsAll(groups.keys - setOf("uiDesign", "emojiShortcuts", "clipboardPolicy", "aiConversationPolicy")))
+        require(keys.all { it in groups } && keys.containsAll(groups.keys - setOf("uiDesign", "emojiShortcuts", "clipboardPolicy", "aiConversationPolicy", "preferences")))
         groups.forEach { (group, spec) ->
             if (!root.has(group)) return@forEach
             val values = root.getJSONObject(group)
@@ -34,7 +44,7 @@ internal class SettingsBackup(private val context: Context) {
             values.keys().forEach { key ->
                 val value = values.get(key)
                 when {
-                    key in setOf("manualDark", "longPressSymbols", "swipeUpSymbols", "backgroundClipboard", "includeNavigationBar") -> require(value is Boolean)
+                    key in booleanPreferences || key in setOf("manualDark", "longPressSymbols", "swipeUpSymbols", "backgroundClipboard", "includeNavigationBar") -> require(value is Boolean)
                     key in setOf("candidateTextSize", "expandedCandidateTextSize") -> integer(value, 12..32)
                     key == "keyDesign_border" -> integer(value, 0..4)
                     key in setOf("keyDesign_horizontal", "keyDesign_vertical") -> integer(value, 0..16)
@@ -43,9 +53,14 @@ internal class SettingsBackup(private val context: Context) {
                     key == "aiConversationHours" -> integer(value, 0..720)
                     key == "clipboardLimit" -> integer(value, 1..300)
                     key == "longPressDelay" -> integer(value, 150..1500)
+                    key == "keySoundVolume" -> integer(value, 0..100)
+                    key == "vibrationStrength" -> integer(value, 1..100)
                     else -> {
                         require(value is String && value.length <= 100_000)
                         when {
+                            key == "chineseInputMode" -> require(value in setOf("wubi", "pinyin", "mixed"))
+                            key == "voiceMode" -> require(value in setOf("offline", "ai"))
+                            key == "keySoundType" -> require(KeySound.options.any { it.first == value })
                             key == EmojiShortcutStore.KEY -> { checkDepth(value); EmojiShortcutStore.decode(value) }
                             group == "prompts" -> if (key.startsWith("model_")) AiPromptStore.normalizeModel(value) else require(value.length <= 12000)
                             key == "clipboardRetention" -> require(value in setOf("none", "timed", "forever"))
@@ -62,9 +77,9 @@ internal class SettingsBackup(private val context: Context) {
                             }
                             key.startsWith("profile_") -> {
                                 checkDepth(value); val profile = JSONObject(value)
-                                val ranges = mapOf("heightDp" to 200..700, "sideGapDp" to 0..300, "bottomGapDp" to 0..300,
+                                val ranges = mapOf("heightDp" to LayoutLimits.HEIGHT, "sideGapDp" to 0..300, "bottomGapDp" to LayoutLimits.BOTTOM_GAP,
                                     "floatingXDp" to 0..2000, "floatingYDp" to 0..2000, "floatingWidthDp" to 220..1600,
-                                    "floatingHeightDp" to 200..700, "splitGapDp" to 0..180, "popupHeightDp" to 110..450)
+                                    "floatingHeightDp" to LayoutLimits.HEIGHT, "splitGapDp" to 0..180, "popupHeightDp" to 110..450)
                                 require(profile.keys().asSequence().all { it in ranges || it in setOf("floating", "split") })
                                 profile.keys().forEach { field -> ranges[field]?.let { integer(profile.get(field), it) }
                                     ?: require(profile.get(field) is Boolean) }
@@ -117,7 +132,7 @@ internal class SettingsBackup(private val context: Context) {
             if (!next.has(group)) return@mapNotNull null
             val spec = groups.getValue(group)
             val before = current.getJSONObject(group); val after = next.getJSONObject(group)
-            val count = spec.second.count { before.opt(it) != after.opt(it) }
+            val count = spec.second.count { (group != "preferences" || after.has(it)) && before.opt(it) != after.opt(it) }
             if (count == 0) null else "${labels.getValue(group)}：$count 项设置变更"
         }
     }
@@ -127,8 +142,10 @@ internal class SettingsBackup(private val context: Context) {
         groups.values.map { it.first }.distinct().forEach { file ->
             val edit = context.getSharedPreferences(file,0).edit()
             groups.filter { (group, spec) -> spec.first == file && root.has(group) }.forEach { (group,spec) ->
-                spec.second.forEach(edit::remove)
+                // Older backups and partial preference groups leave missing preferences unchanged.
+                if (group != "preferences") spec.second.forEach(edit::remove)
                 val values = root.getJSONObject(group)
+                if (group == "preferences" && values.has("keySoundType")) edit.remove("keySound")
                 values.keys().forEach { key -> when(val value=values.get(key)) {
                     is Boolean -> edit.putBoolean(key,value)
                     is Number -> edit.putInt(key,value.toInt())
@@ -139,6 +156,20 @@ internal class SettingsBackup(private val context: Context) {
         }
     }
     companion object {
-        val labels = linkedMapOf("aiConversationPolicy" to "AI 会话有效期","clipboardPolicy" to "剪贴板保留设置", "uiDesign" to "主题 UI 设计", "emojiShortcuts" to "快捷 emoji 表情", "theme" to "主题与候选字号", "layout" to "横竖屏与内外屏布局", "toolbar" to "工具栏", "symbols" to "符号自动闭合", "symbolKeyboard" to "中英文符号键盘", "longPress" to "字母长按符号", "prompts" to "内置 AI 提示词")
+        private val booleanPreferences = setOf("aiAutoApply", "autoChineseSpacing", "chineseAssociation", "editorPreview",
+            "englishAssociation", "englishSpaceSelectsFirst", "fourCodeAutoCommit", "quickPaste", "screenshotProtection",
+            "traditionalOutput", "vibration", "voiceAutoTranslate", "wubiPinyinInput")
+        private val preferenceKeys = booleanPreferences + setOf("chineseInputMode", "keySoundType", "keySoundVolume", "vibrationStrength", "voiceMode")
+        private fun preferenceValues(s: SettingsStore): Map<String, Any> = linkedMapOf(
+            "aiAutoApply" to s.aiAutoApply, "autoChineseSpacing" to s.autoChineseSpacing,
+            "chineseAssociation" to s.chineseAssociation, "chineseInputMode" to s.chineseInputMode.id,
+            "editorPreview" to s.editorPreview, "englishAssociation" to s.englishAssociation,
+            "englishSpaceSelectsFirst" to s.englishSpaceSelectsFirst, "fourCodeAutoCommit" to s.fourCodeAutoCommit,
+            "keySoundType" to s.keySound, "keySoundVolume" to s.keySoundVolume, "quickPaste" to s.quickPaste,
+            "screenshotProtection" to s.screenshotProtection, "traditionalOutput" to s.traditionalOutput,
+            "vibration" to s.vibration, "vibrationStrength" to s.vibrationStrength,
+            "voiceAutoTranslate" to s.voiceAutoTranslate, "voiceMode" to s.voiceMode, "wubiPinyinInput" to s.wubiPinyinInput)
+
+        val labels = linkedMapOf("preferences" to "输入、语音、反馈与隐私偏好", "aiConversationPolicy" to "AI 会话有效期","clipboardPolicy" to "剪贴板保留设置", "uiDesign" to "主题 UI 设计", "emojiShortcuts" to "快捷 emoji 表情", "theme" to "主题与候选字号", "layout" to "横竖屏与内外屏布局", "toolbar" to "工具栏", "symbols" to "符号自动闭合", "symbolKeyboard" to "中英文符号键盘", "longPress" to "字母长按符号", "prompts" to "内置 AI 提示词")
     }
 }

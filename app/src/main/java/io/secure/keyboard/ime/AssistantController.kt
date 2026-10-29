@@ -1,6 +1,8 @@
 package io.secure.keyboard.ime
 
 import android.content.*
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.content.Context.MODE_PRIVATE
 import android.os.*
 import android.view.*
@@ -122,6 +124,8 @@ internal object AssistantController {
         syncingAssistantEditor=true
         aiCustomTab=null
         aiTaskTabs=null
+        assistantLoadingOverlay?.visibility = View.GONE
+        assistantLoadingOverlay = null
         assistantResultTitle=null
         aiResultNavigation=null; assistantSourceTitle=null
         translationTextView?.text = ""
@@ -222,6 +226,7 @@ internal object AssistantController {
             contentDescription = aiCustomPresetName.ifEmpty { "尚未配置自定义 AI" }
             isEnabled = aiCustomPresetName.isNotEmpty()
         }
+        assistantLoadingOverlay?.visibility = if (translation.awaitingFirstText) View.VISIBLE else View.GONE
         val preparing = translation.busy && aiCall == null
         assistantResultTitle?.text = if (preparing) "准备中" else if (translation.busy) "生成中" else "AI 结果"
         assistantSourceTitle?.text = aiSourceLabel()
@@ -356,7 +361,35 @@ internal object AssistantController {
             card.addView(heading,LinearLayout.LayoutParams(-1,dp(24)))
             val text: TextView=if(source) assistantEditor() else label("",14f).apply { gravity=Gravity.START or Gravity.TOP }
             if(source) card.addView(text,LinearLayout.LayoutParams(-1,0,1f))
-            else card.addView(ScrollView(this).apply { isFillViewport=true; isVerticalScrollBarEnabled=false; isHorizontalScrollBarEnabled=false; addView(text) },LinearLayout.LayoutParams(-1,0,1f))
+            else {
+                val resultArea = FrameLayout(this)
+                resultArea.addView(ScrollView(this).apply {
+                    isFillViewport = true
+                    isVerticalScrollBarEnabled = false
+                    isHorizontalScrollBarEnabled = false
+                    addView(text)
+                }, FrameLayout.LayoutParams(-1, -1))
+                val overlay = FrameLayout(this).apply {
+                    setBackgroundColor(Color.argb(235, Color.red(keyBg), Color.green(keyBg), Color.blue(keyBg)))
+                    isClickable = true
+                    contentDescription = "正在生成，等待首个文字"
+                    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                    visibility = View.GONE
+                }
+                val waiting = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+                waiting.addView(ProgressBar(this, null, android.R.attr.progressBarStyleSmall).apply {
+                    isIndeterminate = true
+                    indeterminateTintList = ColorStateList.valueOf(accent)
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, LinearLayout.LayoutParams(dp(20), dp(20)))
+                waiting.addView(label("正在生成…", 12f, muted).apply {
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(8) })
+                overlay.addView(waiting, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+                resultArea.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+                assistantLoadingOverlay = overlay
+                card.addView(resultArea, LinearLayout.LayoutParams(-1, 0, 1f))
+            }
             if(source) {
                 translationTextView=text
                 bindSourcePaste(heading, titleView, text)

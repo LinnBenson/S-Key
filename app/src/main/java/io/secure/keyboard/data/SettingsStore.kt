@@ -106,7 +106,7 @@ class SettingsStore(context: Context) {
         val bottomGapDp: Int = 0,
         val floating: Boolean = false,
         val floatingXDp: Int = 0,
-        val floatingYDp: Int = 0,
+        val floatingYDp: Int = LayoutLimits.FLOATING_BOTTOM_GAP,
         val floatingWidthDp: Int = 340,
         val floatingHeightDp: Int = 260,
         val split: Boolean = false,
@@ -430,7 +430,7 @@ class SettingsStore(context: Context) {
             j.optInt("bottomGapDp", defaults.bottomGapDp),
             j.optBoolean("floating", false),
             j.optInt("floatingXDp", 0),
-            j.optInt("floatingYDp", 0),
+            j.optInt("floatingYDp", LayoutLimits.FLOATING_BOTTOM_GAP),
             j.optInt("floatingWidthDp", 340),
             j.optInt("floatingHeightDp", 260),
             j.optBoolean("split", false),
@@ -442,14 +442,14 @@ class SettingsStore(context: Context) {
     fun saveProfile(outer: Boolean, landscape: Boolean, profile: LayoutProfile) {
         val j =
             JSONObject()
-                .put("heightDp", profile.heightDp.coerceIn(200, 700))
+                .put("heightDp", profile.heightDp.coerceIn(LayoutLimits.HEIGHT))
                 .put("sideGapDp", profile.sideGapDp.coerceIn(0, 300))
-                .put("bottomGapDp", profile.bottomGapDp.coerceIn(0, 300))
+                .put("bottomGapDp", profile.bottomGapDp.coerceIn(LayoutLimits.BOTTOM_GAP))
                 .put("floating", profile.floating)
                 .put("floatingXDp", profile.floatingXDp.coerceIn(0, 2000))
                 .put("floatingYDp", profile.floatingYDp.coerceIn(0, 2000))
                 .put("floatingWidthDp", profile.floatingWidthDp.coerceIn(220, 1600))
-                .put("floatingHeightDp", profile.floatingHeightDp.coerceIn(200, 700))
+                .put("floatingHeightDp", profile.floatingHeightDp.coerceIn(LayoutLimits.HEIGHT))
                 .put("split", profile.split)
                 .put("splitGapDp", profile.splitGapDp.coerceIn(0, 180))
                 .put("popupHeightDp", profile.popupHeightDp.coerceIn(110, 450))

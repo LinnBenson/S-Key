@@ -185,7 +185,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var panel = "keys"
     internal var navigationBarHeightPx = 0
     internal val navigationBottomGapPx: Int
-        get() = if (settings.includeNavigationBar && !profile.floating) navigationBarHeightPx else 0
+        get() = if (settings.includeNavigationBar || profile.floating) navigationBarHeightPx else 0
     internal var toolsScrollY = 0
     internal val translation = io.secure.keyboard.translation.TranslationSession { stopTranslationRequest() }
     internal var translationCall: io.secure.keyboard.translation.GoogleTranslation.Call? = null
@@ -885,6 +885,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     fun assistantEditor() : EditText = with(AssistantController) { assistantEditorImpl() }
 
     internal var assistantResultTitle: TextView? = null
+    internal var assistantLoadingOverlay: View? = null
 
     fun clearAssistantSource() = with(AssistantController) { clearAssistantSourceImpl() }
 
@@ -1013,6 +1014,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
 
     fun renderLayout() = with(PanelController) { renderLayoutImpl() }
 
+    fun layoutBottomPx(height: Int): Int = with(PanelController) { layoutBottomPxImpl(height) }
     fun floatingScreenHeightPx() : Int = with(PanelController) { floatingScreenHeightPxImpl() }
 
     fun baseKeyboardHeightPx() : Int = with(PanelController) { baseKeyboardHeightPxImpl() }
