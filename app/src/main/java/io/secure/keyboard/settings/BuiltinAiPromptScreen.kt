@@ -34,6 +34,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
     var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var draft by rememberSaveable { mutableStateOf("") }
     var modelDraft by rememberSaveable { mutableStateOf("") }
+    var openaiModelDraft by rememberSaveable { mutableStateOf("") }
     var message by rememberSaveable { mutableStateOf("") }
     val colors = MiuixTheme.colorScheme
     LazyColumn(modifier.fillMaxSize(), contentPadding = SettingsPagePadding, verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -52,7 +53,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
                             value == prompt.default -> "默认"
                             value.isBlank() -> "已设为空"
                             else -> "自定义 · " + value.replace('\n', ' ').take(36)
-                        }, onClick = { draft = store.read(prompt.id); modelDraft = store.model(prompt.id); selected = prompt.id })
+                        }, onClick = { draft = store.read(prompt.id); modelDraft = store.model(prompt.id); openaiModelDraft = store.model(prompt.id, "openai"); selected = prompt.id })
                     }
                 }
             }
@@ -78,10 +79,14 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
                             verticalArrangement = Arrangement.spacedBy(20.dp)) {
                             if (id != "common" && id != "custom_common") {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("模型 ID", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                    Text("Grok 模型 ID", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                     TextField(value = modelDraft,
                                         onValueChange = { if (it.length <= 256 && it.none { c -> c.isWhitespace() || c.isISOControl() }) modelDraft = it },
-                                        label = "留空使用 AI 设置中的模型", singleLine = true, modifier = Modifier.fillMaxWidth())
+                                        label = "留空使用 Grok 对话接口中的模型", singleLine = true, modifier = Modifier.fillMaxWidth())
+                                    Text("OpenAI 模型 ID", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                    TextField(value = openaiModelDraft,
+                                        onValueChange = { if (it.length <= 256 && it.none { c -> c.isWhitespace() || c.isISOControl() }) openaiModelDraft = it },
+                                        label = "留空使用 OpenAI 对话接口中的模型", singleLine = true, modifier = Modifier.fillMaxWidth())
                                 }
                             }
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -105,7 +110,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
                         Box(Modifier.fillMaxWidth().height(1.dp).background(colors.onSurface.copy(alpha = .06f)))
                         Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp)) {
                             SettingsDialogActions(cancel = { selected = null }, confirm = {
-                                store.save(id, draft, modelDraft.takeIf { id != "common" && id != "custom_common" })
+                                store.save(id, draft, modelDraft.takeIf { id != "common" && id != "custom_common" },
+                                    openaiModelDraft.takeIf { id != "common" && id != "custom_common" })
                                 revision++; selected = null; message = "已保存，下次生成生效"
                             })
                         }

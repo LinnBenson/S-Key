@@ -208,7 +208,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var aiGalleryOpen = false
     internal data class ImagePermissionDraft(val packageName: String, val fieldId: Int, val text: String,
         val task: String, val tone: String, val custom: String, val customName: String,
-        val customId: String?, val reasoning: String, val model: String, val image: android.net.Uri?, val webSearch: Boolean = false, val xSearch: Boolean = false)
+        val customId: String?, val reasoning: String, val model: String, val image: android.net.Uri?, val webSearch: Boolean = false, val xSearch: Boolean = false, val provider: String = "default")
     internal var imagePermissionDraft: ImagePermissionDraft? = null
     internal var imagePermissionDeadline = 0L
     internal var aiDraftEpoch = 0L
@@ -237,6 +237,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var aiCustomModel = ""
     internal var aiCustomWebSearch = false
     internal var aiCustomXSearch = false
+    internal var aiCustomProvider = "default"
     internal var aiPresetLoadGeneration = 0
     internal var aiSelectionEpoch = 0
     internal val aiSelectionTarget = io.secure.keyboard.ai.AiSelectionTarget()
@@ -601,7 +602,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
                 aiMode = true; translation.enabled = true; translation.editDraft(saved.text)
                 aiTask = saved.task; aiTone = saved.tone; aiCustom = saved.custom
                 aiCustomPresetName = saved.customName; aiCustomPresetId = saved.customId
-                aiCustomReasoning = saved.reasoning; aiCustomModel = saved.model; aiCustomWebSearch = saved.webSearch; aiCustomXSearch = saved.xSearch
+                aiCustomReasoning = saved.reasoning; aiCustomModel = saved.model; aiCustomWebSearch = saved.webSearch; aiCustomXSearch = saved.xSearch; aiCustomProvider = saved.provider
                 aiImage = saved.image.takeIf { AssistantImages.allowed(this) }
                 aiGalleryOpen = AssistantImages.allowed(this)
                 if (!aiGalleryOpen) toast("未获得照片权限，再次点击图片按钮可重试")

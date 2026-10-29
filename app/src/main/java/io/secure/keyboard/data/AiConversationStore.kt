@@ -19,7 +19,7 @@ internal class AiConversationStore(context: Context) {
         j.getString("id"), j.getString("scope"), j.getLong("updatedAt"), j.getString("type"),
         j.optString("key", j.getString("id")), j.optLong("startedAt", j.getLong("updatedAt")),
         j.optString("firstMessage"), j.optString("title", j.getString("type")), j.optString("tone", "自然"),
-        j.optString("presetName"), j.optString("prompt"), j.optString("reasoning", "low"), j.optString("model"), j.optInt("retentionHours", 4), j.optBoolean("webSearch"), j.optBoolean("xSearch"),
+        j.optString("presetName"), j.optString("prompt"), j.optString("reasoning", "low"), j.optString("model"), j.optInt("retentionHours", 4), j.optBoolean("webSearch"), j.optBoolean("xSearch"), j.optString("provider", "default"),
     )
     private fun read(hours: (String) -> Int): State {
         if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return State(emptyList(), null)
@@ -96,7 +96,7 @@ internal class AiConversationStore(context: Context) {
         .put("key", v.key).put("startedAt", v.startedAt).put("firstMessage", v.firstMessage)
         .put("title", v.title).put("tone", v.tone).put("presetName", v.presetName)
         .put("prompt", v.prompt).put("reasoning", v.reasoning).put("model", v.model)
-        .put("retentionHours", v.retentionHours).put("webSearch", v.webSearch).put("xSearch", v.xSearch)
+        .put("retentionHours", v.retentionHours).put("webSearch", v.webSearch).put("xSearch", v.xSearch).put("provider", v.provider)
 
     /** Bound individual records and UTF-8 JSON before building a complete array/string. */
     private fun bounded(state: State): State {

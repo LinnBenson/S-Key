@@ -176,7 +176,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
 
     private fun transcribe(id:Long, pcm:ByteArray, count:Int):String {
         check(current(id)) { "已取消" }
-        val c=config.validatedVoice()
+        val c=config.resolvedVoice()
         require(c.voiceKey.isNotBlank()) { "请配置语音 API 密钥" }
         val boundary="skey-voice-${java.util.UUID.randomUUID()}"
         val model=c.voiceModel

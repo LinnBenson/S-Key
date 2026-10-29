@@ -21,7 +21,7 @@ import org.json.JSONObject
 class ContentStore(context: Context) {
     data class ClipboardItem(val id: String, val text: String, val pinned: Boolean = false, val copiedAt: Long = 0L)
 
-    data class AiPreset(val id: String, val name: String, val prompt: String, val reasoningEffort: String = "low", val modelId: String = "", val retentionHours: Int = 4, val webSearch: Boolean = false, val xSearch: Boolean = false)
+    data class AiPreset(val id: String, val name: String, val prompt: String, val reasoningEffort: String = "low", val modelId: String = "", val retentionHours: Int = 4, val webSearch: Boolean = false, val xSearch: Boolean = false, val provider: String = "default")
 
     data class Phrase(val id: String, val text: String, val pinned: Boolean = false)
 
@@ -677,7 +677,7 @@ class ContentStore(context: Context) {
     internal fun writeEncryptedBackup(output: java.io.OutputStream, password: CharArray) {
         val api = ApiConfigurationStore(app).load()
         val fields = listOf(api.googleUrl, api.googleKey, api.googleModel, api.grokUrl, api.grokKey,
-            api.grokModel, api.voiceUrl, api.voiceKey, api.voiceModel)
+            api.grokModel, api.voiceUrl, api.voiceKey, api.voiceModel, api.openaiUrl, api.openaiKey, api.openaiModel, api.openaiVoiceUrl, api.openaiVoiceKey, api.openaiVoiceModel, api.aiProvider, api.voiceProvider)
         require(fields.all { it.length <= 16384 }) { "AI 配置内容过长" }
         SensitiveBackupBuffer().use { buffer ->
             val data = java.io.DataOutputStream(buffer)
@@ -697,7 +697,10 @@ class ContentStore(context: Context) {
                 require(length > 0 && length <= plain.size - 4)
                 require(data.skipBytes(length) == length)
                 fun field(): String = data.readUTF().also { require(it.length <= 16384) }
-                val api = ApiConfiguration(field(), field(), field(), field(), field(), field(), field(), field(), field())
+                var api = ApiConfiguration(field(), field(), field(), field(), field(), field(), field(), field(), field())
+                if (data.available() > 0) api = api.copy(openaiUrl = field(), openaiKey = field(), openaiModel = field(),
+                    openaiVoiceUrl = field(), openaiVoiceKey = field(), openaiVoiceModel = field(), aiProvider = field(), voiceProvider = field())
+                require(AiProviders.valid(api.aiProvider) && AiProviders.valid(api.voiceProvider))
                 require(data.read() == -1)
                 val plan = prepareBackup(java.io.ByteArrayInputStream(plain, 4, length))
                 BackupPlan(plan.clean, plan.configuration,
@@ -762,7 +765,9 @@ class ContentStore(context: Context) {
                         } else settings.aiConversationHours
                         val webSearch = if (row.has("webSearch")) row.get("webSearch").also { require(it is Boolean) } as Boolean else false
                         val xSearch = if (row.has("xSearch")) row.get("xSearch").also { require(it is Boolean) } as Boolean else false
-                        item.put("name", name).put("prompt", prompt).put("reasoningEffort", effort).put("modelId", model).put("retentionHours", hours).put("webSearch", webSearch).put("xSearch", xSearch)
+                        val provider = if (row.has("provider")) string("provider") else "default"
+                        require(provider == "default" || AiProviders.valid(provider))
+                        item.put("name", name).put("prompt", prompt).put("reasoningEffort", effort).put("modelId", model).put("retentionHours", hours).put("webSearch", webSearch).put("xSearch", xSearch).put("provider", provider)
                         characters += name.length.toLong() + prompt.length
                     }
                     else -> {
@@ -831,7 +836,7 @@ class ContentStore(context: Context) {
         }
         rows.map { AiPreset(it.getString("id"), it.getString("name"), it.getString("prompt"),
             it.optString("reasoningEffort", "low").takeIf(AiReasoning::valid) ?: "low", it.optString("modelId", ""),
-            it.optInt("retentionHours", 4).coerceIn(0, 720), it.optBoolean("webSearch"), it.optBoolean("xSearch")) }
+            it.optInt("retentionHours", 4).coerceIn(0, 720), it.optBoolean("webSearch"), it.optBoolean("xSearch"), it.optString("provider", "default")) }
     }
 
     private var cachedRetentionEpoch = -1L
@@ -859,7 +864,8 @@ class ContentStore(context: Context) {
         store.refreshPolicy()
     }
 
-    fun saveAiPreset(id: String?, name: String, prompt: String, reasoningEffort: String = "low", modelId: String = "", retentionHours: Int? = null, webSearch: Boolean = false, xSearch: Boolean = false) = synchronized(lock) {
+    fun saveAiPreset(id: String?, name: String, prompt: String, reasoningEffort: String = "low", modelId: String = "", retentionHours: Int? = null, webSearch: Boolean = false, xSearch: Boolean = false, provider: String = "default") = synchronized(lock) {
+        require(provider == "default" || AiProviders.valid(provider))
         aiPresets()
         AiConversationStore(app).list()
         var retentionChanged = false
@@ -875,15 +881,15 @@ class ContentStore(context: Context) {
             require(rows.none { it.getString("id") != id && it.getString("name").equals(title, ignoreCase = true) }) { "已有同名自定义 AI，请换个名称" }
             if (id == null) {
                 require(rows.size < 100) { "最多保存 100 个自定义 AI" }
-                rows.add(JSONObject().put("id", UUID.randomUUID().toString()).put("name", title).put("prompt", instruction).put("reasoningEffort", reasoningEffort).put("modelId", model).put("retentionHours", hours).put("webSearch", webSearch).put("xSearch", xSearch))
+                rows.add(JSONObject().put("id", UUID.randomUUID().toString()).put("name", title).put("prompt", instruction).put("reasoningEffort", reasoningEffort).put("modelId", model).put("retentionHours", hours).put("webSearch", webSearch).put("xSearch", xSearch).put("provider", provider))
             } else {
                 val row = rows.find { it.getString("id") == id }
                 require(row != null) { "此自定义 AI 已删除，请重新添加" }
-                if(row.getString("prompt")!=instruction || row.optString("reasoningEffort", "low")!=reasoningEffort || row.optString("modelId", "")!=model || row.optBoolean("webSearch")!=webSearch || row.optBoolean("xSearch")!=xSearch) {
+                if(row.getString("prompt")!=instruction || row.optString("reasoningEffort", "low")!=reasoningEffort || row.optString("modelId", "")!=model || row.optBoolean("webSearch")!=webSearch || row.optBoolean("xSearch")!=xSearch || row.optString("provider", "default")!=provider) {
                     val store=AiConversationStore(app)
                     store.removeType("custom:$id")
                 }
-                row.put("name", title).put("prompt", instruction).put("reasoningEffort", reasoningEffort).put("modelId", model).put("retentionHours", hours).put("webSearch", webSearch).put("xSearch", xSearch)
+                row.put("name", title).put("prompt", instruction).put("reasoningEffort", reasoningEffort).put("modelId", model).put("retentionHours", hours).put("webSearch", webSearch).put("xSearch", xSearch).put("provider", provider)
             }
         }
         if (retentionChanged) AiConversationStore(app).refreshPolicy()

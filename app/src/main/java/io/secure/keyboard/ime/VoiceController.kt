@@ -232,7 +232,7 @@ internal object VoiceController {
             return
         }
         if(usingAiVoice) {
-            val configured=runCatching { io.secure.keyboard.data.ApiConfigurationStore(this).load().voiceKey.isNotBlank() }.getOrDefault(false)
+            val configured=runCatching { io.secure.keyboard.data.ApiConfigurationStore(this).load().resolvedVoice().voiceKey.isNotBlank() }.getOrDefault(false)
             if(!configured) {
                 failVoice("请先在接口 API 配置中保存语音密钥")
                 startActivity(Intent(this,SettingsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("page","api"))

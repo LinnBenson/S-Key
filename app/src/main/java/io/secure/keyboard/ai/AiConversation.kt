@@ -14,6 +14,7 @@ internal data class AiConversation(val id: String, val scope: String, val update
     val retentionHours: Int = DEFAULT_HOURS,
     val webSearch: Boolean = false,
     val xSearch: Boolean = false,
+    val provider: String = "default",
 ) {
     fun normalizeSearchScope(context: String, instruction: String): AiConversation {
         if (!type.startsWith("custom:") || webSearch || xSearch) return this

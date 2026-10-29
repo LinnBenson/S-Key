@@ -407,7 +407,7 @@ open class SettingsActivity : ComponentActivity() {
                                     IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy && index < model.aiPresets.lastIndex,
                                         onClick = { model.task { model.content.moveAiPreset(preset.id, 1) } }) { UiIcon("arrow_down", "下移 ${preset.name}") }
                                     IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy, onClick = {
-                                        model.edit = ContentEdit("custom_ai", preset.id, TextFieldValue(preset.name), TextFieldValue(preset.prompt), preset.reasoningEffort, preset.modelId, preset.retentionHours, preset.webSearch, preset.xSearch)
+                                        model.edit = ContentEdit("custom_ai", preset.id, TextFieldValue(preset.name), TextFieldValue(preset.prompt), preset.reasoningEffort, preset.modelId, preset.retentionHours, preset.webSearch, preset.xSearch, preset.provider)
                                     }) { UiIcon("edit", "编辑 ${preset.name}") }
                                     IconButton(modifier = Modifier.size(36.dp), enabled = !model.busy, onClick = {
                                         ask("删除自定义 AI「${preset.name}」？") { model.task { model.content.deleteAiPreset(preset.id) } }
@@ -458,7 +458,7 @@ open class SettingsActivity : ComponentActivity() {
         Group("开始定制") {
             Nav("偏好设置", "输入、键盘、主题与本机内容", "settings") { openPage("home") }
             Nav("主题与外观", "配色、按键样式与文字提示", "theme") { openPage("behavior") }
-            Nav("AI 设置", "Google 翻译 · Grok · 模型选择", "input") { openPage("api") }
+            Nav("AI 设置", "API / 模型 / 提示词设置", "input") { openPage("api") }
             Nav("语音输入", "离线语音 / AI 语音", "voice") { openPage("voice") }
         }
         Group("应用与隐私") {
@@ -488,7 +488,7 @@ open class SettingsActivity : ComponentActivity() {
             Nav("最近表情", "管理最近使用的表情", "emoji") { openPage("emoji") }
         }
         Group("应用与隐私") {
-            Nav("AI 设置", "Google 翻译 · Grok · 模型选择", "input") { openPage("api") }
+            Nav("AI 设置", "API / 模型 / 提示词设置", "input") { openPage("api") }
             Nav("语音输入", "离线语音 / AI 语音", "voice") { openPage("voice") }
             Nav("备份与清理", "备份、还原与清理本机内容", "delete") { openPage("cleanup") }
             Nav("开源声明", "Miuix、图标、词库、音效与语音组件", "dictionary") { openPage("licenses") }
@@ -570,6 +570,7 @@ open class SettingsActivity : ComponentActivity() {
     @Composable private fun ApiSettings() {
         model.revision
         val draft = model.apiDraft
+        var apiProvider by rememberSaveable { mutableStateOf("google") }
         @Composable fun field(label: String, value: String, secret: Boolean = false, change: (String) -> Unit) {
             TextField(value = value, onValueChange = change, label = label, enabled = model.apiReady,
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
@@ -586,28 +587,57 @@ open class SettingsActivity : ComponentActivity() {
             Toggle("AI 生成后自动上屏", model.settings.aiAutoApply, "结果生成完成后自动上屏", icon = "enter") { model.settings.aiAutoApply = it }
             Toggle("语音自动翻译", model.settings.voiceAutoTranslate, "在英文键盘时使用语音启用自动翻译", icon = "translate") { model.settings.voiceAutoTranslate = it }
             Nav("内置 AI 提示词", null, "ai") { openPage("builtin_ai_prompts") }
+            Info("默认 AI 提供商")
+            HorizontalChoices(AiProviders.options, draft.aiProvider, enabled = model.apiReady, equalWidth = true) {
+                model.updateApi(model.apiDraft.copy(aiProvider = it))
+            }
             Range("会话有效期", model.aiConversationHours, 0, 720, "小时") { model.updateAiConversationHours(it) }
         }
-        Group("Google 翻译 API") {
-            field("翻译接口地址", draft.googleUrl) { model.updateApi(model.apiDraft.copy(googleUrl = it)) }
-            field("Google API Key", draft.googleKey, true) { model.updateApi(model.apiDraft.copy(googleKey = it)) }
-            Choice("默认 NMT 模型", draft.googleModel == "nmt", enabled = model.apiReady) { model.updateApi(model.apiDraft.copy(googleModel = "nmt")) }
-            field("模型 ID / 完整模型资源名", draft.googleModel) { model.updateApi(model.apiDraft.copy(googleModel = it)) }
+        Column(Modifier.fillMaxWidth()) {
+            Text("API KEY 设置", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                color = MiuixTheme.colorScheme.onSurfaceSecondary,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp))
+            HorizontalChoices(listOf("google" to "Google") + AiProviders.options, apiProvider,
+                modifier = Modifier.padding(bottom = 16.dp), equalWidth = true) {
+                apiProvider = it
+            }
+            Group(if (apiProvider == "google") "翻译接口" else "对话接口") {
+                key(apiProvider) {
+                    if (apiProvider == "google") {
+                        field("翻译接口地址", draft.googleUrl) { model.updateApi(model.apiDraft.copy(googleUrl = it)) }
+                        field("Google API Key", draft.googleKey, true) { model.updateApi(model.apiDraft.copy(googleKey = it)) }
+                        Choice("默认 NMT 模型", draft.googleModel == "nmt", enabled = model.apiReady) { model.updateApi(model.apiDraft.copy(googleModel = "nmt")) }
+                        field("模型 ID / 完整模型资源名", draft.googleModel) { model.updateApi(model.apiDraft.copy(googleModel = it)) }
+                    } else if (apiProvider == "grok") {
+                        field("接口地址（包含 /v1）", draft.grokUrl) { model.apiModels = emptyList(); model.updateApi(model.apiDraft.copy(grokUrl = it)) }
+                        field("Grok API Key", draft.grokKey, true) { model.apiModels = emptyList(); model.updateApi(model.apiDraft.copy(grokKey = it)) }
+                        field("模型 ID", draft.grokModel) { model.updateApi(model.apiDraft.copy(grokModel = it)) }
+                        Action("获取可用模型", model.apiReady) { model.fetchApiModels("grok") }
+                        model.apiModels.filter { model.apiModelsProvider == "grok" }.forEach { id -> Choice(id, draft.grokModel == id, enabled = model.apiReady) { model.updateApi(model.apiDraft.copy(grokModel = id)) } }
+                        Info("可获取模型列表，也可填写模型 ID。接口需支持 Responses API。")
+                    } else {
+                        field("接口地址（包含 /v1）", draft.openaiUrl) { model.apiModels = emptyList(); model.updateApi(model.apiDraft.copy(openaiUrl = it)) }
+                        field("OpenAI API Key", draft.openaiKey, true) { model.apiModels = emptyList(); model.updateApi(model.apiDraft.copy(openaiKey = it)) }
+                        field("模型 ID", draft.openaiModel) { model.updateApi(model.apiDraft.copy(openaiModel = it)) }
+                        Action("获取可用模型", model.apiReady) { model.fetchApiModels("openai") }
+                        model.apiModels.filter { model.apiModelsProvider == "openai" }.forEach { id -> Choice(id, draft.openaiModel == id, enabled = model.apiReady) { model.updateApi(model.apiDraft.copy(openaiModel = id)) } }
+                        Info("请选择支持 Responses API 的对话模型，也可手动填写模型 ID。")
+                    }
+                }
+            }
         }
-        Group("Grok API") {
-            field("接口地址（包含 /v1）", draft.grokUrl) { model.apiModels = emptyList(); model.updateApi(model.apiDraft.copy(grokUrl = it)) }
-            field("Grok API Key", draft.grokKey, true) { model.apiModels = emptyList(); model.updateApi(model.apiDraft.copy(grokKey = it)) }
-            field("模型 ID", draft.grokModel) { model.updateApi(model.apiDraft.copy(grokModel = it)) }
-            Action("获取可用模型", model.apiReady) { model.fetchApiModels() }
-            model.apiModels.forEach { id -> Choice(id, draft.grokModel == id, enabled = model.apiReady) { model.updateApi(model.apiDraft.copy(grokModel = id)) } }
-            Info("可获取模型列表，也可填写模型 ID。接口需支持 Responses API。")
+        if (apiProvider == "grok") {
+            Group("语音接口") {
+                field("语音识别端点（完整 HTTPS 地址）", draft.voiceUrl) { model.updateApi(model.apiDraft.copy(voiceUrl = it)) }
+                field("语音 API Key", draft.voiceKey, true) { model.updateApi(model.apiDraft.copy(voiceKey = it)) }
+                field("语音模型 ID", draft.voiceModel) { model.updateApi(model.apiDraft.copy(voiceModel = it)) }
+            }
         }
-        Group("AI 语音 API") {
-            field("语音识别端点（完整 HTTPS 地址）", draft.voiceUrl) { model.updateApi(model.apiDraft.copy(voiceUrl = it)) }
-            field("语音 API Key", draft.voiceKey, true) { model.updateApi(model.apiDraft.copy(voiceKey = it)) }
-            field("语音模型 ID", draft.voiceModel) { model.updateApi(model.apiDraft.copy(voiceModel = it)) }
-            Action("使用 Grok 地址与密钥", model.apiReady) {
-                model.updateApi(model.apiDraft.copy(voiceUrl = draft.grokUrl.trimEnd('/') + "/stt", voiceKey = draft.grokKey))
+        if (apiProvider == "openai") {
+            Group("语音接口") {
+                field("语音识别端点（完整 HTTPS 地址）", draft.openaiVoiceUrl) { model.updateApi(model.apiDraft.copy(openaiVoiceUrl = it)) }
+                field("语音 API Key", draft.openaiVoiceKey, true) { model.updateApi(model.apiDraft.copy(openaiVoiceKey = it)) }
+                field("语音模型 ID", draft.openaiVoiceModel) { model.updateApi(model.apiDraft.copy(openaiVoiceModel = it)) }
             }
         }
         Group("其它设置") {
@@ -1005,6 +1035,9 @@ open class SettingsActivity : ComponentActivity() {
                                     model.edit = edit.copy(first = it)
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("AI 提供商", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                    HorizontalChoices(AiProviders.customOptions, edit.provider, modifier = Modifier,
+                                        enabled = !model.busy, equalWidth = true) { model.edit = edit.copy(provider = it) }
                                     Text("模型 ID", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                     TextField(value = edit.modelId,
                                         onValueChange = { if (it.length <= 256) model.edit = edit.copy(modelId = it) },
@@ -1033,7 +1066,7 @@ open class SettingsActivity : ComponentActivity() {
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     AiEditorToggle("联网搜索", "允许 AI 按需搜索网页", edit.webSearch) { model.edit = edit.copy(webSearch = it) }
-                                    AiEditorToggle("X 搜索", "允许 AI 按需搜索 X 帖子", edit.xSearch) { model.edit = edit.copy(xSearch = it) }
+                                    AiEditorToggle("X 搜索", "允许 AI 按需搜索 X 帖子；OpenAI 会忽略此项", edit.xSearch) { model.edit = edit.copy(xSearch = it) }
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     SettingRange("会话有效期", edit.retentionHours, 0, 720, "小时",
@@ -1119,6 +1152,10 @@ open class SettingsActivity : ComponentActivity() {
         }
         if(ai) {
             Group("AI 语音") {
+                Info("AI 语音提供商")
+                HorizontalChoices(AiProviders.options, model.apiDraft.voiceProvider, enabled = model.apiReady, equalWidth = true) {
+                    model.updateApi(model.apiDraft.copy(voiceProvider = it))
+                }
                 Nav("AI 设置", "配置语音端点、密钥与模型", "settings") { openPage("api") }
                 Action("允许麦克风权限", !microphone) { micPicker.launch(Manifest.permission.RECORD_AUDIO) }
             }

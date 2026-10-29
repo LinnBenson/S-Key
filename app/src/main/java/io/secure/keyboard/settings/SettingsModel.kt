@@ -12,11 +12,12 @@ import kotlinx.coroutines.flow.first
 
 /** Private drafts are discarded when leaving their page or backgrounding the activity. */
 internal data class ContentEdit(val category: String, val id: String? = null,
-    val first: TextFieldValue = TextFieldValue(), val second: TextFieldValue = TextFieldValue(), val reasoningEffort: String = "low", val modelId: String = "", val retentionHours: Int = 4, val webSearch: Boolean = false, val xSearch: Boolean = false)
+    val first: TextFieldValue = TextFieldValue(), val second: TextFieldValue = TextFieldValue(), val reasoningEffort: String = "low", val modelId: String = "", val retentionHours: Int = 4, val webSearch: Boolean = false, val xSearch: Boolean = false, val provider: String = "default")
 
 internal class SettingsModel(app: Application) : AndroidViewModel(app) {
     val apiStore = ApiConfigurationStore(app)
     var apiDraft by mutableStateOf(ApiConfiguration())
+    var apiModelsProvider by mutableStateOf("grok")
     var apiModels by mutableStateOf<List<String>>(emptyList())
     private val apiWriter = LatestWriteQueue<ApiConfiguration>(apiExecutor, apiStore::saveDraft, apiStore::clear) {
         android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -24,7 +25,7 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
         }
     }
     private var apiLoaded by mutableStateOf(false)
-    val apiCanClear: Boolean get() = visible && page == "api" && !busy
+    val apiCanClear: Boolean get() = visible && page in setOf("api", "voice") && !busy
     val apiReady: Boolean get() = apiLoaded && apiCanClear
     fun updateApi(value: ApiConfiguration) {
         if (!apiReady) return
@@ -49,16 +50,17 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
     fun awaitApiWrites() { apiExecutor.submit {}.get() }
 
     fun loadApi() { if (visible && page == "api") refresh() }
-    fun fetchApiModels() {
-        val snapshot = apiDraft
+    fun fetchApiModels(provider: String = "grok") {
+        val snapshot = apiDraft.copy(aiProvider = provider)
         var result = emptyList<String>()
         task(refreshContent = false, success = {
-            if (apiDraft.grokUrl == snapshot.grokUrl && apiDraft.grokKey == snapshot.grokKey) {
+            if (apiDraft.copy(aiProvider = provider).let { it.chatUrl == snapshot.chatUrl && it.chatKey == snapshot.chatKey }) {
+                apiModelsProvider = provider
                 apiModels = result
                 message = if (result.isEmpty()) "此密钥未返回可用模型" else "已获取 ${result.size} 个模型，请选择"
             }
         }) {
-            try { result = GrokModelCatalog.fetch(snapshot) }
+            try { result = AiModelCatalog.fetch(snapshot) }
             catch (e: IllegalArgumentException) { throw e }
             catch (e: IllegalStateException) { throw e }
             catch (e: Exception) { error("获取模型失败，请检查网络与接口配置") }
@@ -141,7 +143,7 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
                 // Only the displayed category is retained; unrelated pages do not read content.
                 val value: Any? = withContext(Dispatchers.IO) {
                     when (route) {
-                        "api" -> apiExecutor.submit<ApiConfiguration> { apiStore.load() }.get()
+                        "api", "voice" -> apiExecutor.submit<ApiConfiguration> { apiStore.load() }.get()
                         "clipboard" -> content.clipboardForDisplay()
                         "phrases" -> content.phrasesForDisplay()
                         "dictionary" -> content.dictionary(DictionaryKind.CHINESE)
@@ -154,7 +156,7 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
                 if (!visible || ticket != generation || route != page) return@launch
                 @Suppress("UNCHECKED_CAST")
                 when (route) {
-                    "api" -> { apiDraft = value as ApiConfiguration; aiConversationHours = settings.aiConversationHours; apiLoaded = true }
+                    "api", "voice" -> { apiDraft = value as ApiConfiguration; aiConversationHours = settings.aiConversationHours; apiLoaded = true }
                     "clipboard" -> clipboard = value as List<ContentStore.ClipboardItem>
                     "phrases" -> phrases = value as List<ContentStore.Phrase>
                     "dictionary" -> chinese = value as List<ContentStore.DictionaryEntry>
@@ -212,7 +214,7 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
             val text = current.first.text
             require(text.isNotBlank()) { "内容不能为空" }
             when (current.category) {
-                "custom_ai" -> content.saveAiPreset(current.id, text, current.second.text, current.reasoningEffort, current.modelId, current.retentionHours, current.webSearch, current.xSearch)
+                "custom_ai" -> content.saveAiPreset(current.id, text, current.second.text, current.reasoningEffort, current.modelId, current.retentionHours, current.webSearch, current.xSearch, current.provider)
                 "phrases" -> if (current.id == null) content.addPhrase(text) else content.updatePhrase(current.id, text)
                 "dictionary", "english_dictionary" -> {
                     val kind = if (current.category == "dictionary") DictionaryKind.CHINESE else DictionaryKind.ENGLISH

@@ -55,7 +55,7 @@ internal fun CurrentInformation(context: Context) {
         listOf("剪贴板数量", "已编译词库数量", "离线模型状态").forEachIndexed { index, title ->
             BasicComponent(title = title, summary = local[index])
         }
-        listOf("翻译 API 可用性", "Grok AI 可用性", "Grok 语音可用性").forEachIndexed { index, title ->
+        listOf("翻译 API 可用性", "${AiProviders.label(config?.aiProvider.orEmpty())} AI 可用性", "${AiProviders.label(config?.voiceProvider.orEmpty())} 语音可用性").forEachIndexed { index, title ->
             BasicComponent(title = title, summary = states[index], rightActions = {
                 TextButton(text = if (checking == index) "检测中" else "检测", enabled = checking == null && config?.let { apiState(it, index) == "未检测" } == true,
                     onClick = {
@@ -96,20 +96,20 @@ internal fun CurrentInformation(context: Context) {
 }
 
 internal fun apiState(config: ApiConfiguration, index: Int): String {
-    val key = when(index) { 0 -> config.googleKey; 1 -> config.grokKey; else -> config.voiceKey }
+    val key = when(index) { 0 -> config.googleKey; 1 -> config.chatKey; else -> if (config.voiceProvider == "openai") config.openaiVoiceKey else config.voiceKey }
     if (key.isBlank()) return "未配置"
     return try {
         when(index) {
             0 -> config.validatedGoogle()
-            1 -> { config.validatedGrok(); require(config.grokModel.isNotBlank()) }
-            else -> { config.validatedVoice(); require(!config.voiceModel.contains('\r') && !config.voiceModel.contains('\n')) }
+            1 -> { config.validatedChat(); require(config.chatModel.isNotBlank()) }
+            else -> { val voice = config.resolvedVoice(); require(!voice.voiceModel.contains('\r') && !voice.voiceModel.contains('\n')) }
         }
         "未检测"
     } catch (_: Exception) { "配置不完整或无效" }
 }
 
 private fun checkVoice(config: ApiConfiguration, call: VoiceHttpRequest) {
-    val c = config.validatedVoice()
+    val c = config.resolvedVoice()
     val boundary = "skey-check-${java.util.UUID.randomUUID()}"
     val prefix = ("--$boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n${c.voiceModel}\r\n" +
         "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"check.wav\"\r\nContent-Type: audio/wav\r\n\r\n").toByteArray()

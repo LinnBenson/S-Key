@@ -510,11 +510,11 @@ class SettingsStore(context: Context) {
             )
         }
         internal val symbolHintModes = setOf("all", "digits", "hidden")
-        val defaultPins = listOf("ai", "floating", "quickedit", "clipboard", "emoji", "translate")
+        val defaultPins = listOf("translate", "quickedit", "clipboard", "emoji", "ai")
         // Keep the complete tool catalog independent of which tools are pinned by default.
         val availablePins = listOf(
-            "ai", "floating", "quickedit", "clipboard", "emoji", "translate", "phrases", "split",
-            "script", "input_mode", "voice", "dictionary", "english_dictionary", "association", "theme", "layout", "settings",
+            "translate", "quickedit", "clipboard", "emoji", "ai", "phrases", "floating", "script",
+            "input_mode", "voice", "dictionary", "english_dictionary", "association", "theme", "split", "layout", "settings",
         )
     }
 }

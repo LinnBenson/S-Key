@@ -337,7 +337,7 @@ internal object AssistantController {
                         if (aiGalleryOpen || AssistantImages.allowed(this)) { aiGalleryOpen = !aiGalleryOpen; renderBody(false) }
                         else {
                             currentInputEditorInfo?.let { imagePermissionDraft = KeyboardSession.ImagePermissionDraft(it.packageName, it.fieldId, translation.text,
-                                aiTask, aiTone, aiCustom, aiCustomPresetName, aiCustomPresetId, aiCustomReasoning, aiCustomModel, aiImage, aiCustomWebSearch, aiCustomXSearch) }
+                                aiTask, aiTone, aiCustom, aiCustomPresetName, aiCustomPresetId, aiCustomReasoning, aiCustomModel, aiImage, aiCustomWebSearch, aiCustomXSearch, aiCustomProvider) }
                             imagePermissionDeadline = android.os.SystemClock.elapsedRealtime() + 120_000
                             main.postDelayed({ if(android.os.SystemClock.elapsedRealtime() >= imagePermissionDeadline) imagePermissionDraft = null }, 120_000)
                             startActivity(Intent(this, ImagePermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -370,7 +370,7 @@ internal object AssistantController {
             galleryRow.addView(AssistantImages.Gallery(this), LinearLayout.LayoutParams(0, dp(64), 1f))
             if (Build.VERSION.SDK_INT >= 34) galleryRow.addView(icon("image", "选择更多照片") {
                 currentInputEditorInfo?.let { imagePermissionDraft = KeyboardSession.ImagePermissionDraft(it.packageName, it.fieldId, translation.text,
-                    aiTask, aiTone, aiCustom, aiCustomPresetName, aiCustomPresetId, aiCustomReasoning, aiCustomModel, aiImage, aiCustomWebSearch, aiCustomXSearch) }
+                    aiTask, aiTone, aiCustom, aiCustomPresetName, aiCustomPresetId, aiCustomReasoning, aiCustomModel, aiImage, aiCustomWebSearch, aiCustomXSearch, aiCustomProvider) }
                 imagePermissionDeadline = android.os.SystemClock.elapsedRealtime() + 120_000
                 main.postDelayed({ if(android.os.SystemClock.elapsedRealtime() >= imagePermissionDeadline) imagePermissionDraft = null }, 120_000)
                 startActivity(Intent(this, ImagePermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -445,6 +445,7 @@ internal object AssistantController {
                 aiCustomModel = selected?.modelId.orEmpty()
                 aiCustomWebSearch = selected?.webSearch ?: false
                 aiCustomXSearch = selected?.xSearch ?: false
+                aiCustomProvider = selected?.provider ?: "default"
                 val taskChanged = selected == null && aiTask == "custom"
                 if (taskChanged) {
                     detachAiConversation(); aiTask = "polish"
@@ -576,11 +577,11 @@ internal object AssistantController {
                     renderAiChoices(column, window, entries, { it.name }, { it.id == selectedId }, "自定义 AI") { preset ->
                         if (content !== store || epoch != store.customAiEpoch()) { fillDefaultCustomAiPreset(); return@renderAiChoices }
                         stopAiRequest(); clearComposition()
-                        if(aiCustomPresetId!=preset.id || aiCustom!=preset.prompt || aiCustomReasoning!=preset.reasoningEffort || aiCustomModel!=preset.modelId || aiCustomWebSearch!=preset.webSearch || aiCustomXSearch!=preset.xSearch) detachAiConversation()
+                        if(aiCustomPresetId!=preset.id || aiCustom!=preset.prompt || aiCustomReasoning!=preset.reasoningEffort || aiCustomModel!=preset.modelId || aiCustomWebSearch!=preset.webSearch || aiCustomXSearch!=preset.xSearch || aiCustomProvider!=preset.provider) detachAiConversation()
                         aiCustomPresetId = preset.id
                         aiCustomPresetName = preset.name
                         settings.lastCustomAiPresetId = preset.id
-                        aiCustom = preset.prompt; aiCustomReasoning = preset.reasoningEffort; aiCustomModel = preset.modelId; aiCustomWebSearch = preset.webSearch; aiCustomXSearch = preset.xSearch
+                        aiCustom = preset.prompt; aiCustomReasoning = preset.reasoningEffort; aiCustomModel = preset.modelId; aiCustomWebSearch = preset.webSearch; aiCustomXSearch = preset.xSearch; aiCustomProvider = preset.provider
                         translation.invalidate(); renderBody(false)
                     }
                 }
@@ -590,9 +591,10 @@ internal object AssistantController {
     }
 
     internal fun KeyboardSession.effectiveAiConfigurationImpl(): io.secure.keyboard.data.ApiConfiguration {
-        val config = aiConfiguration()
-        val model = io.secure.keyboard.ai.AiPromptStore(this).resolveModel(aiTask, aiTone, aiCustomModel, config.grokModel)
-        return config.copy(grokModel = model)
+        val original = aiConfiguration()
+        val config = if (aiTask == "custom" && io.secure.keyboard.data.AiProviders.valid(aiCustomProvider)) original.copy(aiProvider = aiCustomProvider) else original
+        val model = io.secure.keyboard.ai.AiPromptStore(this).resolveModel(aiTask, aiTone, aiCustomModel, config.chatModel, config.aiProvider)
+        return config.withChatModel(model)
     }
 
     internal fun KeyboardSession.aiTypeImpl() = if(aiTask=="custom") "custom:${aiCustomPresetId.orEmpty()}" else aiTask
@@ -733,7 +735,7 @@ internal object AssistantController {
             aiPresetLoadGeneration++
             aiCustomPresetId = saved.type.substringAfter(':')
             aiCustomPresetName = saved.presetName
-            aiCustom = saved.prompt; aiCustomReasoning = saved.reasoning; aiCustomModel = saved.model; aiCustomWebSearch = saved.webSearch; aiCustomXSearch = saved.xSearch
+            aiCustom = saved.prompt; aiCustomReasoning = saved.reasoning; aiCustomModel = saved.model; aiCustomWebSearch = saved.webSearch; aiCustomXSearch = saved.xSearch; aiCustomProvider = saved.provider
         }
         saved = normalizeAiSearchScope(saved)
         val scope = runCatching { aiScope(effectiveAiConfiguration()) }.getOrNull()
@@ -836,7 +838,7 @@ internal object AssistantController {
         if(code.isNotEmpty()) { toast("请先确认候选词再生成"); return }
         val config=try { effectiveAiConfiguration() }
             catch(_:Exception) { toast("无法读取API配置，请重新保存"); return }
-        if(config.grokKey.isBlank() || config.grokModel.isBlank()) { toast("请在 AI 设置中填写密钥和模型 ID"); return }
+        if(config.chatKey.isBlank() || config.chatModel.isBlank()) { toast("请在 AI 设置中填写密钥和模型 ID"); return }
         val instruction=try { io.secure.keyboard.ai.AiPromptStore(this).system(aiTask,aiTone,aiCustom) }
             catch(e:Exception) { toast(e.message ?: "请检查指令"); return }
         if(translation.text.isBlank() && aiImage == null) { toast("请输入原文或添加图片"); return }
@@ -865,7 +867,7 @@ internal object AssistantController {
             title = if (customRequest) aiCustomPresetName else if (aiTask == "tone") "语气：$aiTone" else io.secure.keyboard.ai.AiWriting.tasks[aiTask].orEmpty(),
             tone = aiTone, presetName = if (customRequest) aiCustomPresetName else "",
             prompt = if (customRequest) aiCustom else "", reasoning = reasoningEffort,
-            model = if (customRequest) aiCustomModel else "", webSearch = webSearch, xSearch = xSearch)
+            model = if (customRequest) aiCustomModel else "", webSearch = webSearch, xSearch = xSearch, provider = if (customRequest) aiCustomProvider else "default")
         // Transfer this one-shot attachment to the request; failures/cancellation cannot
         // leave a retryable attachment in the next draft or editor.
         if (imageUri != null) { aiImage = null; aiGalleryOpen = false; renderBody(false) }
