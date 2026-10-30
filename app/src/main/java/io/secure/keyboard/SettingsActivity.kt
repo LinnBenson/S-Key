@@ -1091,7 +1091,7 @@ open class SettingsActivity : ComponentActivity() {
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     AiEditorToggle("联网搜索", "允许 AI 按需搜索网页", edit.webSearch) { model.edit = edit.copy(webSearch = it) }
-                                    AiEditorToggle("X 搜索", "允许 AI 按需搜索 X 帖子；OpenAI 和 Gemini 会忽略此项", edit.xSearch) { model.edit = edit.copy(xSearch = it) }
+                                    AiEditorToggle("X 搜索", "允许 AI 按需搜索 X 帖子；此选项仅 Grok 使用。", edit.xSearch) { model.edit = edit.copy(xSearch = it) }
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     SettingRange("会话有效期", edit.retentionHours, 0, 720, "小时",

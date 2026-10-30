@@ -81,7 +81,7 @@ internal object VoiceController {
                 OfflineVoiceSession.State.LISTENING ->
                     if(usingAiVoice) { if(heldVoice) "聆听中 · 松手识别" else "聆听中" }
                     else if (heldVoice) "正在聆听 · 松手完成" else "正在聆听"
-                OfflineVoiceSession.State.PROCESSING -> if(usingAiVoice) "正在识别…" else "正在完成最后一段"
+                OfflineVoiceSession.State.PROCESSING -> if(usingAiVoice) aiVoice?.recognitionStatus ?: "正在识别…" else "正在完成最后一段"
                 else -> if(settings.voiceMode=="ai") { if (aiVoiceRoundCommitted) "识别完成" else "等待聆听" } else "普通话 · 离线语音"
             }
     }

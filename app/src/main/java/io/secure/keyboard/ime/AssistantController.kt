@@ -626,7 +626,8 @@ internal object AssistantController {
     private fun KeyboardSession.aiSourceLabel(): String {
         val provider = if (aiTask == "custom" && io.secure.keyboard.data.AiProviders.valid(aiCustomProvider)) aiCustomProvider else aiDisplayProvider
         val prefix = if (aiConversation == null) "原文" else "续聊"
-        return if (provider.isEmpty()) prefix else "$prefix ${io.secure.keyboard.data.AiProviders.label(provider)}"
+        val providerLabel = if (provider == "openai") "ChatGPT" else io.secure.keyboard.data.AiProviders.label(provider)
+        return if (provider.isEmpty()) prefix else "$prefix $providerLabel"
     }
 
     internal fun KeyboardSession.effectiveAiConfigurationImpl(): io.secure.keyboard.data.ApiConfiguration {
@@ -1006,7 +1007,7 @@ internal object AssistantController {
     internal fun KeyboardSession.toggleAiCommandVoiceImpl() = startAssistantVoice(false)
 
     internal fun KeyboardSession.startAssistantVoiceImpl(held: Boolean) {
-        if(aiCommandVoice!=null || inlineOfflineVoice!=null) { aiCommandVoice?.stop(); inlineOfflineVoice?.stop(); toast("识别中…"); return }
+        if(aiCommandVoice!=null || inlineOfflineVoice!=null) { val status = aiCommandVoice?.recognitionStatus ?: "识别中…"; aiCommandVoice?.stop(); inlineOfflineVoice?.stop(); toast(status); return }
         val target=activeAssistantEditor() ?: return
         if(!active || secret || translation.busy) return
         val usingAi = settings.voiceMode == "ai"
@@ -1070,7 +1071,7 @@ internal object AssistantController {
                 }
                 status.text=when(state) {
                     OfflineVoiceSession.State.LISTENING -> if (held) "按住说话，松手识别" else "聆听中"
-                    OfflineVoiceSession.State.PROCESSING -> "识别中"
+                    OfflineVoiceSession.State.PROCESSING -> aiCommandVoice?.recognitionStatus ?: "识别中"
                     OfflineVoiceSession.State.LOADING -> "准备聆听"
                     else -> "识别完成"
                 }

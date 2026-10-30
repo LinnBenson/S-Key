@@ -18,6 +18,13 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
     private val listener: OfflineVoiceSession.Listener,
     private val translateToEnglish: Boolean = false,
     private val newCall: (okhttp3.Request) -> okhttp3.Call = VoiceHttpRequest.client::newCall) {
+    val recognitionStatus: String
+        get() = when (config.voiceProvider) {
+            "gemini" -> "Gemini 正在识别…"
+            "openai" -> "ChatGPT 正在识别…"
+            else -> "Grok 正在识别…"
+        }
+
     private val context = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
