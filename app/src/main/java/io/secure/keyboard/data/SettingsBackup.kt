@@ -44,6 +44,11 @@ internal class SettingsBackup(private val context: Context) {
             values.keys().forEach { key ->
                 val value = values.get(key)
                 when {
+                    key == "fuzzyPairs" -> {
+                        require(value is JSONArray && value.length() <= SettingsStore.fuzzyPairIds.size)
+                        val pairs = (0 until value.length()).map { value.get(it) }
+                        require(pairs.all { it is String && it in SettingsStore.fuzzyPairIds } && pairs.distinct().size == pairs.size)
+                    }
                     key in booleanPreferences || key in setOf("manualDark", "longPressSymbols", "swipeUpSymbols", "backgroundClipboard", "includeNavigationBar") -> require(value is Boolean)
                     key in setOf("candidateTextSize", "expandedCandidateTextSize") -> integer(value, 12..32)
                     key == "keyDesign_border" -> integer(value, 0..4)
@@ -59,6 +64,8 @@ internal class SettingsBackup(private val context: Context) {
                         require(value is String && value.length <= 100_000)
                         when {
                             key == "chineseInputMode" -> require(value in setOf("wubi", "pinyin", "mixed"))
+                            key == "translationSource" -> require(value == "auto" || value in translationLanguages)
+                            key == "translationTarget" -> require(value in translationLanguages)
                             key == "voiceMode" -> require(value in setOf("offline", "ai"))
                             key == "keySoundType" -> require(KeySound.options.any { it.first == value })
                             key == EmojiShortcutStore.KEY -> { checkDepth(value); EmojiShortcutStore.decode(value) }
@@ -132,7 +139,14 @@ internal class SettingsBackup(private val context: Context) {
             if (!next.has(group)) return@mapNotNull null
             val spec = groups.getValue(group)
             val before = current.getJSONObject(group); val after = next.getJSONObject(group)
-            val count = spec.second.count { (group != "preferences" || after.has(it)) && before.opt(it) != after.opt(it) }
+            val count = spec.second.count { key ->
+                (group != "preferences" || after.has(key)) && if (key == "fuzzyPairs") {
+                    fun pairs(values: JSONObject): Set<String>? = values.optJSONArray(key)?.let { array ->
+                        (0 until array.length()).map { array.getString(it) }.toSet()
+                    }
+                    pairs(before) != pairs(after)
+                } else before.opt(key) != after.opt(key)
+            }
             if (count == 0) null else "${labels.getValue(group)}：$count 项设置变更"
         }
     }
@@ -145,22 +159,28 @@ internal class SettingsBackup(private val context: Context) {
                 // Older backups and partial preference groups leave missing preferences unchanged.
                 if (group != "preferences") spec.second.forEach(edit::remove)
                 val values = root.getJSONObject(group)
+                if (group == "preferences" && values.has("englishAssociation")) edit.remove("englishCompletion")
                 if (group == "preferences" && values.has("keySoundType")) edit.remove("keySound")
                 values.keys().forEach { key -> when(val value=values.get(key)) {
                     is Boolean -> edit.putBoolean(key,value)
                     is Number -> edit.putInt(key,value.toInt())
                     is String -> edit.putString(key,value)
+                    is JSONArray -> edit.putStringSet(key, (0 until value.length()).map { value.getString(it) }.toSet())
                 } }
             }
             check(edit.commit()) { "设置保存失败，请重试" }
         }
     }
     companion object {
-        private val booleanPreferences = setOf("aiAutoApply", "autoChineseSpacing", "chineseAssociation", "editorPreview",
+        private val booleanPreferences = setOf("fuzzyPinyin", "swipeDelete", "spaceEnglishGloss", "aiAutoApply", "autoChineseSpacing", "chineseAssociation", "editorPreview",
             "englishAssociation", "englishSpaceSelectsFirst", "fourCodeAutoCommit", "quickPaste", "screenshotProtection",
             "traditionalOutput", "vibration", "voiceAutoTranslate", "wubiPinyinInput")
-        private val preferenceKeys = booleanPreferences + setOf("chineseInputMode", "keySoundType", "keySoundVolume", "vibrationStrength", "voiceMode")
+        private val translationLanguages = setOf("zh-CN", "zh-TW", "en", "ja", "ko", "fr", "de", "es", "ru", "pt", "ar", "th", "vi", "id")
+        private val preferenceKeys = booleanPreferences + setOf("translationSource", "translationTarget", "fuzzyPairs", "chineseInputMode", "keySoundType", "keySoundVolume", "vibrationStrength", "voiceMode")
         private fun preferenceValues(s: SettingsStore): Map<String, Any> = linkedMapOf(
+            "translationSource" to s.translationSource, "translationTarget" to s.translationTarget,
+            "fuzzyPinyin" to s.fuzzyPinyin, "fuzzyPairs" to JSONArray(s.fuzzyPairs.sorted()),
+            "swipeDelete" to s.swipeDelete, "spaceEnglishGloss" to s.spaceEnglishGloss,
             "aiAutoApply" to s.aiAutoApply, "autoChineseSpacing" to s.autoChineseSpacing,
             "chineseAssociation" to s.chineseAssociation, "chineseInputMode" to s.chineseInputMode.id,
             "editorPreview" to s.editorPreview, "englishAssociation" to s.englishAssociation,

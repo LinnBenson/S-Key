@@ -15,7 +15,6 @@ import android.view.View
 import android.widget.*
 import io.secure.keyboard.ui.KeyboardFeedback
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.Executors
 
 /** Ephemeral attachment. Never writes image data or a gallery cache to disk. */
 internal object AssistantImages {
@@ -68,7 +67,19 @@ internal object AssistantImages {
     /** Keyset metadata pages; only viewport cells and thumbnails are retained. */
     class Gallery(private val s: KeyboardSession) : HorizontalScrollView(s) {
         private val row = LinearLayout(s)
-        private val executor = Executors.newSingleThreadExecutor()
+        private val executor = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, java.util.concurrent.LinkedBlockingQueue<Runnable>())
+        private class Request {
+            val signal = android.os.CancellationSignal()
+            lateinit var task: java.util.concurrent.FutureTask<Unit>
+        }
+        private val requests = mutableMapOf<Int, Request>()
+        private fun cancelRequest(index: Int) {
+            requests.remove(index)?.let { request ->
+                request.signal.cancel()
+                request.task.cancel(true)
+                executor.remove(request.task)
+            }
+        }
         private val cancellation = android.os.CancellationSignal()
         private val entries = mutableListOf<Uri>()
         private val cells = mutableMapOf<Int, ImageView>()
@@ -132,7 +143,7 @@ internal object AssistantImages {
             val first = ((scrollX / stride) - 1).coerceAtLeast(0)
             val last = ((scrollX + width) / stride + 1).coerceAtMost(entries.lastIndex)
             val removed = cells.keys.filter { it !in first..last }
-            removed.forEach { cells.remove(it)?.setImageDrawable(null) }
+            removed.forEach { cancelRequest(it); cells.remove(it)?.setImageDrawable(null) }
             val rebuild = removed.isNotEmpty() || (first..last).any { it !in cells } || row.tag != entries.size
             if (rebuild) {
                 row.removeAllViews()
@@ -163,20 +174,31 @@ internal object AssistantImages {
                     s.translation.invalidate(); s.renderBody(false)
                 }
             }
-            executor.execute {
-                if (closed) return@execute
-                val bitmap = runCatching {
-                    if (Build.VERSION.SDK_INT >= 29) s.contentResolver.loadThumbnail(uri, Size(side, side), cancellation)
-                    else thumbnail(s, uri, side)
-                }.getOrNull()
-                s.main.post {
-                    if (!closed && cells[index] === image) image.setImageBitmap(bitmap) else bitmap?.recycle()
+            val request = Request()
+            requests[index] = request
+            request.task = java.util.concurrent.FutureTask<Unit> {
+                if (!closed && !request.signal.isCanceled) {
+                    val bitmap = runCatching {
+                        if (Build.VERSION.SDK_INT >= 29) s.contentResolver.loadThumbnail(uri, Size(side, side), request.signal)
+                        else thumbnail(s, uri, side)
+                    }.getOrNull()
+                    if (closed || request.signal.isCanceled) bitmap?.recycle()
+                    else s.main.post {
+                        if (!closed && requests[index] === request) {
+                            requests.remove(index)
+                            cells[index]?.setImageBitmap(bitmap) ?: bitmap?.recycle()
+                        } else bitmap?.recycle()
+                    }
                 }
+                Unit
             }
+            executor.execute(request.task)
             return image
         }
         override fun onDetachedFromWindow() {
-            closed = true; cancellation.cancel(); executor.shutdownNow()
+            closed = true; cancellation.cancel()
+            requests.keys.toList().forEach(::cancelRequest)
+            executor.shutdownNow()
             cells.values.forEach { it.setImageDrawable(null) }; cells.clear(); entries.clear()
             row.removeAllViews()
             super.onDetachedFromWindow()

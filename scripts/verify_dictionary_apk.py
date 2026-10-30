@@ -35,6 +35,10 @@ def verify_archive(apk):
         assert hashlib.sha256(apk.read('assets/dictionaries/'+name)).digest()==hashlib.sha256(expected.read_bytes()).digest(), f'Stale compiled dictionary: {name}'
     for name in NOTICES | {'emoji_keywords.tsv'}:
         assert apk.read('assets/dictionaries/'+name)==(ROOT/'app/src/main/assets/dictionaries'/name).read_bytes(), f'Stale notice/emoji resource: {name}'
+    traditional_name = 'assets/opencc/conversion.skt'
+    traditional = ROOT/'app/build/generated/traditionalIndex/opencc/conversion.skt'
+    assert apk.getinfo(traditional_name).compress_type == zipfile.ZIP_STORED, 'Traditional index must support memory mapping'
+    assert apk.read(traditional_name) == traditional.read_bytes(), 'Stale traditional conversion index'
     learning = ROOT/'app/build/generated/spaceGlossary/learning'
     learning_names = {'glossary.bin', 'sha256.txt', 'LICENSE.txt', 'NOTICE.txt'}
     assert {p.name for p in learning.iterdir()} == learning_names, 'Unexpected generated learning resources'

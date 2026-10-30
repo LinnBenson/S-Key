@@ -12,7 +12,8 @@ import javax.net.ssl.HttpsURLConnection
 
 internal object AiProviders {
     val options = listOf("grok" to "Grok", "gemini" to "Gemini", "openai" to "OpenAI")
-    val customOptions = listOf("default" to "跟随默认") + options
+    val assistantOptions = options.map { (id, label) -> id to if (id == "openai") "ChatGPT" else label }
+    val customOptions = listOf("default" to "跟随默认") + assistantOptions
     fun valid(value: String) = options.any { it.first == value }
     fun label(value: String) = options.firstOrNull { it.first == value }?.second ?: "未知提供商"
 }

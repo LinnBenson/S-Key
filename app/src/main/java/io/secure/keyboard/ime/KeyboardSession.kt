@@ -155,6 +155,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         data class EnglishPair(val opening: String, val closing: String, val moveBackUnits: Int) : QueuedKey()
         object Space : QueuedKey()
         object Enter : QueuedKey()
+        object SubmitAssistant : QueuedKey()
         object Backspace : QueuedKey()
         object RepeatedBackspace : QueuedKey()
     }
@@ -261,15 +262,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal lateinit var toolbarGroup: LinearLayout
     internal lateinit var hideIcon: View
     private val traditionalConverter get() =
-        io.secure.keyboard.data.TraditionalConverter.shared {
-        io.secure.keyboard.data.TraditionalConverter(sequence {
-            for (name in listOf("STCharacters.txt", "STPhrases.txt")) {
-                assets.open("opencc/$name").bufferedReader().use { reader ->
-                    for (line in reader.lineSequence()) yield(line)
-                }
-            }
-        })
-        }
+        io.secure.keyboard.data.TraditionalConverter.shared(assets)
 
     internal fun outputText(value: String): String =
         if (settings.traditionalOutput && !secret) traditionalConverter.convert(value) else value

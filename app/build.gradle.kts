@@ -6,9 +6,10 @@ android {
         applicationId = "io.secure.keyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 194
-        versionName = "1.3.8"
+        versionCode = 195
+        versionName = "1.3.9"
     }
+    androidResources { noCompress += "skt" }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
@@ -75,3 +76,13 @@ val buildRuntimeNotices by tasks.registering {
 }
 android.sourceSets.getByName("main").assets.srcDir(runtimeNoticeAssets)
 tasks.named("preBuild").configure { dependsOn(buildRuntimeNotices) }
+
+val buildTraditionalIndex by tasks.registering(Exec::class) {
+    workingDir(rootProject.projectDir)
+    commandLine("python3", "scripts/build_traditional_index.py")
+    inputs.file(rootProject.file("scripts/build_traditional_index.py"))
+    inputs.files(file("src/main/assets/opencc/STCharacters.txt"), file("src/main/assets/opencc/STPhrases.txt"))
+    outputs.dir(layout.buildDirectory.dir("generated/traditionalIndex"))
+}
+android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/traditionalIndex"))
+tasks.named("preBuild").configure { dependsOn(buildTraditionalIndex) }

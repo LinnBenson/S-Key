@@ -347,6 +347,7 @@ internal object InputController {
             is QueuedKey.EnglishPair -> applyEnglishPair(key.opening, key.closing, key.moveBackUnits)
             QueuedKey.Space -> applySpace()
             QueuedKey.Enter -> applyEnter()
+            QueuedKey.SubmitAssistant -> applyAssistantSubmitImpl()
             QueuedKey.Backspace -> applyBackspace()
             QueuedKey.RepeatedBackspace -> performBackspace(false)
         }
@@ -586,6 +587,14 @@ internal object InputController {
     internal fun KeyboardSession.enterImpl() = dispatchKey(QueuedKey.Enter)
 
     internal fun KeyboardSession.applyEnterImpl() {
+        if (translation.enabled && !phraseMode) {
+            val pending = if (code.isNotEmpty()) pinyinComposition.text + code else ""
+            if (commitInputText(pending + "\n")) {
+                clearComposition()
+                renderHeader()
+            }
+            return
+        }
         if (chinese && code.isNotEmpty()) {
             val rawCode = pinyinComposition.text + code
             if (!commitInputText(rawCode)) return
@@ -593,15 +602,27 @@ internal object InputController {
             renderHeader()
             return
         }
-        if (translation.enabled) {
-            if (phraseMode) { commitInputText("\n"); return }
-            if (aiMode && translation.busy) {
-                if (aiCall == null) return // A history selection/read has no generation to stop.
-                stopAiRequest(); val token=translation.begin(); translation.complete(token,"已停止生成",true); updateAiPreview()
-            } else requestTranslation()
+        if (phraseMode) { commitInputText("\n"); return }
+        if (!sendDefaultEditorAction(true)) commit("\n")
+    }
+
+    internal fun KeyboardSession.applyAssistantSubmitImpl() {
+        if (!translation.enabled || phraseMode || !active || secret) return
+        if (aiMode && translation.busy) {
+            if (aiCall == null) return
+            stopAiRequest()
+            val token = translation.begin()
+            translation.complete(token, "已停止生成", true)
+            updateAiPreview()
             return
         }
-        if (!sendDefaultEditorAction(true)) commit("\n")
+        if (translation.busy) return
+        if (code.isNotEmpty()) {
+            if (!commitInputText(pinyinComposition.text + code)) return
+            clearComposition()
+            renderHeader()
+        }
+        requestTranslation()
     }
 
 }

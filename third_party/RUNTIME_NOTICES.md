@@ -7,7 +7,14 @@ The release resolves Kotlin stdlib 2.2.10 and JetBrains annotations 23.0.0.
 The build generates `assets/runtime-licenses/DEPENDENCIES.txt` from the resolved
 release runtime artifacts, including AndroidX, Compose, Miuix 0.5.1, OkHttp 4.12.0,
 Okio 3.6.0, coroutines and JSpecify. This avoids confusing requested versions with
-resolved versions. The local sherpa-onnx AAR is 1.13.8.
+resolved versions. The local sherpa-onnx AAR is 1.13.8. Its JNI library also includes unused
+TTS, Piper phonemize (MIT) and eSpeak NG/ucd-tools (GPL-3.0-or-later) code;
+excluding the standalone C/C++ API libraries does not remove those components.
+kaldi-native-fbank also includes KissFFT (BSD-3-Clause). See
+[the native component notice](../app/src/main/assets/voice-licenses/NATIVE_COMPONENTS_NOTICE.txt)
+for pinned source versions and the accompanying complete license texts. The
+GPL corresponding-source and redistribution requirements still apply; merely
+adding attribution does not satisfy all binary distribution requirements.
 
 Full license and copyright texts are under `app/src/main/assets/`; the application
 license page recursively displays all packaged LICENSE, NOTICE and COPYRIGHT files.

@@ -599,7 +599,7 @@ open class SettingsActivity : ComponentActivity() {
             Toggle("语音自动翻译", model.settings.voiceAutoTranslate, "在英文键盘时使用语音启用自动翻译", icon = "translate") { model.settings.voiceAutoTranslate = it }
             Nav("内置 AI 提示词", null, "ai") { openPage("builtin_ai_prompts") }
             Info("默认 AI 提供商")
-            HorizontalChoices(AiProviders.options, draft.aiProvider, enabled = model.apiReady, equalWidth = true) {
+            HorizontalChoices(AiProviders.assistantOptions, draft.aiProvider, enabled = model.apiReady, equalWidth = true) {
                 model.updateApi(model.apiDraft.copy(aiProvider = it))
             }
             Range("会话有效期", model.aiConversationHours, 0, 720, "小时") { model.updateAiConversationHours(it) }
@@ -1178,7 +1178,7 @@ open class SettingsActivity : ComponentActivity() {
         if(ai) {
             Group("AI 语音") {
                 Info("AI 语音提供商")
-                HorizontalChoices(AiProviders.options, model.apiDraft.voiceProvider, enabled = model.apiReady, equalWidth = true) {
+                HorizontalChoices(AiProviders.assistantOptions, model.apiDraft.voiceProvider, enabled = model.apiReady, equalWidth = true) {
                     model.updateApi(model.apiDraft.copy(voiceProvider = it))
                 }
                 Nav("AI 设置", "配置语音端点、密钥与模型", "settings") { openPage("api") }

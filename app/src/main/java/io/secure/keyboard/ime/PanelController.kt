@@ -329,24 +329,11 @@ internal object PanelController {
         val isClipboard = panel == "clipboard"
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(column, FrameLayout.LayoutParams(-1, -1))
-        if (isClipboard && secret) {
-            // Do not read or render saved/system clipboard contents in a password context.
-            // Explicit paste stays available and is performed by the host editor itself.
-            column.addView(label("密码输入框不显示剪贴板内容", 14f, muted).apply {
-                setPadding(dp(16), dp(24), dp(16), dp(16))
-            })
-            column.addView(button("粘贴") {
-                currentInputConnection?.performContextMenuAction(android.R.id.paste)
-            }, LinearLayout.LayoutParams(-1, dp(52)).apply {
-                setMargins(dp(4), dp(3), dp(4), dp(3))
-            })
-            return
-        }
         val loading = label("正在读取…", 14f, muted)
         column.addView(loading)
         val expectedPanel = panel
         fun current() = !destroyed && active && panel == expectedPanel &&
-            body.indexOfChild(column) >= 0 && !(isClipboard && secret)
+            body.indexOfChild(column) >= 0
         // Parsing and the shared storage lock never block the input/main thread.
         contentQueries.submit {
             val entries = readContent(emptyList<ContentStore.ClipboardItem>()) {

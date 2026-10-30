@@ -847,7 +847,7 @@ internal object KeyboardViewController {
                 "◎" -> "切换中文和英文"
                 "⌫" -> "删除"
                 "⇧" -> if (capsLocked) "大写锁定已开启" else if (shifted) "单次大写已开启" else "大写"
-                "↵" -> "回车"
+                "↵" -> if (translation.enabled && !phraseMode) "换行，长按提交" else "回车"
                 else -> text
             }
         container.isFocusable = true
@@ -951,11 +951,13 @@ internal object KeyboardViewController {
             } else if (text == "↵" && translation.enabled) {
                 long = true
                 keyFeedback()
-                val pending = if (code.isNotEmpty()) pinyinComposition.text + code else ""
-                if (commitInputText(pending + "\n")) {
-                    clearComposition()
-                    renderHeader()
-                }
+                if (phraseMode) {
+                    val pending = if (code.isNotEmpty()) pinyinComposition.text + code else ""
+                    if (commitInputText(pending + "\n")) {
+                        clearComposition()
+                        renderHeader()
+                    }
+                } else dispatchKey(QueuedKey.SubmitAssistant)
             } else if (delete) {
                 long = true
                 repeat.run()
@@ -963,38 +965,35 @@ internal object KeyboardViewController {
                 keyFeedback()
                 long = true
                 choices = alternatives.codePoints().toArray().map { String(Character.toChars(it)) }
-                // Password fields keep alternate-key input, but never magnify its text.
-                // The hidden selector uses the same key anchor for the existing slide gesture.
-                if (!secret) {
-                    val r =
-                        LinearLayout(this).apply {
-                            isBaselineAligned = false
-                            gravity = Gravity.CENTER_VERTICAL
-                            setPadding(dp(4), dp(4), dp(4), dp(4))
-                            background = shape(special)
-                        }
-                    popRow = r
-                    choices.forEachIndexed { index, s ->
-                        r.addView(
-                            PunctuationKeyLabel(this).apply {
-                                this.text = s
-                                textSize = 23f
-                                setTextColor(fg)
-                                setPadding(dp(6), dp(6), dp(6), dp(6))
-                                background = shape(if (index == 0) selectedKeyBg else keyBg)
-                                setTextColor(if (index == 0) selectedKeyText else fg)
-                            },
-                            LinearLayout.LayoutParams(dp(44), dp(44)).apply {
-                                if (index < choices.lastIndex) rightMargin = dp(4)
-                            },
-                        )
+                val r =
+                    LinearLayout(this).apply {
+                        isBaselineAligned = false
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(4), dp(4), dp(4), dp(4))
+                        background = shape(special)
                     }
-                    popup =
-                        PopupWindow(r, dp(choices.size * 44 + (choices.size - 1) * 4 + 8), dp(52), false).apply {
-                            isTouchable = false
-                            showAsDropDown(container, 0, -container.height - dp(54))
-                        }
+                popRow = r
+                choices.forEachIndexed { index, s ->
+                    r.addView(
+                        PunctuationKeyLabel(this).apply {
+                            this.text = s
+                            textSize = 23f
+                            setTextColor(fg)
+                            setPadding(dp(6), dp(6), dp(6), dp(6))
+                            background = shape(if (index == 0) selectedKeyBg else keyBg)
+                            setTextColor(if (index == 0) selectedKeyText else fg)
+                        },
+                        LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+                            if (index < choices.lastIndex) rightMargin = dp(4)
+                        },
+                    )
                 }
+                popup =
+                    PopupWindow(r, dp(choices.size * 44 + (choices.size - 1) * 4 + 8), dp(52), false).apply {
+                        isTouchable = false
+                        showAsDropDown(container, 0, -container.height - dp(54))
+                        if (secret) io.secure.keyboard.ui.SensitiveWindows.securePopup(this)
+                    }
                 choice = 0
             }
         }
@@ -1150,7 +1149,7 @@ internal object KeyboardViewController {
         container.setOnTouchListener(KeyTouchRouter(
             singleTouch = singleTouch,
             canCompleteOriginalTap = {
-                !canceled && !swipedSymbol && !spaceHoldTransferred && !(long && (delete || cursorSwiping))
+                !canceled && !swipedSymbol && !spaceHoldTransferred && !(long && (delete || cursorSwiping || text == "↵"))
             },
             completeTap = { eventTime ->
                 touchClickTime = eventTime

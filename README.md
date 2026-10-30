@@ -60,7 +60,7 @@ S Key 是一款 Android 输入法，支持本地词库、可调整的键盘布�
 
 ## 翻译与 AI 助手
 
-在键盘内翻译文字、润色、扩写或调整语气。原文可以手动输入，也可以从当前选区带入；结果支持插入当前应用。AI 助手支持流式输出、会话历史和续聊。
+在键盘内翻译文字、润色、扩写或调整语气。原文可以手动输入，也可以从当前选区带入；结果支持插入当前应用。AI 助手支持流式输出、会话历史和续聊。AI 和翻译面板中，单击回车换行，长按回车提交；AI 正在生成时，长按回车可停止生成。
 
 - **内置 AI 提示词**：可编辑通用要求、任务与语气提示词，并为支持的条目分别指定 Grok、Gemini 和 OpenAI 模型。
 - **自定义 AI**：保存自己的指令，配置模型、推理强度和会话有效期。
@@ -153,3 +153,5 @@ S Key 原创代码采用 [Apache-2.0](LICENSE)。第三方组件、字体、词�
 感谢 Miuix、Material Symbols、sherpa-onnx，以及开放词库与字体项目。词库来源见[默认词库说明](third_party/open_dictionaries/README.md)，空格键英文释义数据见 [CC-CEDICT](third_party/cc_cedict/README.md)。
 
 内置的六种按键音效来自 [Kenney Interface Sounds](https://kenney.nl/assets/interface-sounds)，采用 CC0 1.0，许可声明随应用提供。
+
+当前离线语音依赖的 JNI 库还包含未启用的 TTS、Piper phonemize 和 eSpeak NG/ucd-tools 代码，其中 eSpeak NG/ucd-tools 使用 GPL-3.0-or-later；语音特征提取依赖还包含 BSD-3-Clause 的 KissFFT。这些组件不因应用未调用而免除许可要求。完整许可、固定源码版本及再分发注意事项见[原生语音组件声明](app/src/main/assets/voice-licenses/NATIVE_COMPONENTS_NOTICE.txt)，应用内「开源声明」也可查看。

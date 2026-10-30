@@ -1,0 +1,48 @@
+Native voice components distributed with S-Key
+
+The pinned upstream sherpa-onnx 1.13.8 AAR has SHA-256:
+633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96
+https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.13.8
+
+S-Key uses streaming speech recognition only. However, the distributed
+libsherpa-onnx-jni.so also contains upstream offline TTS and Piper/eSpeak NG
+code. Not invoking TTS does not remove that code or its license obligations.
+Excluding the separate C/C++ API shared libraries does not remove it from JNI.
+The original S-Key Apache-2.0 license does not relicense these components.
+
+Components and corresponding upstream sources:
+
+* sherpa-onnx (including its TTS implementations): Apache-2.0.
+  https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8
+  License: SHERPA_ONNX_LICENSE.
+* Piper phonemize: MIT, Copyright (c) 2023 Michael Hansen.
+  https://github.com/csukuangfj/piper-phonemize/tree/f3ff95afc03640bc1399e113e83361192a2fafb4
+  License: PIPER_PHONEMIZE_LICENSE. Its bundled uni-algo license alternatives
+  and notices are reproduced in PIPER_UNI_ALGO_LICENSE.
+* eSpeak NG and its ucd-tools: GPL version 3 or (at your option) any later
+  version, with separately licensed files as specified by upstream.
+  Copyright (C) 2005 to 2014 Jonathan Duddington;
+  Copyright (C) 2015-2017 Reece H. Dunn, and other upstream contributors.
+  https://github.com/csukuangfj/espeak-ng/tree/ed530aa113046142eb5115cf2fc9157854d0ffe1
+  Full GPLv3 text: ESPEAK_NG_GPLv3_LICENSE and ESPEAK_NG_UCD_TOOLS_LICENSE.
+  Additional terms: ESPEAK_NG_BSD2_LICENSE, ESPEAK_NG_UCD_LICENSE;
+  Apache-2.0 text is supplied in SHERPA_ONNX_LICENSE.
+* kaldi-native-fbank 1.22.3: Apache-2.0.
+  https://github.com/csukuangfj/kaldi-native-fbank/tree/v1.22.3
+  License: KALDI_NATIVE_FBANK_LICENSE.
+* KissFFT, used by kaldi-native-fbank: BSD-3-Clause.
+  Copyright (c) 2003-2010 Mark Borgerding. All rights reserved.
+  https://github.com/mborgerding/kissfft/tree/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec
+  Copyright notice: KISSFFT_LICENSE; full terms: KISSFFT_BSD3_LICENSE.
+* ONNX Runtime: ONNXRUNTIME_LICENSE and ONNXRUNTIME_THIRD_PARTY_NOTICES.
+
+Version provenance is the sherpa-onnx v1.13.8 build configuration:
+cmake/espeak-ng-for-piper.cmake, cmake/piper-phonemize.cmake and
+cmake/kaldi-native-fbank.cmake; KissFFT is pinned by kaldi-native-fbank
+v1.22.3/cmake/kissfft.cmake. NATIVE_PROVENANCE_NOTICE.txt records exact license
+URLs and hashes. All components above are unmodified upstream dependencies.
+
+GPL-covered code remains subject to GPL, including applicable corresponding
+source and redistribution requirements. These notices and source links are
+not a substitute for fulfilling those requirements when distributing binaries.
+The GPL components are provided without warranty; see the full license text.

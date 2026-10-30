@@ -1,0 +1,35 @@
+PIPER_PHONEMIZE_LICENSE
+https://raw.githubusercontent.com/csukuangfj/piper-phonemize/f3ff95afc03640bc1399e113e83361192a2fafb4/LICENSE.md
+SHA-256: 13746d509d74e55ea2265fbef204bb7cdbf84a8315b0207e988326cb54387028
+
+PIPER_UNI_ALGO_LICENSE
+https://raw.githubusercontent.com/csukuangfj/piper-phonemize/f3ff95afc03640bc1399e113e83361192a2fafb4/licenses/uni-algo/LICENSE.md
+SHA-256: c55648b02873556d6ab2de14938998101fda3a0f293337542af9196435def318
+
+ESPEAK_NG_GPLv3_LICENSE
+https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING
+SHA-256: 8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903
+
+ESPEAK_NG_BSD2_LICENSE
+https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING.BSD2
+SHA-256: a8b0c1c7d7af6c0415c068be8cf373799d1a42b0707b79dc4ccfcaf593cd902d
+
+ESPEAK_NG_UCD_LICENSE
+https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING.UCD
+SHA-256: be029c50df83105a810e391778b6edcb522d6cb4b4e142332aca54437a499bf7
+
+ESPEAK_NG_UCD_TOOLS_LICENSE
+https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/src/ucd-tools/COPYING
+SHA-256: 8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903
+
+KALDI_NATIVE_FBANK_LICENSE
+https://raw.githubusercontent.com/csukuangfj/kaldi-native-fbank/v1.22.3/LICENSE
+SHA-256: cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+
+KISSFFT_LICENSE
+https://raw.githubusercontent.com/mborgerding/kissfft/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec/COPYING
+SHA-256: a2840585f8411be8e6826a31ef15ae65c950bd74a2437a73b013398a934ad0c6
+
+KISSFFT_BSD3_LICENSE
+https://raw.githubusercontent.com/mborgerding/kissfft/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec/LICENSES/BSD-3-Clause
+SHA-256: 4d6bcab46f27d6d0c878e8305d4bdcfe040d52bf6656b9771f04c9fb9902c0ed
