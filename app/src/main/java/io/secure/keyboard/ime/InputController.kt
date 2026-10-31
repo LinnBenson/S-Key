@@ -41,13 +41,12 @@ internal object InputController {
     }
 
     /** Finished/hidden/editor-invalidated ownership only; never the asynchronous loading path. */
-    internal fun KeyboardSession.releaseFinishedInputPresentationImpl() {
+    internal fun KeyboardSession.releaseFinishedInputPresentationImpl(keepQuickPaste: Boolean) {
         releaseSpaceGlossary()
         spaceGlossLabel = null
         // Native posted clicks/long presses must be revoked while their views are still in
         // the root. cancelTransient separately revokes our key timers and voice session.
-        main.removeCallbacks(quickPasteExpiry)
-        quickPasteState.clear()
+        if (!keepQuickPaste) quickPasteState.clear()
         if (headerInitialized) {
             toolbarGroup.removeAllViews()
             toolbarSignature = null

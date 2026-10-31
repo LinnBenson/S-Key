@@ -268,33 +268,10 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         if (settings.traditionalOutput && !secret) traditionalConverter.convert(value) else value
 
     internal val quickPasteState = QuickPasteState()
-    internal val quickPasteExpiry = object : Runnable {
-        override fun run() {
-            if (quickPasteState.expireIfNeeded()) {
-                if (active && headerInitialized) renderHeader()
-            } else if (active && quickPasteState.text != null) {
-                main.postDelayed(this, quickPasteState.remainingMillis)
-            }
-        }
-    }
-
     internal fun dismissQuickPasteOnInput() {
         if (quickPasteState.text == null) return
         quickPasteState.clear()
         renderHeader()
-    }
-
-    private fun prepareQuickPaste() {
-        main.removeCallbacks(quickPasteExpiry)
-        if (secret || !settings.quickPaste) { quickPasteState.clear(); return }
-        val clip = try { clips.primaryClip } catch (_: SecurityException) { null }
-        val token = clip?.description?.timestamp ?: 0L
-        val text = if (!secret && settings.quickPaste && clip != null)
-            io.secure.keyboard.data.ClipboardCapturePolicy.textForHistory(clip) else null
-        quickPasteState.open(token, text, settings.quickPasteConsumedToken) {
-            settings.quickPasteConsumedToken = it
-        }
-        if (quickPasteState.text != null) main.postDelayed(quickPasteExpiry, quickPasteState.remainingMillis)
     }
 
     internal var toolbarSignature: Pair<String, List<String>>? = null
@@ -469,7 +446,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var landscape = false
     internal lateinit var clips: ClipboardManager
     internal val clipListener =
-        ClipboardManager.OnPrimaryClipChangedListener { captureClipboard(true) }
+        ClipboardManager.OnPrimaryClipChangedListener { captureClipboard(newCopyEvent = true) }
     internal val associationEnabled: Boolean
         get() = if (chinese) settings.chineseAssociation else settings.englishAssociation
     internal val tools =
@@ -553,17 +530,21 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         val restoreKeysAfterPanel = active && (candidatesExpanded || panel != "keys" ||
             (::body.isInitialized && body.childCount == 0) || translation.enabled)
         val retainedSpaceLabel = spaceGlossLabel.takeIf { active && !restoreKeysAfterPanel }
+        val entry = editorEntry(attribute)
+        val allowLearning = EditorEntryPolicy.allowsPersonalizedLearning(attribute?.imeOptions ?: 0)
+        // A cut can restart the same editor after its clipboard callback has already arrived.
+        val keepPaste = restarting && active && !secret && personalizedLearning &&
+            attribute != null && !entry.secret && allowLearning && settings.quickPaste && quickPasteState.text != null
         voiceEditorGeneration++
-        releaseFinishedInputPresentation()
+        releaseFinishedInputPresentation(keepQuickPaste = keepPaste)
         clearPending()
         // An editor restart must not carry a held key, popup, or voice preview into its new target.
         cancelTransient()
         panel = "keys"
-        val entry = editorEntry(attribute)
         glossarySelectionStart = attribute?.initialSelStart ?: -1
         glossarySelectionEnd = attribute?.initialSelEnd ?: -1
         secret = entry.secret
-        personalizedLearning = EditorEntryPolicy.allowsPersonalizedLearning(attribute?.imeOptions ?: 0)
+        personalizedLearning = allowLearning
         // Only an opening/new editor applies the field default. A live restart preserves any
         // manual language or symbol-page change made after the keyboard became visible.
         if (!restarting || !active) applyEditorEntry(entry)
@@ -572,7 +553,9 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         if (restoreKeysAfterPanel && ::body.isInitialized) {
             renderHeader()
             renderBody()
-        } else if (retainedSpaceLabel != null) {
+        } else {
+            if (keepPaste) renderHeader()
+            if (retainedSpaceLabel == null) return
             // A live editor restart may retain the ordinary key views without onStartInputView.
             spaceGlossLabel = retainedSpaceLabel
             updateSpaceGlossLabel()
@@ -587,7 +570,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         personalizedLearning = EditorEntryPolicy.allowsPersonalizedLearning(info?.imeOptions ?: 0)
         if (!restarting || !active) applyEditorEntry(entry)
         quickEditSelection.reset()
-        if (!active) prepareQuickPaste()
+        val opening = !active
         active = true
         imagePermissionDraft?.let { saved ->
             imagePermissionDraft = null
@@ -605,7 +588,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
         // Mode/privacy state is final before constructing or attaching the first visible root.
         createView()
         setInputView(root)
-        captureClipboard()
+        captureClipboard(opening = opening)
         refreshCandidates()
     }
 
@@ -799,7 +782,8 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
 
     fun clearComposition() = with(InputController) { clearCompositionImpl() }
 
-    fun releaseFinishedInputPresentation() = with(InputController) { releaseFinishedInputPresentationImpl() }
+    fun releaseFinishedInputPresentation(keepQuickPaste: Boolean = false) =
+        with(InputController) { releaseFinishedInputPresentationImpl(keepQuickPaste) }
 
     fun clearCandidates() = with(CandidateController) { clearCandidatesImpl() }
 
@@ -987,7 +971,8 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
 
     fun arrow(key: Int) = with(PanelController) { arrowImpl(key) }
 
-    fun captureClipboard(newCopyEvent: Boolean = false) = with(PanelController) { captureClipboardImpl(newCopyEvent) }
+    fun captureClipboard(newCopyEvent: Boolean = false, opening: Boolean = false) =
+        with(PanelController) { captureClipboardImpl(newCopyEvent, opening) }
 
     internal var contentErrorShown = false
 

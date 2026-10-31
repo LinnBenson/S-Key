@@ -287,18 +287,23 @@ internal object PanelController {
         sendDownUpKeyEvents(key)
     }
 
-    internal fun KeyboardSession.captureClipboardImpl(newCopyEvent: Boolean = false) {
-        if (!clipsInitialized || destroyed || (!active && !newCopyEvent) || secret || !personalizedLearning) return
-        // With background capture disabled, only a copy made while the input view
-        // is visible is eligible. Reopening must not import the hidden-period clip.
-        if (!settings.backgroundClipboard && (!active || !newCopyEvent)) return
-        if (!newCopyEvent && !worker.isShutdown) clipboardWrites.submit(0) {
+    internal fun KeyboardSession.captureClipboardImpl(newCopyEvent: Boolean, opening: Boolean) {
+        if (!clipsInitialized || destroyed || secret || !personalizedLearning) return
+        val preview = active && settings.quickPaste && (opening || newCopyEvent)
+        val history = (active || newCopyEvent) && (settings.backgroundClipboard || (active && newCopyEvent))
+        if (!preview && !history) return
+        if (history && !newCopyEvent && !worker.isShutdown) clipboardWrites.submit(0) {
             try { content.trimClipboard() } catch (_: Exception) { reportContentError() }
         }
         try {
-            val clip = clips.primaryClip ?: return
-            val text = ClipboardCapturePolicy.textForHistory(clip) ?: return
-            val timestamp = clip.description.timestamp
+            val clip = clips.primaryClip
+            val text = clip?.let(ClipboardCapturePolicy::textForHistory)
+            val timestamp = clip?.description?.timestamp ?: 0L
+            if (preview) {
+                quickPasteState.offer(timestamp, text, settings.quickPasteConsumedToken, opening, settings.quickPasteSeconds)
+                renderHeader()
+            }
+            if (!history || text == null) return
             val epoch = content.clipboardGeneration()
             if (worker.isShutdown) return
             clipboardWrites.submit(text.length) {
@@ -310,7 +315,7 @@ internal object PanelController {
                 }
             }
         } catch (_: SecurityException) {
-            /* Android blocks clipboard while this IME is not eligible. */
+            if (preview) dismissQuickPasteOnInput()
         } catch (_: Exception) {
             reportContentError()
         }

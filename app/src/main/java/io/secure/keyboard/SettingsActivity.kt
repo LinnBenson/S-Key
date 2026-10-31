@@ -740,6 +740,8 @@ open class SettingsActivity : ComponentActivity() {
         }
         Group("剪贴板设置") {
             Toggle("快捷粘贴", s.quickPaste) { s.quickPaste = it }
+            val seconds = SettingsStore.quickPasteSecondsRange
+            Range("快捷复制持续时间", s.quickPasteSeconds, seconds.first, seconds.last, "秒") { s.quickPasteSeconds = it }
         }
     }
     @Composable private fun KeySoundSettings() {

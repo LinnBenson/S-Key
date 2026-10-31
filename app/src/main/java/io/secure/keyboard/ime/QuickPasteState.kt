@@ -1,40 +1,22 @@
 package io.secure.keyboard.ime
 
-/** Only actual keyboard openings offer clips; clipboard callbacks never do. */
 internal class QuickPasteState(private val now: () -> Long = System::currentTimeMillis) {
-    companion object {
-        const val MAX_AGE_MS = 5 * 60 * 1000L
-    }
     var text: String? = null
         private set
-    private var copiedAt = 0L
+    var token = 0L
+        private set
     var revision = 0L
         private set
 
-    fun open(token: Long, value: String?, consumed: Long, consume: (Long) -> Unit) {
-        clear()
-        if (token <= 0 || token == consumed) return
-        consume(token)
-        // The clipboard timestamp and this clock both use wall-clock milliseconds.
-        val currentTime = now()
-        if (token > currentTime || currentTime - token > MAX_AGE_MS) return
-        copiedAt = token
-        text = value
+    fun offer(timestamp: Long, value: String?, consumed: Long, opening: Boolean, durationSeconds: Int) {
+        // Duplicate change notifications must not reopen a dismissed preview or expire a visible one.
+        if (!opening && timestamp == token && value != null) return
+        token = timestamp
+        text = value?.takeIf { timestamp > 0 && timestamp != consumed && now() - timestamp in 0L until durationSeconds * 1000L }
+        revision++
     }
-
-    fun expireIfNeeded(): Boolean {
-        if (text == null) return false
-        val current = now()
-        if (current >= copiedAt && current - copiedAt <= MAX_AGE_MS) return false
-        clear()
-        return true
-    }
-
-    val remainingMillis: Long
-        get() = if (text == null) 0L else (MAX_AGE_MS - (now() - copiedAt)).coerceIn(0L, MAX_AGE_MS) + 1L
 
     fun clear() {
-        copiedAt = 0L
         text = null
         revision++
     }

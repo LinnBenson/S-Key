@@ -34,6 +34,10 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean("quickPaste", true)
         set(value) { prefs.edit().putBoolean("quickPaste", value).apply() }
 
+    var quickPasteSeconds: Int
+        get() = prefs.getInt("quickPasteSeconds", 30).coerceIn(quickPasteSecondsRange)
+        set(value) { prefs.edit().putInt("quickPasteSeconds", value.coerceIn(quickPasteSecondsRange)).apply() }
+
     var quickPasteConsumedToken: Long
         get() = prefs.getLong("quickPasteConsumedToken", 0L)
         set(value) { prefs.edit().putLong("quickPasteConsumedToken", value).apply() }
@@ -464,6 +468,7 @@ class SettingsStore(context: Context) {
         "profile_${if (outer) "outer" else "inner"}_${if (landscape) "landscape" else "portrait"}"
 
     companion object {
+        val quickPasteSecondsRange = 5..120
         internal const val DEFAULT_CHINESE_LANGUAGE = true
         internal const val DEFAULT_VIBRATION_STRENGTH = 10
         internal const val DEFAULT_SYMBOL_HINTS = "digits"

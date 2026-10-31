@@ -310,7 +310,12 @@ internal object KeyboardViewController {
         header.addView(hideIcon, LinearLayout.LayoutParams(dp(44), -1))
     }
 
-    internal fun KeyboardSession.showsCandidateModeImpl() = !secret && panel == "keys" &&
+    private val KeyboardSession.visibleQuickPaste: String?
+        get() = quickPasteState.text?.takeIf {
+            active && !secret && personalizedLearning && settings.quickPaste && panel == "keys" && !translation.enabled
+        }
+
+    internal fun KeyboardSession.showsCandidateModeImpl() = visibleQuickPaste == null && !secret && panel == "keys" &&
         ((chinese && (code.isNotEmpty() || candidateTexts.isNotEmpty() || pinyinPredictionGeneration == generation)) || (!chinese && candidateTexts.isNotEmpty()))
 
     internal fun KeyboardSession.renderHeaderImpl() {
@@ -319,8 +324,9 @@ internal object KeyboardViewController {
         if (phraseMode) with(PhraseEditorController) { updatePhraseActions() }
         val visibleCode = if (secret) "" else pinyinComposition.text + code
         if (preedit.text.toString() != visibleCode) preedit.text = visibleCode
-        val showCode = !secret && chinese && !settings.editorPreview && code.isNotEmpty()
-        val reserveCode = !secret && chinese && !settings.editorPreview &&
+        val paste = visibleQuickPaste
+        val showCode = paste == null && !secret && chinese && !settings.editorPreview && code.isNotEmpty()
+        val reserveCode = paste == null && !secret && chinese && !settings.editorPreview &&
             (showCode || candidateTexts.isNotEmpty() || pinyinPredictionGeneration == generation)
         val codeVisibility = if (showCode) View.VISIBLE else if (reserveCode) View.INVISIBLE else View.GONE
         if (preedit.visibility != codeVisibility) preedit.visibility = codeVisibility
@@ -344,13 +350,9 @@ internal object KeyboardViewController {
             candidatesExpanded -> "收起候选"
             else -> "展开候选"
         }
-        quickPasteState.expireIfNeeded()
-        val paste = quickPasteState.text?.takeIf {
-            active && !secret && settings.quickPaste && panel == "keys" && !translation.enabled
-        }
         val pasteRevision = quickPasteState.revision
         val signature = "$panel:${translation.enabled}:$aiMode:${settings.traditionalOutput}:${settings.chineseInputMode.id}:$chinese:$associationEnabled:${paste != null}:$pasteRevision" to settings.toolbarPins.toList()
-        if (!hasCandidates && toolbarSignature != signature) {
+        if (toolbarSignature != signature) {
             toolbarGroup.removeAllViews()
             toolbarGroup.addView(
                 icon(
@@ -383,13 +385,15 @@ internal object KeyboardViewController {
                 LinearLayout.LayoutParams(dp(44), -1),
             )
             if (paste != null) {
-                val preview = button(paste.replace(Regex("[\\r\\n\\t\\u2028\\u2029]+"), " ")) {
-                    if (quickPasteState.expireIfNeeded()) { renderHeader(); return@button }
-                    if (active && !secret && settings.quickPaste && panel == "keys" &&
+                val preview = button(paste.take(160).replace(Regex("[\\r\\n\\t\\u2028\\u2029]+"), " ")) {
+                    if (active && !secret && personalizedLearning && settings.quickPaste && panel == "keys" &&
                         !translation.enabled && quickPasteState.revision == pasteRevision) {
-                        commitInputText(paste)
-                        quickPasteState.clear()
-                        renderHeader()
+                        val token = quickPasteState.token
+                        if (commitInputText(paste)) {
+                            settings.quickPasteConsumedToken = token
+                            clearPending()
+                            renderHeader()
+                        }
                     }
                 }.apply {
                     background = null
@@ -428,8 +432,8 @@ internal object KeyboardViewController {
             toolbarSignature = signature
         }
         if (headerShowsCandidates != hasCandidates) {
-            candidateGroup.visibility = if (hasCandidates) View.VISIBLE else View.GONE
             toolbarGroup.visibility = if (hasCandidates) View.GONE else View.VISIBLE
+            candidateGroup.visibility = if (hasCandidates) View.VISIBLE else View.GONE
             val toolbarInset = if (hasCandidates) 0 else dp(8)
             header.setPadding(toolbarInset, 0, toolbarInset, 0)
             hideIcon.layoutParams = LinearLayout.LayoutParams(dp(44), -1)

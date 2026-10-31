@@ -60,6 +60,7 @@ internal class SettingsBackup(private val context: Context) {
                     key == "clipboardLimit" -> integer(value, 1..300)
                     key == "longPressDelay" -> integer(value, 150..1500)
                     key == "keySoundVolume" -> integer(value, 0..100)
+                    key == "quickPasteSeconds" -> integer(value, SettingsStore.quickPasteSecondsRange)
                     key == "vibrationStrength" -> integer(value, 1..100)
                     else -> {
                         require(value is String && value.length <= 100_000)
@@ -180,7 +181,7 @@ internal class SettingsBackup(private val context: Context) {
             "englishAssociation", "englishSpaceSelectsFirst", "fourCodeAutoCommit", "quickPaste", "screenshotProtection",
             "traditionalOutput", "vibration", "voiceAutoTranslate", "wubiPinyinInput")
         private val translationLanguages = setOf("zh-CN", "zh-TW", "en", "ja", "ko", "fr", "de", "es", "ru", "pt", "ar", "th", "vi", "id")
-        private val preferenceKeys = booleanPreferences + setOf("translationSource", "translationTarget", "fuzzyPairs", "chineseInputMode", "keySoundType", "keySoundVolume", "vibrationStrength", "voiceMode")
+        private val preferenceKeys = booleanPreferences + setOf("translationSource", "translationTarget", "fuzzyPairs", "chineseInputMode", "keySoundType", "keySoundVolume", "vibrationStrength", "voiceMode", "quickPasteSeconds")
         private fun preferenceValues(s: SettingsStore): Map<String, Any> = linkedMapOf(
             "translationSource" to s.translationSource, "translationTarget" to s.translationTarget,
             "fuzzyPinyin" to s.fuzzyPinyin, "fuzzyPairs" to JSONArray(s.fuzzyPairs.sorted()),
@@ -190,6 +191,7 @@ internal class SettingsBackup(private val context: Context) {
             "editorPreview" to s.editorPreview, "englishAssociation" to s.englishAssociation,
             "englishSpaceSelectsFirst" to s.englishSpaceSelectsFirst, "fourCodeAutoCommit" to s.fourCodeAutoCommit,
             "keySoundType" to s.keySound, "keySoundVolume" to s.keySoundVolume, "quickPaste" to s.quickPaste,
+            "quickPasteSeconds" to s.quickPasteSeconds,
             "screenshotProtection" to s.screenshotProtection, "traditionalOutput" to s.traditionalOutput,
             "vibration" to s.vibration, "vibrationStrength" to s.vibrationStrength,
             "voiceAutoTranslate" to s.voiceAutoTranslate, "voiceMode" to s.voiceMode, "wubiPinyinInput" to s.wubiPinyinInput)
