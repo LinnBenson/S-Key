@@ -794,7 +794,7 @@ class ContentStore(context: Context) {
         val settingsBackup = SettingsBackup(app)
         val previous = settingsBackup.snapshot()
         val apiStore = ApiConfigurationStore(app)
-        val previousApi = if (plan.api != null) apiStore.load() else null
+        val previousApi = if (plan.api != null) apiStore.encryptedSnapshot() else null
         BACKUP_KEYS.forEach { root.put(it, plan.clean.getJSONArray(it)) }
         // Validation precedes every mutation; roll back both stores on an I/O failure.
         try {
@@ -806,7 +806,7 @@ class ContentStore(context: Context) {
             listOf<() -> Unit>(
                 { write(old) },
                 { if (plan.configuration != null) settingsBackup.apply(previous) },
-                { previousApi?.let(apiStore::saveDraft); Unit },
+                { if (plan.api != null) apiStore.storeEncrypted(previousApi) },
             ).forEach { rollback -> runCatching(rollback).exceptionOrNull()?.let(failure::addSuppressed) }
             throw failure
         }

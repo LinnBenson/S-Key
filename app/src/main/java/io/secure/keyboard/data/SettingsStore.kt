@@ -305,6 +305,10 @@ class SettingsStore(context: Context) {
                 .apply()
         }
 
+    var panelEnterSends: Boolean
+        get() = prefs.getBoolean("panelEnterSends", true)
+        set(value) { prefs.edit().putBoolean("panelEnterSends", value).apply() }
+
     var swipeUpSymbols: Boolean
         get() = prefs.getBoolean("swipeUpSymbols", false)
         set(value) { prefs.edit().putBoolean("swipeUpSymbols", value).apply() }

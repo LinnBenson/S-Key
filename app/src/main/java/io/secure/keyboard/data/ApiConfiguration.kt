@@ -14,6 +14,7 @@ internal object AiProviders {
     val options = listOf("grok" to "Grok", "gemini" to "Gemini", "openai" to "OpenAI")
     val assistantOptions = options.map { (id, label) -> id to if (id == "openai") "ChatGPT" else label }
     val customOptions = listOf("default" to "跟随默认") + assistantOptions
+    fun assistantLabel(value: String) = assistantOptions.firstOrNull { it.first == value }?.second ?: "未知提供商"
     fun valid(value: String) = options.any { it.first == value }
     fun label(value: String) = options.firstOrNull { it.first == value }?.second ?: "未知提供商"
 }
@@ -89,8 +90,12 @@ internal class ApiConfigurationStore(context: Context) {
     private val app = context.applicationContext
     private val prefs = context.getSharedPreferences("api_configuration", Context.MODE_PRIVATE)
     private fun key(): SecretKey = StorageKeys.get("skey_api_config")
+    fun encryptedSnapshot(): String? = prefs.getString("encrypted", null)
+    fun storeEncrypted(value: String?) {
+        check(prefs.edit().putString("encrypted", value).commit()) { "配置保存失败" }
+    }
     fun load(): ApiConfiguration {
-        val stored = prefs.getString("encrypted", null) ?: return ApiConfiguration()
+        val stored = encryptedSnapshot() ?: return ApiConfiguration()
         val parts = stored.split(':')
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)))
@@ -112,7 +117,7 @@ internal class ApiConfigurationStore(context: Context) {
             Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" +
                 Base64.encodeToString(cipher.doFinal(plain), Base64.NO_WRAP)
         } finally { plain.fill(0) }
-        check(prefs.edit().putString("encrypted", encoded).commit()) { "配置保存失败" }
+        storeEncrypted(encoded)
     }
     fun clear() { AiConversationStore(app).clear(); check(prefs.edit().clear().commit()) { "清除失败" } }
 }

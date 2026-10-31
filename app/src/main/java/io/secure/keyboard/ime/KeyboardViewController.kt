@@ -847,7 +847,11 @@ internal object KeyboardViewController {
                 "◎" -> "切换中文和英文"
                 "⌫" -> "删除"
                 "⇧" -> if (capsLocked) "大写锁定已开启" else if (shifted) "单次大写已开启" else "大写"
-                "↵" -> if (translation.enabled && !phraseMode) "换行，长按提交" else "回车"
+                "↵" -> when {
+                    !translation.enabled || phraseMode -> "回车"
+                    settings.panelEnterSends -> "发送，长按换行"
+                    else -> "换行，长按发送"
+                }
                 else -> text
             }
         container.isFocusable = true
@@ -957,7 +961,7 @@ internal object KeyboardViewController {
                         clearComposition()
                         renderHeader()
                     }
-                } else dispatchKey(QueuedKey.SubmitAssistant)
+                } else enter(longPress = true)
             } else if (delete) {
                 long = true
                 repeat.run()

@@ -855,7 +855,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
 
     fun applySpace() = with(InputController) { applySpaceImpl() }
 
-    fun enter() = with(InputController) { enterImpl() }
+    fun enter(longPress: Boolean = false) = with(InputController) { enterImpl(longPress) }
 
     fun applyEnter() = with(InputController) { applyEnterImpl() }
 

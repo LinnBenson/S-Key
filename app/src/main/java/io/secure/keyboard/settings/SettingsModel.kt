@@ -25,21 +25,44 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
         }
     }
     private var apiLoaded by mutableStateOf(false)
-    val apiCanClear: Boolean get() = visible && page in setOf("api", "voice") && !busy
-    val apiReady: Boolean get() = apiLoaded && apiCanClear
+    private var apiLoadFailed by mutableStateOf(false)
+    val apiStatusText: String? get() = when {
+        apiLoadFailed -> "读取失败"
+        !apiLoaded -> "正在读取…"
+        else -> null
+    }
+    val apiReady: Boolean get() = apiLoaded && visible && page in apiPages && !busy
     fun updateApi(value: ApiConfiguration) {
         if (!apiReady) return
         apiDraft = value
         apiWriter.offer(value)
     }
-    fun clearApi() {
-        if (!apiCanClear) return
-        apiLoaded = true
-        apiDraft = ApiConfiguration()
-        apiModels = emptyList()
-        apiWriter.clear()
+    fun resetApi(provider: String) {
+        if (!apiReady) return
+        val defaults = ApiConfiguration()
+        val reset = when (provider) {
+            "google" -> apiDraft.copy(
+                googleUrl = defaults.googleUrl, googleKey = defaults.googleKey, googleModel = defaults.googleModel,
+                geminiUrl = defaults.geminiUrl, geminiKey = defaults.geminiKey, geminiModel = defaults.geminiModel,
+                geminiVoiceUrl = defaults.geminiVoiceUrl, geminiVoiceKey = defaults.geminiVoiceKey,
+                geminiVoiceModel = defaults.geminiVoiceModel,
+            )
+            "grok" -> apiDraft.copy(
+                grokUrl = defaults.grokUrl, grokKey = defaults.grokKey, grokModel = defaults.grokModel,
+                voiceUrl = defaults.voiceUrl, voiceKey = defaults.voiceKey, voiceModel = defaults.voiceModel,
+            )
+            "openai" -> apiDraft.copy(
+                openaiUrl = defaults.openaiUrl, openaiKey = defaults.openaiKey, openaiModel = defaults.openaiModel,
+                openaiVoiceUrl = defaults.openaiVoiceUrl, openaiVoiceKey = defaults.openaiVoiceKey,
+                openaiVoiceModel = defaults.openaiVoiceModel,
+            )
+            else -> return
+        }
+        updateApi(reset)
+        if (apiModelsProvider == (if (provider == "google") "gemini" else provider)) apiModels = emptyList()
     }
     companion object {
+        private val apiPages = setOf("api", "voice", "ai_provider", "voice_provider")
         // Shared ordering also covers Activity destruction/reopening. Idle threads expire.
         private val apiExecutor = java.util.concurrent.ThreadPoolExecutor(
             0, 1, 30L, java.util.concurrent.TimeUnit.SECONDS,
@@ -116,6 +139,7 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
         loadRevision++; loading = false
         loadJob?.cancel(); loadJob = null
         apiLoaded = false
+        apiLoadFailed = false
         apiDraft = ApiConfiguration(); apiModels = emptyList()
         clipboard = emptyList(); phrases = emptyList(); chinese = emptyList()
         english = emptyList(); emoji = emptyList(); aiPresets = emptyList()
@@ -138,12 +162,16 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
         loading = true
         val ticket = generation
         val route = page
+        if (route in apiPages) {
+            apiLoaded = false
+            apiLoadFailed = false
+        }
         loadJob = viewModelScope.launch {
             try {
                 // Only the displayed category is retained; unrelated pages do not read content.
                 val value: Any? = withContext(Dispatchers.IO) {
                     when (route) {
-                        "api", "voice" -> apiExecutor.submit<ApiConfiguration> { apiStore.load() }.get()
+                        in apiPages -> apiExecutor.submit<ApiConfiguration> { apiStore.load() }.get()
                         "clipboard" -> content.clipboardForDisplay()
                         "phrases" -> content.phrasesForDisplay()
                         "dictionary" -> content.dictionary(DictionaryKind.CHINESE)
@@ -156,7 +184,7 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
                 if (!visible || ticket != generation || route != page) return@launch
                 @Suppress("UNCHECKED_CAST")
                 when (route) {
-                    "api", "voice" -> { apiDraft = value as ApiConfiguration; aiConversationHours = settings.aiConversationHours; apiLoaded = true }
+                    in apiPages -> { apiDraft = value as ApiConfiguration; aiConversationHours = settings.aiConversationHours; apiLoaded = true }
                     "clipboard" -> clipboard = value as List<ContentStore.ClipboardItem>
                     "phrases" -> phrases = value as List<ContentStore.Phrase>
                     "dictionary" -> chinese = value as List<ContentStore.DictionaryEntry>
@@ -165,7 +193,12 @@ internal class SettingsModel(app: Application) : AndroidViewModel(app) {
                     "custom_ai" -> aiPresets = value as List<ContentStore.AiPreset>
                 }
             } catch (e: CancellationException) { throw e }
-            catch (_: Exception) { if (visible && ticket == generation) message = "读取失败，请重试" }
+            catch (_: Exception) {
+                if (visible && ticket == generation && loadTicket == loadRevision) {
+                    if (route in apiPages) apiLoadFailed = true
+                    message = "读取失败，请重试"
+                }
+            }
             finally { if (loadTicket == loadRevision) loading = false }
         }
     }

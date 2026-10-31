@@ -222,6 +222,8 @@ open class SettingsActivity : ComponentActivity() {
                 route.startsWith("profile_") -> "layout"
                 route.startsWith("theme_") -> "behavior"
                 route == "custom_ai" -> "api"
+                route == "ai_provider" -> "api"
+                route == "voice_provider" -> "voice"
                 route == "symbol_keyboard" -> "layout"
                 route == "feedback" || route == "key_sound" -> "keyboard"
                 route == "home" && initialPage == "dashboard" -> "dashboard"
@@ -317,6 +319,12 @@ open class SettingsActivity : ComponentActivity() {
                                 "input_english" -> EnglishSettings()
                                 "input_fuzzy" -> FuzzySettings()
                                 "keyboard", "feedback" -> KeyboardSettings()
+                                "ai_provider" -> ProviderChoices("默认 AI 提供商", model.apiDraft.aiProvider) {
+                                    model.updateApi(model.apiDraft.copy(aiProvider = it))
+                                }
+                                "voice_provider" -> ProviderChoices("AI 语音提供商", model.apiDraft.voiceProvider) {
+                                    model.updateApi(model.apiDraft.copy(voiceProvider = it))
+                                }
                                 "key_sound" -> KeySoundSettings()
                                 "behavior" -> Appearance()
                                 "layout" -> Layouts()
@@ -598,10 +606,7 @@ open class SettingsActivity : ComponentActivity() {
             Toggle("AI 生成后自动上屏", model.settings.aiAutoApply, "结果生成完成后自动上屏", icon = "enter") { model.settings.aiAutoApply = it }
             Toggle("语音自动翻译", model.settings.voiceAutoTranslate, "在英文键盘时使用语音启用自动翻译", icon = "translate") { model.settings.voiceAutoTranslate = it }
             Nav("内置 AI 提示词", null, "ai") { openPage("builtin_ai_prompts") }
-            Info("默认 AI 提供商")
-            HorizontalChoices(AiProviders.assistantOptions, draft.aiProvider, enabled = model.apiReady, equalWidth = true) {
-                model.updateApi(model.apiDraft.copy(aiProvider = it))
-            }
+            Nav("默认 AI 提供商", model.apiStatusText ?: AiProviders.assistantLabel(model.apiDraft.aiProvider), "ai") { openPage("ai_provider") }
             Range("会话有效期", model.aiConversationHours, 0, 720, "小时") { model.updateAiConversationHours(it) }
         }
         Column(Modifier.fillMaxWidth()) {
@@ -666,7 +671,8 @@ open class SettingsActivity : ComponentActivity() {
             }
         }
         Group("其它设置") {
-            Action("清除 API 配置", model.apiCanClear) { model.clearApi() }
+            val label = if (apiProvider == "google") "Google" else AiProviders.label(apiProvider)
+            Action("重置 ${label} 配置", model.apiReady) { model.resetApi(apiProvider) }
         }
     }
 
@@ -725,6 +731,7 @@ open class SettingsActivity : ComponentActivity() {
             Info("将震动强度设为 10% 将尝试使用系统震动")
         }
         Group("手势与长按") {
+            Toggle("面板回车发送", s.panelEnterSends, "开启时翻译与 AI 助手回车将响应发送，长按为换行。") { s.panelEnterSends = it }
             Toggle("上滑输入符号", model.settings.swipeUpSymbols, "多个符号时只输入第一个") { model.settings.swipeUpSymbols = it }
             Toggle("长按输入符号", s.longPressSymbols) { s.longPressSymbols = it }
             Range("长按延迟", s.longPressDelay, 150, 1500, "ms", 10) { s.longPressDelay = it }
@@ -1177,10 +1184,7 @@ open class SettingsActivity : ComponentActivity() {
         }
         if(ai) {
             Group("AI 语音") {
-                Info("AI 语音提供商")
-                HorizontalChoices(AiProviders.assistantOptions, model.apiDraft.voiceProvider, enabled = model.apiReady, equalWidth = true) {
-                    model.updateApi(model.apiDraft.copy(voiceProvider = it))
-                }
+                Nav("AI 语音提供商", model.apiStatusText ?: AiProviders.assistantLabel(model.apiDraft.voiceProvider), "ai") { openPage("voice_provider") }
                 Nav("AI 设置", "配置语音端点、密钥与模型", "settings") { openPage("api") }
                 Action("允许麦克风权限", !microphone) { micPicker.launch(Manifest.permission.RECORD_AUDIO) }
             }
@@ -1273,6 +1277,14 @@ open class SettingsActivity : ComponentActivity() {
             onClick = { change(!checked) },
             rightActions = { Switch(checked = checked, onCheckedChange = change) })
     }
+    @Composable private fun ProviderChoices(title: String, selected: String, select: (String) -> Unit) {
+        Group(title) {
+            model.apiStatusText?.let { Info(it); return@Group }
+            AiProviders.assistantOptions.forEach { (id, label) ->
+                Choice(label, id == selected, enabled = model.apiReady) { select(id) }
+            }
+        }
+    }
     @Composable private fun Choice(title: String, checked: Boolean, enabled: Boolean = true, action: () -> Unit) {
         BasicComponent(title = title, enabled = enabled, onClick = { if (enabled) action() }, rightActions = { if (checked) UiIcon("check", "已选择") })
     }
@@ -1363,6 +1375,8 @@ open class SettingsActivity : ComponentActivity() {
         "input_english" -> "英文设置"
         "input_fuzzy" -> "模糊拼音"
         "keyboard", "feedback" -> "键盘操作"
+        "ai_provider" -> "默认 AI 提供商"
+        "voice_provider" -> "AI 语音提供商"
         "key_sound" -> "按键声音"
         "behavior" -> "主题与外观"
         "theme_light" -> "浅色配色"

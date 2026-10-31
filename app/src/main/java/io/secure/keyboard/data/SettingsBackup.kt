@@ -18,7 +18,7 @@ internal class SettingsBackup(private val context: Context) {
         "toolbar" to ("settings" to setOf("toolbarPins", "toolOrder")),
         "symbols" to ("symbol_closure" to setOf("rules")),
         "symbolKeyboard" to ("settings" to setOf("symbol_keyboard_zh_1", "symbol_keyboard_zh_2", "symbol_keyboard_en_1", "symbol_keyboard_en_2")),
-        "longPress" to ("settings" to (setOf("longPressSymbols", "longPressDelay", "swipeUpSymbols") + listOf("zh", "en").flatMap { lang -> ('a'..'z').map { "letter_symbols_${lang}_$it" } })),
+        "longPress" to ("settings" to (setOf("longPressSymbols", "longPressDelay", "panelEnterSends", "swipeUpSymbols") + listOf("zh", "en").flatMap { lang -> ('a'..'z').map { "letter_symbols_${lang}_$it" } })),
         "prompts" to ("ai_builtin_prompts" to AiPromptStore.prompts.flatMap { if (it.id in setOf("common", "custom_common")) listOf(it.id) else listOf(it.id, "model_${it.id}", "model_openai_${it.id}", "model_gemini_${it.id}") }.toSet()),
     )
     fun snapshot(): JSONObject = JSONObject().also { root ->
@@ -31,6 +31,7 @@ internal class SettingsBackup(private val context: Context) {
                 val all = context.getSharedPreferences(spec.first, 0).all
                 spec.second.forEach { key -> all[key]?.let { values.put(key, it) } }
             }
+            if (group == "longPress") values.put("panelEnterSends", SettingsStore(context).panelEnterSends)
             root.put(group, values)
         }
     }
@@ -49,7 +50,7 @@ internal class SettingsBackup(private val context: Context) {
                         val pairs = (0 until value.length()).map { value.get(it) }
                         require(pairs.all { it is String && it in SettingsStore.fuzzyPairIds } && pairs.distinct().size == pairs.size)
                     }
-                    key in booleanPreferences || key in setOf("manualDark", "longPressSymbols", "swipeUpSymbols", "backgroundClipboard", "includeNavigationBar") -> require(value is Boolean)
+                    key in booleanPreferences || key in setOf("manualDark", "longPressSymbols", "panelEnterSends", "swipeUpSymbols", "backgroundClipboard", "includeNavigationBar") -> require(value is Boolean)
                     key in setOf("candidateTextSize", "expandedCandidateTextSize") -> integer(value, 12..32)
                     key == "keyDesign_border" -> integer(value, 0..4)
                     key in setOf("keyDesign_horizontal", "keyDesign_vertical") -> integer(value, 0..16)
@@ -140,7 +141,7 @@ internal class SettingsBackup(private val context: Context) {
             val spec = groups.getValue(group)
             val before = current.getJSONObject(group); val after = next.getJSONObject(group)
             val count = spec.second.count { key ->
-                (group != "preferences" || after.has(key)) && if (key == "fuzzyPairs") {
+                (!preserveWhenMissing(group, key) || after.has(key)) && if (key == "fuzzyPairs") {
                     fun pairs(values: JSONObject): Set<String>? = values.optJSONArray(key)?.let { array ->
                         (0 until array.length()).map { array.getString(it) }.toSet()
                     }
@@ -150,6 +151,9 @@ internal class SettingsBackup(private val context: Context) {
             if (count == 0) null else "${labels.getValue(group)}：$count 项设置变更"
         }
     }
+    private fun preserveWhenMissing(group: String, key: String) =
+        group == "preferences" || (group == "longPress" && key == "panelEnterSends")
+
     fun apply(root: JSONObject) {
         validate(root)
         // Commit each preference file once. Caller retains the previous snapshot for rollback.
@@ -157,7 +161,7 @@ internal class SettingsBackup(private val context: Context) {
             val edit = context.getSharedPreferences(file,0).edit()
             groups.filter { (group, spec) -> spec.first == file && root.has(group) }.forEach { (group,spec) ->
                 // Older backups and partial preference groups leave missing preferences unchanged.
-                if (group != "preferences") spec.second.forEach(edit::remove)
+                spec.second.filterNot { preserveWhenMissing(group, it) }.forEach(edit::remove)
                 val values = root.getJSONObject(group)
                 if (group == "preferences" && values.has("englishAssociation")) edit.remove("englishCompletion")
                 if (group == "preferences" && values.has("keySoundType")) edit.remove("keySound")

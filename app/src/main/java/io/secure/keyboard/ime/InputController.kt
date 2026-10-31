@@ -584,7 +584,10 @@ internal object InputController {
         } else commit(" ")
     }
 
-    internal fun KeyboardSession.enterImpl() = dispatchKey(QueuedKey.Enter)
+    internal fun KeyboardSession.enterImpl(longPress: Boolean) {
+        val send = translation.enabled && !phraseMode && settings.panelEnterSends != longPress
+        dispatchKey(if (send) QueuedKey.SubmitAssistant else QueuedKey.Enter)
+    }
 
     internal fun KeyboardSession.applyEnterImpl() {
         if (translation.enabled && !phraseMode) {
