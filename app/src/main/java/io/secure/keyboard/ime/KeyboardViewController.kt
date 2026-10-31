@@ -388,9 +388,8 @@ internal object KeyboardViewController {
                 val preview = button(paste.take(160).replace(Regex("[\\r\\n\\t\\u2028\\u2029]+"), " ")) {
                     if (active && !secret && personalizedLearning && settings.quickPaste && panel == "keys" &&
                         !translation.enabled && quickPasteState.revision == pasteRevision) {
-                        val token = quickPasteState.token
+                        settings.quickPasteConsumedToken = quickPasteState.token
                         if (commitInputText(paste)) {
-                            settings.quickPasteConsumedToken = token
                             clearPending()
                             renderHeader()
                         }
