@@ -1,0 +1,4 @@
+ZXing Core 3.5.3
+Copyright ZXing authors
+Licensed under the Apache License, Version 2.0 (see SKEY-LICENSE.txt).
+https://github.com/zxing/zxing

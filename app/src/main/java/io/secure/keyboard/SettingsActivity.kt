@@ -407,7 +407,7 @@ open class SettingsActivity : ComponentActivity() {
                             ContentCard(item.text, if (item.pinned) "已置顶" else "剪贴板", listOf(
                                 (if (item.pinned) "取消置顶" else "置顶") to { model.task { model.content.setClipboardPinned(item.id, !item.pinned) } },
                                 "复制" to { copy(item.text) },
-                                "删除" to { ask("删除这条剪贴板记录？") { model.task { model.content.deleteClipboard(item.id) } } }))
+                                "删除" to { ask("删除这条剪贴板记录？") { model.task { model.content.deleteClipboard(item.id) } } }), allowQr = true)
                         }
                         if (route == "phrases") items(model.phrases, key = { it.id }) { item ->
                             ContentCard(item.text, if (item.pinned) "已置顶" else "常用语", listOf(
@@ -1377,7 +1377,7 @@ open class SettingsActivity : ComponentActivity() {
         TextButton(text = text, onClick = action, enabled = enabled,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
     }
-    @Composable private fun ContentCard(text: String, summary: String, actions: List<Pair<String, () -> Unit>>, compact: Boolean = false, first: Boolean = false, last: Boolean = false) {
+    @Composable private fun ContentCard(text: String, summary: String, actions: List<Pair<String, () -> Unit>>, compact: Boolean = false, first: Boolean = false, last: Boolean = false, allowQr: Boolean = false) {
         var preview by remember(text) { mutableStateOf(false) }
         val shape = RoundedCornerShape(
             topStart = if (!compact || first) 16.dp else 0.dp,
@@ -1417,11 +1417,17 @@ open class SettingsActivity : ComponentActivity() {
                 }
             }
         }
-        if (preview) Modal("内容", { preview = false }) {
-            Text(text, color = MiuixTheme.colorScheme.onSurface)
-            if (summary.isNotBlank()) Info(summary)
+        var showQr by remember(text) { mutableStateOf(false) }
+        if (preview && showQr) Modal("二维码", { showQr = false }) {
+            ClipboardQr(text)
+            TextButton(text = "返回", onClick = { showQr = false }, modifier = Modifier.fillMaxWidth())
+        } else if (preview) Modal("内容", { preview = false }) {
+            Text(text, modifier = if (allowQr) Modifier.padding(vertical = 8.dp) else Modifier,
+                color = MiuixTheme.colorScheme.onSurface)
+            if (summary.isNotBlank() && summary != "剪贴板") Info(summary)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(text = "关闭", onClick = { preview = false }, modifier = Modifier.weight(1f))
+                if (allowQr) TextButton(text = "二维码", onClick = { showQr = true }, modifier = Modifier.weight(1f))
                 TextButton(text = "复制", onClick = { copy(text); preview = false }, modifier = Modifier.weight(1f))
             }
         }

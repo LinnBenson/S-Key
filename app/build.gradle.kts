@@ -6,8 +6,8 @@ android {
         applicationId = "io.secure.keyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 200
-        versionName = "1.3.14"
+        versionCode = 201
+        versionName = "1.3.15"
     }
     androidResources { noCompress += "skt" }
     buildFeatures { compose = true }
@@ -24,6 +24,7 @@ android {
     buildTypes { release { isMinifyEnabled = false } }
 }
 dependencies {
+    implementation("com.google.zxing:core:3.5.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("top.yukonga.miuix.kmp:miuix-android:0.5.1")
     implementation("androidx.activity:activity-compose:1.10.1")
