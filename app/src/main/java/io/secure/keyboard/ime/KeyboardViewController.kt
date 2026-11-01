@@ -313,11 +313,14 @@ internal object KeyboardViewController {
             active && !secret && personalizedLearning && settings.quickPaste && panel == "keys" && !translation.enabled
         }
 
+    internal fun KeyboardSession.showsProtectedContent() =
+        visibleQuickPaste != null || secret || translation.enabled || panel in setOf("clipboard", "phrases", "voice", "emoji")
+
     internal fun KeyboardSession.showsCandidateModeImpl() = visibleQuickPaste == null && !secret && panel == "keys" &&
         ((chinese && (code.isNotEmpty() || candidateTexts.isNotEmpty() || pinyinPredictionGeneration == generation)) || (!chinese && candidateTexts.isNotEmpty()))
 
     internal fun KeyboardSession.renderHeaderImpl() {
-        io.secure.keyboard.ui.SensitiveWindows.apply(window?.window, secret || translation.enabled || panel in setOf("clipboard", "phrases", "voice", "emoji"))
+        io.secure.keyboard.ui.SensitiveWindows.apply(window?.window, showsProtectedContent())
         if (!headerInitialized) return
         if (phraseMode) with(PhraseEditorController) { updatePhraseActions() }
         val visibleCode = if (secret) "" else pinyinComposition.text + code
@@ -441,7 +444,7 @@ internal object KeyboardViewController {
     internal fun KeyboardSession.renderBodyImpl() = renderBody(translation.enabled && panel in assistantTools)
 
     internal fun KeyboardSession.renderBodyImpl(preserveAssistant: Boolean) {
-        io.secure.keyboard.ui.SensitiveWindows.apply(window?.window, secret || translation.enabled || panel in setOf("clipboard", "phrases", "voice", "emoji"))
+        io.secure.keyboard.ui.SensitiveWindows.apply(window?.window, showsProtectedContent())
         if(assistantVoicePanel!=null) cancelAiCommandVoice()
         val keepAssistant = preserveAssistant && activeAssistantEditor()?.isAttachedToWindow == true
         if (!keepAssistant) releaseAssistantViews()
@@ -997,7 +1000,7 @@ internal object KeyboardViewController {
                     PopupWindow(r, dp(choices.size * 44 + (choices.size - 1) * 4 + 8), dp(52), false).apply {
                         isTouchable = false
                         showAsDropDown(container, 0, -container.height - dp(54))
-                        if (secret) io.secure.keyboard.ui.SensitiveWindows.securePopup(this)
+                        if (showsProtectedContent()) io.secure.keyboard.ui.SensitiveWindows.securePopup(this)
                     }
                 choice = 0
             }

@@ -1183,12 +1183,25 @@ internal object AssistantController {
         val controlHeight = minOf(dp(32), (extra - dp(18)).coerceAtLeast(0))
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         area.addView(row, LinearLayout.LayoutParams(-1, controlHeight))
+        val languageLabels = mutableMapOf<Boolean, TextView>()
+        fun refreshLanguages() {
+            for ((source, label) in languageLabels) {
+                val id = if (source) translation.source else translation.target
+                val name = translationLanguages[id] ?: id
+                label.text = name
+                (label.parent as View).contentDescription = (if (source) "源语言：" else "目标语言：") + name
+            }
+            saveTranslationLanguages()
+            translation.invalidate()
+            updateTranslationPreview()
+        }
         fun languageChip(source: Boolean): View {
             val selected = if (source) translation.source else translation.target
             return LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL; background = shape(keyBg)
                 setPadding(dp(10),0,dp(6),0)
                 addView(label(translationLanguages[selected] ?: selected, 12f).apply {
+                    languageLabels[source] = this
                     setSingleLine(true); ellipsize = android.text.TextUtils.TruncateAt.END
                 }, LinearLayout.LayoutParams(0,-1,1f))
                 addView(ToolIcon(this@renderTranslationBarImpl,"hide",muted,artworkSizeDp=14f),LinearLayout.LayoutParams(dp(18),-1))
@@ -1198,8 +1211,7 @@ internal object AssistantController {
                         translationLanguages.filter { source || it.key != "auto" }.forEach { (id, name) ->
                             menu.add(name).setOnMenuItemClickListener {
                                 if (source) translation.source = id else translation.target = id
-                                saveTranslationLanguages()
-                                translation.invalidate(); renderBody(); true
+                                refreshLanguages(); true
                             }
                         }
                         show()
@@ -1217,8 +1229,7 @@ internal object AssistantController {
                 if (translation.source == "auto") toast("请先选择明确的源语言")
                 else {
                     val old = translation.source; translation.source = translation.target; translation.target = old
-                    saveTranslationLanguages()
-                    translation.invalidate(); renderBody()
+                    refreshLanguages()
                 }
             }
         }

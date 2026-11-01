@@ -424,9 +424,8 @@ internal object VoiceController {
         }
 
     internal fun KeyboardSession.failVoiceImpl(message: String) {
-        val wasHeld = heldVoice
         cancelVoice()
-        if (wasHeld) toast(message)
+        toast(message)
         updateVoiceLabels()
     }
 

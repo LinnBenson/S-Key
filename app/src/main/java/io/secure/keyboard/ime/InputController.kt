@@ -136,8 +136,13 @@ internal object InputController {
                 if(assistantEnglishPrefix(editor)!=expected) return false
                 val end=editor.selectionStart
                 val existingSpace=editor.text.getOrNull(end)==' '
+                val replacement = if (existingSpace) value else "$value "
+                if (editor.length() - expected.length + replacement.length > 5000) {
+                    toast("原文最多 5000 字符")
+                    return false
+                }
                 feedback()
-                editor.text.replace(end-expected.length,end,if(existingSpace) value else "$value ")
+                editor.text.replace(end-expected.length, end, replacement)
                 editor.setSelection((end-expected.length+value.length+1).coerceAtMost(editor.length()))
                 clearPending(); refreshCandidates()
                 return true
@@ -221,6 +226,10 @@ internal object InputController {
                         ChineseSpacing.format(value, editor.text.substring(0, start), editor.text.substring(end))
                         else ChineseSpacing.Edit(value, false)
                     val retainedLength = editor.length() - (end - start)
+                    if (retainedLength + edit.text.length > 5000) {
+                        toast("原文最多 5000 字符")
+                        return false
+                    }
                     if (preview) {
                         if (!editorPreview.commit(edit.text)) return false
                         clearEditorPreview()

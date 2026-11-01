@@ -309,7 +309,7 @@ internal object PanelController {
             clipboardWrites.submit(text.length) {
                 try {
                     val saved = content.captureClipboard(text, timestamp, newCopyEvent, epoch)
-                    if (saved) main.post { if (active && panel == "clipboard") renderBody() }
+                    if (saved) main.post { if (active && panel == "clipboard") (body.getChildAt(0) as? ContentPanel)?.reload?.invoke() }
                 } catch (_: Exception) {
                     reportContentError()
                 }
@@ -330,132 +330,139 @@ internal object PanelController {
         }
     }
 
+    private class ContentPanel(context: Context) : LinearLayout(context) {
+        var reload: () -> Unit = {}
+    }
+
     internal fun KeyboardSession.renderContentImpl() {
         val isClipboard = panel == "clipboard"
-        val column = LinearLayout(this).apply {
+        val column = ContentPanel(this).apply {
             orientation = LinearLayout.VERTICAL
             isClickable = true // Consume taps in the empty area as the last rows disappear.
         }
         body.addView(column, FrameLayout.LayoutParams(-1, -1))
-        val loading = label("正在读取…", 14f, muted)
-        column.addView(loading)
         val expectedPanel = panel
         fun current() = !destroyed && active && panel == expectedPanel &&
             body.indexOfChild(column) >= 0
-        // Parsing and the shared storage lock never block the input/main thread.
-        contentQueries.submit {
-            val entries = readContent(emptyList<ContentStore.ClipboardItem>()) {
-                if (isClipboard) content.clipboardForDisplay()
-                else content.phrasesForDisplay().map { ContentStore.ClipboardItem(it.id, it.text, it.pinned) }
+        if (!isClipboard) {
+            column.addView(button("＋ 添加常用语") {
+                if (current()) with(PhraseEditorController) { openPhraseEditor() }
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply {
+                setMargins(dp(10), dp(4), dp(10), dp(8))
+            })
+        }
+        val empty = label("复制的文字会保存在这里", 14f, muted).apply { visibility = View.GONE }
+        if (isClipboard) column.addView(empty)
+        var changing = false
+        fun changeContent(action: () -> Unit) {
+            if (!current() || changing) return
+            changing = true
+            column.cancelPendingInputEvents()
+            worker.execute {
+                readContent(Unit) { action() }
+                main.post { if (current()) { changing = false; column.reload() } }
             }
-            val webLinks = if (isClipboard) entries.associate {
-                it.id to io.secure.keyboard.data.ClipboardWebLink.parse(it.text)
-            } else emptyMap()
-            main.post {
-                if (!current()) return@post
-                column.removeAllViews()
-                if (!isClipboard) {
-                    column.addView(button("＋ 添加常用语") {
-                        if (current()) with(PhraseEditorController) { openPhraseEditor() }
-                    }, LinearLayout.LayoutParams(-1, dp(48)).apply {
-                        setMargins(dp(10), dp(4), dp(10), dp(8))
-                    })
-                }
-                if (entries.isEmpty()) {
-                    if (isClipboard) column.addView(label("复制的文字会保存在这里", 14f, muted))
-                    return@post
-                }
-                var changing = false
-                fun changeContent(action: () -> Unit) {
-                    if (!current() || changing) return
-                    changing = true
-                    column.cancelPendingInputEvents()
-                    column.removeAllViews()
-                    column.addView(label("正在保存…", 14f, muted))
-                    worker.execute {
-                        readContent(Unit) { action() }
-                        main.post { if (current()) renderBody() }
+        }
+        val list = ListView(this).apply {
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            divider = null
+            dividerHeight = dp(6)
+            setPadding(dp(10), 0, dp(10), 0)
+            clipToPadding = true
+        }
+        val visibleEntries = mutableListOf<ContentStore.ClipboardItem>()
+        var webLinks = emptyMap<String, String?>()
+        val pendingDeletes = mutableSetOf<String>()
+        val adapter = object : BaseAdapter() {
+            override fun getCount() = visibleEntries.size
+            override fun getItem(position: Int) = visibleEntries[position]
+            override fun getItemId(position: Int) = position.toLong()
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val entry = getItem(position)
+                val webLink = webLinks[entry.id]
+                val openLink: (() -> Unit)? = webLink?.let { url -> {
+                    if (current() && !changing) {
+                        try {
+                            val browse = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                .addCategory(Intent.CATEGORY_BROWSABLE)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            val browser = packageManager.resolveActivity(
+                                Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://example.com"))
+                                    .addCategory(Intent.CATEGORY_BROWSABLE),
+                                android.content.pm.PackageManager.MATCH_DEFAULT_ONLY,
+                            )?.takeIf { it.match > 0 }?.activityInfo?.packageName
+                            if (browser != null && browser != "android") browse.setPackage(browser)
+                            startActivity(browse)
+                        } catch (_: ActivityNotFoundException) { toast("未找到可用的浏览器") }
+                        catch (_: SecurityException) { toast("无法打开浏览器") }
                     }
-                }
-                val list = ListView(this).apply {
-                    isVerticalScrollBarEnabled = false
-                    isHorizontalScrollBarEnabled = false
-                    divider = null
-                    dividerHeight = dp(6)
-                    setPadding(dp(10), 0, dp(10), 0)
-                    clipToPadding = true
-                }
-                val visibleEntries = entries.toMutableList()
-                val pendingDeletes = mutableSetOf<String>()
-                list.adapter = object : BaseAdapter() {
-                    override fun getCount() = visibleEntries.size
-                    override fun getItem(position: Int) = visibleEntries[position]
-                    override fun getItemId(position: Int) = position.toLong()
-                    override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                        val entry = getItem(position)
-                        val webLink = webLinks[entry.id]
-                        val openLink: (() -> Unit)? = webLink?.let { url -> {
-                            if (current() && !changing) {
-                                try {
-                                    val browse = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                                        .addCategory(Intent.CATEGORY_BROWSABLE)
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    val browser = packageManager.resolveActivity(
-                                        Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://example.com"))
-                                            .addCategory(Intent.CATEGORY_BROWSABLE),
-                                        android.content.pm.PackageManager.MATCH_DEFAULT_ONLY,
-                                    )?.takeIf { it.match > 0 }?.activityInfo?.packageName
-                                    if (browser != null && browser != "android") browse.setPackage(browser)
-                                    startActivity(browse)
-                                } catch (_: ActivityNotFoundException) { toast("未找到可用的浏览器") }
-                                catch (_: SecurityException) { toast("无法打开浏览器") }
-                            }
-                        } }
-                        val insert: (String) -> Unit = { if (current() && !changing) { commit(it) } }
-                        val pin: (Boolean) -> Unit = { pinned -> changeContent {
-                            if (isClipboard) content.setClipboardPinned(entry.id, pinned)
-                            else content.setPhrasePinned(entry.id, pinned)
-                        } }
-                        val delete: () -> Unit = delete@{
-                            if (!current() || changing || !pendingDeletes.add(entry.id)) return@delete
-                            worker.execute {
-                                val deleted = readContent(false) {
-                                    if (isClipboard) content.deleteClipboard(entry.id) else content.deletePhrase(entry.id)
-                                    true
-                                }
-                                main.post {
-                                    pendingDeletes.remove(entry.id)
-                                    if (current() && deleted) {
-                                        visibleEntries.removeAll { it.id == entry.id }
-                                        notifyDataSetChanged()
-                                        if (visibleEntries.isEmpty()) {
-                                            list.visibility = View.GONE
-                                            if (isClipboard) column.addView(label("复制的文字会保存在这里", 14f, muted))
-                                        }
-                                    }
+                } }
+                val insert: (String) -> Unit = { if (current() && !changing) { commit(it) } }
+                val pin: (Boolean) -> Unit = { pinned -> changeContent {
+                    if (isClipboard) content.setClipboardPinned(entry.id, pinned)
+                    else content.setPhrasePinned(entry.id, pinned)
+                } }
+                val delete: () -> Unit = delete@{
+                    if (!current() || changing || !pendingDeletes.add(entry.id)) return@delete
+                    worker.execute {
+                        val deleted = readContent(false) {
+                            if (isClipboard) content.deleteClipboard(entry.id) else content.deletePhrase(entry.id)
+                            true
+                        }
+                        main.post {
+                            pendingDeletes.remove(entry.id)
+                            if (current() && deleted) {
+                                visibleEntries.removeAll { it.id == entry.id }
+                                notifyDataSetChanged()
+                                if (visibleEntries.isEmpty()) {
+                                    list.visibility = View.GONE
+                                    if (isClipboard) empty.visibility = View.VISIBLE
                                 }
                             }
                         }
-                        val edit: (() -> Unit)? = if (isClipboard) null else ({
-                            if (current() && !changing) with(PhraseEditorController) { openPhraseEditor(entry.id, entry.text) }
-                        })
-                        return (convertView as? ContentEntryRow)?.apply {
-                            bind(entry.text, entry.pinned, insert, pin, delete, openLink, edit)
-                        } ?: ContentEntryRow(
-                            this@renderContentImpl, entry.text, entry.pinned,
-                            textColor = fg, surfaceColor = keyBg, actionColor = toolbarColor,
-                            pinnedColor = accent,
-                            deleteColor = if (dark) 0xFFFF7B83.toInt() else 0xFFC94A54.toInt(),
-                            categoryLabel = if (isClipboard) "剪贴板记录" else "常用语",
-                            onInsert = insert, onPin = pin, onDelete = delete, onOpenLink = openLink, onEdit = edit,
-                            feedback = { pressFeedback() },
-                            cornerRadius = settings.keyCornerRadius,
-                        ).apply { layoutParams = AbsListView.LayoutParams(-1, dp(52)) }
                     }
                 }
-                column.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
+                val edit: (() -> Unit)? = if (isClipboard) null else ({
+                    if (current() && !changing) with(PhraseEditorController) { openPhraseEditor(entry.id, entry.text) }
+                })
+                return (convertView as? ContentEntryRow)?.apply {
+                    bind(entry.text, entry.pinned, insert, pin, delete, openLink, edit)
+                } ?: ContentEntryRow(
+                    this@renderContentImpl, entry.text, entry.pinned,
+                    textColor = fg, surfaceColor = keyBg, actionColor = toolbarColor,
+                    pinnedColor = accent,
+                    deleteColor = if (dark) 0xFFFF7B83.toInt() else 0xFFC94A54.toInt(),
+                    categoryLabel = if (isClipboard) "剪贴板记录" else "常用语",
+                    onInsert = insert, onPin = pin, onDelete = delete, onOpenLink = openLink, onEdit = edit,
+                    feedback = { pressFeedback() },
+                    cornerRadius = settings.keyCornerRadius,
+                ).apply { layoutParams = AbsListView.LayoutParams(-1, dp(52)) }
             }
         }
+        list.adapter = adapter
+        column.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
+        column.reload = {
+            contentQueries.submit {
+                val entries = readContent(emptyList<ContentStore.ClipboardItem>()) {
+                    if (isClipboard) content.clipboardForDisplay()
+                    else content.phrasesForDisplay().map { ContentStore.ClipboardItem(it.id, it.text, it.pinned) }
+                }
+                val links = if (isClipboard) entries.associate {
+                    it.id to io.secure.keyboard.data.ClipboardWebLink.parse(it.text)
+                } else emptyMap()
+                main.post {
+                    if (!current()) return@post
+                    webLinks = links
+                    visibleEntries.clear()
+                    visibleEntries.addAll(entries)
+                    adapter.notifyDataSetChanged()
+                    list.visibility = if (entries.isEmpty()) View.GONE else View.VISIBLE
+                    empty.visibility = if (isClipboard && entries.isEmpty()) View.VISIBLE else View.GONE
+                }
+            }
+        }
+        column.reload()
     }
 
     internal fun KeyboardSession.renderEmojiImpl() {

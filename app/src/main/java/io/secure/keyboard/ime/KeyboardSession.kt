@@ -408,10 +408,10 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             }
             else if (key == "screenshotProtection") main.post {
                 io.secure.keyboard.ui.SensitiveWindows.apply(window?.window,
-                    secret || translation.enabled || panel in setOf("clipboard", "phrases", "voice", "emoji"))
+                    with(KeyboardViewController) { showsProtectedContent() })
                 popup?.takeIf { it.isShowing && it.contentView != null }?.let {
                     io.secure.keyboard.ui.SensitiveWindows.securePopup(it,
-                        secret || translation.enabled || panel in setOf("clipboard", "phrases", "voice", "emoji"))
+                        with(KeyboardViewController) { showsProtectedContent() })
                 }
             }
             else if (key == "editorPreview") main.post { syncEditorPreview(); prefetchSpacingContext(); if (active) renderHeader() }
