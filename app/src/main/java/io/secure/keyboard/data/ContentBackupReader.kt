@@ -56,17 +56,22 @@ internal object ContentBackupReader {
                     JsonToken.BOOLEAN -> values.put(key,reader.nextBoolean())
                     JsonToken.NUMBER -> { val value = reader.nextString(); require(value.matches(Regex("[0-9]{1,4}"))); values.put(key,value.toInt()) }
                     JsonToken.BEGIN_ARRAY -> {
-                        require(group == "preferences" && key == "fuzzyPairs")
-                        val pairs = JSONArray()
+                        require(group == "preferences")
+                        val limit = when (key) {
+                            "fuzzyPairs" -> SettingsStore.fuzzyPairIds.size
+                            "voiceAiChoices" -> io.secure.keyboard.ai.VoiceAiChoice.LIMIT
+                            else -> error("Invalid preference array")
+                        }
+                        val items = JSONArray()
                         reader.beginArray()
                         while (reader.hasNext()) {
-                            require(pairs.length() < SettingsStore.fuzzyPairIds.size && reader.peek() == JsonToken.STRING)
-                            val pair = reader.nextString()
-                            require(pair in SettingsStore.fuzzyPairIds)
-                            pairs.put(pair)
+                            require(items.length() < limit && reader.peek() == JsonToken.STRING)
+                            val item = reader.nextString()
+                            require(item.length <= 135) // "custom:" plus a 128-character preset ID.
+                            items.put(item)
                         }
                         reader.endArray()
-                        values.put(key, pairs)
+                        values.put(key, items)
                     }
                     else -> error("Invalid setting type")
                 }

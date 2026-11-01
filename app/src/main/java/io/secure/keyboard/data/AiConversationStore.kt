@@ -9,7 +9,7 @@ import java.io.File
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 
-/** Encrypted local continuation list; excluded from backups. No API secrets or full transcript. */
+/** Encrypted continuations and single-turn voice results. Excluded from backups. */
 internal class AiConversationStore(context: Context) {
     private val app = context.applicationContext
     private val content by lazy { ContentStore(app) }
@@ -19,7 +19,7 @@ internal class AiConversationStore(context: Context) {
         j.getString("id"), j.getString("scope"), j.getLong("updatedAt"), j.getString("type"),
         j.optString("key", j.getString("id")), j.optLong("startedAt", j.getLong("updatedAt")),
         j.optString("firstMessage"), j.optString("title", j.getString("type")), j.optString("tone", "自然"),
-        j.optString("presetName"), j.optString("prompt"), j.optString("reasoning", "low"), j.optString("model"), j.optInt("retentionHours", 4), j.optBoolean("webSearch"), j.optBoolean("xSearch"), j.optString("provider", "default"),
+        j.optString("presetName"), j.optString("prompt"), j.optString("reasoning", "low"), j.optString("model"), j.optInt("retentionHours", 4), j.optBoolean("webSearch"), j.optBoolean("xSearch"), j.optString("provider", "default"), j.optString("voiceResult"),
     )
     private fun read(hours: (String) -> Int): State {
         if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return State(emptyList(), null)
@@ -96,7 +96,7 @@ internal class AiConversationStore(context: Context) {
         .put("key", v.key).put("startedAt", v.startedAt).put("firstMessage", v.firstMessage)
         .put("title", v.title).put("tone", v.tone).put("presetName", v.presetName)
         .put("prompt", v.prompt).put("reasoning", v.reasoning).put("model", v.model)
-        .put("retentionHours", v.retentionHours).put("webSearch", v.webSearch).put("xSearch", v.xSearch).put("provider", v.provider)
+        .put("retentionHours", v.retentionHours).put("webSearch", v.webSearch).put("xSearch", v.xSearch).put("provider", v.provider).put("voiceResult", v.voiceResult)
 
     /** Bound individual records and UTF-8 JSON before building a complete array/string. */
     private fun bounded(state: State): State {
@@ -112,8 +112,8 @@ internal class AiConversationStore(context: Context) {
     }
     private fun entryBytes(entry: AiConversation): Int? {
         val fields = listOf(entry.id, entry.scope, entry.type, entry.key, entry.firstMessage,
-            entry.title, entry.tone, entry.presetName, entry.prompt, entry.reasoning, entry.model)
-        if (!entry.key.matches(Regex("[A-Za-z0-9_-]{1,256}")) || fields.sumOf { it.length.toLong() } > 40_000) return null
+            entry.title, entry.tone, entry.presetName, entry.prompt, entry.reasoning, entry.model, entry.voiceResult)
+        if (!entry.key.matches(Regex("[A-Za-z0-9_-]{1,256}")) || fields.sumOf { it.length.toLong() } > (if (entry.voiceResult.isEmpty()) 40_000 else 80_000)) return null
         return encode(entry).toString().toByteArray(Charsets.UTF_8).size + 1
     }
     private fun schedule(state: State) {
@@ -153,7 +153,7 @@ internal class AiConversationStore(context: Context) {
             write(State(state.entries.filterNot { it.key == current.key }, state.selected?.takeUnless { it == current.key }))
             return@withPolicy null
         }
-        val next = bounded(State(state.entries.filterNot { it.key == current.key } + current, current.key))
+        val next = bounded(State(state.entries.filterNot { it.key == current.key } + current, if (current.voiceResult.isEmpty()) current.key else state.selected))
         check(isCurrent()) { "会话已关闭" }
         write(next)
         next.entries.firstOrNull { it.key == current.key }

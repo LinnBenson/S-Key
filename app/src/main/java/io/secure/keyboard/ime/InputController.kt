@@ -80,10 +80,7 @@ internal object InputController {
             preedit.text = ""
             preedit.visibility = View.GONE
         }
-        voicePreview = ""
-        voiceText?.text = ""
         voiceStatus?.text = ""
-        voiceText = null
         voiceStatus = null
         voiceWaveform = null
     }

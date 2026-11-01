@@ -35,10 +35,12 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
 
         fun onState(state: State)
 
-        fun onPreview(text: String, isFinal: Boolean)
+        fun onFinalText(text: String) {}
 
         /** Unique, increasing identity within this begin(); identical spoken phrases are distinct. */
         fun onSegment(segmentId: Long, text: String) {}
+
+        fun onCaptureTimeout() {}
 
         fun onError(message: String)
     }
@@ -59,14 +61,20 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
         if (!released && generation.get() == id && recording) listener.onLevel(level)
     }
     // Access only on the single worker, including disposal queued behind active capture.
-    private var cachedRecognizer: OnlineRecognizer? = null
-    private var cachedStamp: List<Long>? = null
+    private class ModelCache {
+        var recognizer: OnlineRecognizer? = null
+        var stamp: List<Long>? = null
+        fun clear() {
+            val previous = recognizer
+            recognizer = null
+            stamp = null
+            previous?.release()
+        }
+    }
+    private val modelCache = ModelCache()
     private fun disposeRecognizer() {
-        val previous = cachedRecognizer
-        cachedRecognizer = null
-        cachedStamp = null
-        if (recognizerOwner === this) recognizerOwner = null
-        previous?.release()
+        if (activeCache === modelCache) activeCache = null
+        modelCache.clear()
     }
 
     private val idleRelease = Runnable { trimIdleMemory() }
@@ -96,7 +104,6 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                 // suppress the old generation, and let cleanup start it on this same session.
                 generation.incrementAndGet()
                 pendingBegin = true
-                listener.onPreview("", false)
                 listener.onState(State.LOADING)
             }
             return
@@ -112,7 +119,6 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
         val id = generation.incrementAndGet()
         recording = true
         busy = true
-        listener.onPreview("", false)
         listener.onState(State.LOADING)
         worker.execute { capture(id) }
     }
@@ -137,7 +143,6 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
         generation.incrementAndGet()
         stop()
         if (!released) {
-            listener.onPreview("", false)
             listener.onState(State.IDLE)
         }
     }
@@ -158,10 +163,10 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
     /** Worker-confined lazy native owner, independent of microphone availability. */
     private fun recognizer(repository: ModelRepository): OnlineRecognizer {
         // All sessions use one worker: release the previous owner's model before allocating.
-        if (recognizerOwner !== this) recognizerOwner?.disposeRecognizer()
+        if (activeCache !== modelCache) activeCache?.clear()
         val stamp = repository.installedStamp()
-        if (cachedStamp != stamp) disposeRecognizer()
-        val engine = cachedRecognizer ?: OnlineRecognizer(
+        if (modelCache.stamp != stamp) disposeRecognizer()
+        val engine = modelCache.recognizer ?: OnlineRecognizer(
             config = OnlineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
                 modelConfig = OnlineModelConfig(
@@ -176,9 +181,9 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                 decodingMethod = "greedy_search",
             )
         )
-        cachedRecognizer = engine
-        recognizerOwner = this
-        cachedStamp = stamp
+        modelCache.recognizer = engine
+        activeCache = modelCache
+        modelCache.stamp = stamp
         return engine
     }
 
@@ -218,7 +223,6 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             }
             val progress = AudioReadProgress(SystemClock.elapsedRealtime())
             var samples = 0
-            var previous = ""
             var segmentId = 0L
             while (recording && generation.get() == id && samples < 16000 * 60 &&
                 SystemClock.elapsedRealtime() < deadline) {
@@ -228,7 +232,9 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                 if (count <= 0 && !recording) break
                 check(count >= 0) { "麦克风读取失败" }
                 if (generation.get() != id) return
-                check(progress.accept(count, SystemClock.elapsedRealtime())) { "麦克风未返回录音数据，请关闭语音后重试" }
+                if (!progress.accept(count, SystemClock.elapsedRealtime())) {
+                    emit(id) { listener.onCaptureTimeout() }; return
+                }
                 if (count == 0) { Thread.sleep(10); continue }
                 check(signal.accept(pcm, 0, count)) { "麦克风录音数据异常，请重试" }
                 val level = VoiceLevel.measure(pcm, 0, count)
@@ -241,19 +247,13 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                 floats = null
                 pcm.fill(0)
                 while (engine.isReady(input)) engine.decode(input)
-                val result = engine.getResult(input).text.trim()
-                if (result != previous) {
-                    previous = result
-                    emit(id) { listener.onPreview(result, false) }
-                }
                 if (engine.isEndpoint(input)) {
+                    val result = engine.getResult(input).text.trim()
                     // sherpa 1.13.8 CTC reset clears its result and decoding state. Never resend
                     // the full session text, and never use text equality to deduplicate speech.
                     engine.reset(input)
                     val finalizedId = segmentId++
                     if (result.isNotEmpty()) emit(id) { listener.onSegment(finalizedId, result) }
-                    previous = ""
-                    emit(id) { listener.onPreview("", false) }
                 }
                 // Native decoding time is not a microphone stall. Preserve final positive reads
                 // after stop(), then let the existing final flush finish the utterance.
@@ -279,7 +279,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
                 val finalizedId = segmentId
                 emit(id) { listener.onSegment(finalizedId, result) }
             }
-            emit(id) { listener.onPreview(result, true) }
+            emit(id) { listener.onFinalText(result) }
         } catch (e: SecurityException) {
             failed = true
             emit(id) { listener.onError("麦克风权限不可用，请在语音设置中重新允许") }
@@ -345,7 +345,7 @@ class OfflineVoiceSession(context: Context, private val listener: Listener) {
             0, 1, 30L, java.util.concurrent.TimeUnit.SECONDS,
             java.util.concurrent.LinkedBlockingQueue<Runnable>(),
         )
-        private var recognizerOwner: OfflineVoiceSession? = null // worker-confined
+        private var activeCache: ModelCache? = null // worker-confined
         /** Explicit upstream defaults, shared with native endpoint regression tests. */
         internal fun endpointConfig() = EndpointConfig(
             rule1 = EndpointRule(false, 2.4f, 0.0f),

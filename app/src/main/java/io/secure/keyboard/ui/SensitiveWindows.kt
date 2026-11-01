@@ -5,7 +5,7 @@ import android.view.WindowManager
 
 internal object SensitiveWindows {
     private val pages = setOf("api", "clipboard", "phrases", "dictionary", "english_dictionary",
-        "custom_ai", "builtin_ai_prompts", "builtin_dictionaries", "cleanup", "recovery", "emoji")
+        "custom_ai", "voice_ai", "builtin_ai_prompts", "builtin_dictionaries", "cleanup", "recovery", "emoji")
     fun settingsPage(page: String): Boolean = page in pages
     fun securePopup(popup: android.widget.PopupWindow, sensitive: Boolean = true) {
         val root = popup.contentView.rootView

@@ -15,32 +15,61 @@ import io.secure.keyboard.*
 
 /** Voice capture coordination and editor validation. */
 internal object VoiceController {
+    private const val BUBBLE_HEIGHT_DP = 36
+
     internal fun KeyboardSession.renderVoiceImpl() {
         val col =
             LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(14), dp(8), dp(14), dp(8))
             }
-        body.addView(col, FrameLayout.LayoutParams(-1, -1))
+        // Measure in logical panel coordinates, then fit the entire panel inside the
+        // body allocated below the toolbar and above the floating resize handle.
+        val hasShortcuts = heldVoice && voiceChoices.isNotEmpty()
+        val viewport = object : FrameLayout(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val w = MeasureSpec.getSize(widthMeasureSpec)
+                val h = MeasureSpec.getSize(heightMeasureSpec)
+                val minHeight = dp(16 + 28 + 72 + 12 + 44 + if (hasShortcuts) BUBBLE_HEIGHT_DP else 0)
+                val minWidth = dp(if (hasShortcuts) 28 + voiceChoices.size * 58 + (voiceChoices.size - 1) * 12 else 180)
+                val scale = minOf(1f, h.toFloat() / minHeight, w.toFloat() / minWidth)
+                setMeasuredDimension(w, h)
+                if (scale <= 0f) return
+                col.pivotX = 0f
+                col.pivotY = 0f
+                col.scaleX = scale
+                col.scaleY = scale
+                col.measure(MeasureSpec.makeMeasureSpec((w / scale).toInt(), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec((h / scale).toInt(), MeasureSpec.EXACTLY))
+            }
+        }
+        viewport.addView(col, FrameLayout.LayoutParams(-1, -1, Gravity.TOP or Gravity.LEFT))
+        body.addView(viewport, FrameLayout.LayoutParams(-1, -1))
         voiceStatus = label("普通话 · 离线语音", 15f, fg)
         col.addView(voiceStatus, LinearLayout.LayoutParams(-1, dp(28)))
         voiceWaveform = io.secure.keyboard.ui.VoiceWaveform(this, accent)
-        col.addView(voiceWaveform, LinearLayout.LayoutParams(-1, dp(72)))
-        voiceText =
-            label(voicePreview, 16f).apply {
-                gravity = Gravity.CENTER
-                textAlignment = View.TEXT_ALIGNMENT_CENTER
-                setPadding(dp(8), dp(8), dp(8), dp(8))
+        col.addView(voiceWaveform, LinearLayout.LayoutParams(-1, 0, 1f))
+        voiceBubbles.clear()
+        if (heldVoice && voiceChoices.isNotEmpty()) {
+            val row = LinearLayout(this)
+            col.addView(row, LinearLayout.LayoutParams(-1, dp(BUBBLE_HEIGHT_DP)))
+            voiceChoices.forEachIndexed { index, choice ->
+                val bubble = label(choice.title, 14f, fg).apply {
+                    gravity = Gravity.CENTER
+                    setSingleLine()
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    background = shape(keyBg, BUBBLE_HEIGHT_DP / 2)
+                }
+                voiceBubbles[choice] = bubble
+                row.addView(bubble, LinearLayout.LayoutParams(0, -1, 1f).apply {
+                    marginStart = dp(if (index == 0) 2 else 12)
+                    if (index == voiceChoices.lastIndex) marginEnd = dp(2)
+                })
             }
-        col.addView(
-            ScrollView(this).apply {
-                isFillViewport = true
-                addView(voiceText, ViewGroup.LayoutParams(-1, -2))
-            },
-            LinearLayout.LayoutParams(-1, 0, 1f),
-        )
+        }
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
         }
         col.addView(actions, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(12) })
         if(settings.voiceMode=="ai" && !heldVoice) {
@@ -51,20 +80,76 @@ internal object VoiceController {
                         OfflineVoiceSession.State.IDLE -> if (voiceGuard == null) startVoice()
                         else -> Unit
                     }
-                }.apply { tag = "voice-submit" },
+                }.apply {
+                    tag = "voice-submit"
+                    background = shape(keyBg, 22)
+                },
                 LinearLayout.LayoutParams(0, -1, 1f).apply { rightMargin = dp(10) },
             )
         }
         actions.addView(
-            button("取消") {
+            voiceCancelButton {
                 cancelTransient()
                 panel = "keys"
                 renderHeader()
                 renderBody()
             },
-            LinearLayout.LayoutParams(0, -1, 1f),
+            LinearLayout.LayoutParams(dp(44), dp(44)),
         )
         updateVoiceLabels()
+    }
+
+    internal fun KeyboardSession.updateShortcutHover(x: Float, y: Float) {
+        if (!heldVoice || heldVoiceFinishRequested || voiceBubbles.isEmpty()) return
+        val bounds = android.graphics.Rect()
+        val rootLocation = IntArray(2)
+        body.rootView.getLocationOnScreen(rootLocation)
+        val hit = voiceBubbles.entries.firstOrNull { (_, bubble) ->
+            bubble.getGlobalVisibleRect(bounds) &&
+                bounds.contains(floor(x - rootLocation[0]).toInt(), floor(y - rootLocation[1]).toInt())
+        }?.key
+        if (voiceChoice == hit) return
+        voiceChoice = hit
+        voiceBubbles.forEach { (choice, bubble) ->
+            bubble.background = shape(if (choice == hit) accent else keyBg, BUBBLE_HEIGHT_DP / 2)
+            bubble.setTextColor(if (choice == hit) enterText else fg)
+            bubble.isSelected = choice == hit
+        }
+    }
+
+    private fun KeyboardSession.processShortcut(choice: io.secure.keyboard.ai.VoiceAiChoice, text: String) {
+        val connection = voiceConnection ?: return
+        val request = voiceRequest
+        val editor = voiceEditorGeneration
+        val call = aiCallFactory()
+        voiceShortcutCall = call
+        updateVoiceLabels()
+        aiWorker.execute {
+            val result = runCatching {
+                val preset = choice.preset
+                val original = io.secure.keyboard.data.ApiConfigurationStore(this).load()
+                val config = if (preset != null && io.secure.keyboard.data.AiProviders.valid(preset.provider))
+                    original.copy(aiProvider = preset.provider) else original
+                val prompts = io.secure.keyboard.ai.AiPromptStore(this)
+                val model = prompts.resolveModel(choice.task, choice.tone, preset?.modelId.orEmpty(), config.chatModel, config.aiProvider)
+                val instruction = prompts.system(choice.task, choice.tone, preset?.prompt.orEmpty())
+                call.execute(config.withChatModel(model), text, instruction, custom = preset != null,
+                    reasoningEffort = preset?.reasoningEffort ?: "low", systemOverride = instruction,
+                    webSearch = preset?.webSearch ?: false, xSearch = preset?.xSearch ?: false)
+            }
+            if (!voiceRequestIsCurrent(request, editor)) return@execute
+            val output = result.getOrNull()
+            main.post {
+                if (!voiceTargetIsCurrent(request, editor, connection) || voiceShortcutCall !== call) return@post
+                voiceShortcutCall = null
+                if (output.isNullOrBlank()) {
+                    failVoice(result.exceptionOrNull()?.localizedMessage ?: "AI 未返回文字")
+                } else {
+                    voiceSegments.addLast(heldSegmentId to output)
+                    drainVoiceSegments()
+                }
+            }
+        }
     }
 
     internal fun KeyboardSession.updateVoiceLabelsImpl() {
@@ -75,7 +160,8 @@ internal object VoiceController {
                 (voiceState == OfflineVoiceSession.State.IDLE && voiceGuard == null))
         }
         voiceStatus?.text =
-            if (heldVoiceWaitingKeys) "正在完成先前输入 · 松手取消"
+            if (voiceShortcutCall != null) "内容正由 ${voiceChoice?.title} 处理中..."
+            else if (heldVoiceWaitingKeys) "正在完成先前输入 · 松手取消"
             else when (voiceState) {
                 OfflineVoiceSession.State.LOADING -> if(usingAiVoice) "正在准备 AI 语音" else "正在准备离线语音"
                 OfflineVoiceSession.State.LISTENING ->
@@ -88,6 +174,13 @@ internal object VoiceController {
 
     /** Invalidates queued recognition and editor checks before stopping the microphone. */
     internal fun KeyboardSession.cancelVoiceImpl(preserveSpaceHold: Boolean = false) {
+        voiceShortcutCall?.cancel()
+        voiceShortcutCall = null
+        voiceChoices = emptyList()
+        voiceChoice = null
+        voiceBubbles.clear()
+        heldTranscript.clear()
+        heldSegmentId = -1L
         aiVoiceRestart?.let(main::removeCallbacks); aiVoiceRestart = null
         aiVoiceRoundCommitted = false
         val closeHeldPanel = heldVoice
@@ -109,8 +202,6 @@ internal object VoiceController {
         voiceState = OfflineVoiceSession.State.IDLE
         if (closeHeldPanel && panel == "voice") {
             panel = "keys"
-            voicePreview = ""
-            voiceText = null
             voiceStatus = null
             voiceWaveform = null
             if (active && bodyInitialized) {
@@ -152,13 +243,24 @@ internal object VoiceController {
             cancelVoice()
             return
         }
-        if(usingAiVoice) aiVoice?.stop() else voice?.stop()
+        if(usingAiVoice) aiVoice?.stop(skipAutoTranslation = voiceChoice != null) else voice?.stop()
         completeHeldVoiceIfDrained()
     }
 
     internal fun KeyboardSession.completeHeldVoiceIfDrainedImpl() {
         if (heldVoice && heldVoiceFinishRequested && heldVoiceSessionFinished &&
             !voiceStarting && !voiceValidationPending && voiceSegments.isEmpty()) {
+            if (voiceShortcutCall != null) return
+            if (heldTranscript.isNotEmpty()) {
+                val text = heldTranscript.toString()
+                heldTranscript.clear()
+                val choice = voiceChoice
+                if (choice == null) {
+                    voiceSegments.addLast(heldSegmentId to text)
+                    drainVoiceSegments()
+                } else processShortcut(choice, text)
+                return
+            }
             // Final callbacks and guarded commits finished. Only now may panel==keys invalidate
             // the voice target. Already-inserted endpoint segments are never undone.
             cancelVoice()
@@ -185,8 +287,6 @@ internal object VoiceController {
 
     internal fun KeyboardSession.stopVoiceForEditorChangeImpl() {
         cancelVoice()
-        voicePreview = ""
-        voiceText?.text = "输入位置已改变，语音已停止"
         updateVoiceLabels()
     }
 
@@ -221,7 +321,6 @@ internal object VoiceController {
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
                 android.content.pm.PackageManager.PERMISSION_GRANTED) {
             val message = if(usingAiVoice) "请先允许麦克风权限" else "请先完成模型和麦克风设置，再点击语音"
-            voiceText?.text = message
             if (heldVoice) {
                 cancelVoice()
                 toast(message)
@@ -247,13 +346,12 @@ internal object VoiceController {
         val editor = voiceEditorGeneration
         voiceStarting = true
         voiceState = OfflineVoiceSession.State.LOADING
-        voicePreview = ""
-        voiceText?.text = ""
         updateVoiceLabels()
         checkVoiceStart(request, editor, connection)
     }
 
     internal fun KeyboardSession.checkVoiceStartImpl(request: Long, editor: Int, connection: InputConnection) {
+        val selected = if (heldVoice && !secret) settings.voiceAiChoices else emptySet()
         voiceSelectionChecks.submit(onRejected = {
             main.post {
                 if (voiceTargetIsCurrent(request, editor, connection) && voiceStarting)
@@ -261,6 +359,10 @@ internal object VoiceController {
             }
         }) selection@{
             if (!voiceRequestIsCurrent(request, editor)) return@selection
+            val choices = if (selected.isEmpty()) emptyList() else {
+                val presets = if (selected.any { it.startsWith("custom:") }) runCatching { content.aiPresets() }.getOrDefault(emptyList()) else emptyList()
+                io.secure.keyboard.ai.VoiceAiChoice.options(presets).filter { it.id in selected }.take(4)
+            }
             val selection = readVoiceSelection(connection)
             if (!voiceRequestIsCurrent(request, editor)) return@selection
             main.post {
@@ -273,10 +375,14 @@ internal object VoiceController {
                 }
                 voiceGuard = VoiceCommitGuard(editor, selection.first)
                 voiceConnection = connection
+                if (choices.isNotEmpty()) {
+                    voiceChoices = choices
+                    renderBody(false)
+                }
                 if(usingAiVoice) {
                     val config=runCatching { io.secure.keyboard.data.ApiConfigurationStore(this).load() }.getOrNull()
                     if(config==null) { failVoice("无法读取语音 API 配置");return@post }
-                    if (!chinese && settings.voiceAutoTranslate && config.googleKey.isBlank()) { failVoice("英文语音需要先配置 Google 翻译密钥"); return@post }
+                    if (choices.isEmpty() && !chinese && settings.voiceAutoTranslate && config.googleKey.isBlank()) { failVoice("英文语音需要先配置 Google 翻译密钥"); return@post }
                     aiVoice?.release()
                     aiVoice=io.secure.keyboard.voice.AiVoiceSession(this,config,voiceListener(), translateToEnglish = !chinese && settings.voiceAutoTranslate)
                     aiVoice?.begin()
@@ -303,11 +409,9 @@ internal object VoiceController {
                 restartAiVoiceIfDrained()
             }
 
-            override fun onPreview(text: String, isFinal: Boolean) {
-                voicePreview = text
-                voiceText?.text = text.ifEmpty {
-                    if (isFinal) "本次语音已结束" else ""
-                }
+            override fun onCaptureTimeout() {
+                cancelVoice()
+                updateVoiceLabels()
             }
 
             override fun onSegment(segmentId: Long, text: String) {
@@ -322,7 +426,7 @@ internal object VoiceController {
     internal fun KeyboardSession.failVoiceImpl(message: String) {
         val wasHeld = heldVoice
         cancelVoice()
-        if (wasHeld) toast(message) else voiceText?.text = message
+        if (wasHeld) toast(message)
         updateVoiceLabels()
     }
 
@@ -331,6 +435,16 @@ internal object VoiceController {
         if (voiceGuard?.active != true) return
         val commitText = text.trim()
         if (commitText.isEmpty()) return
+        if (heldVoice && voiceChoices.isNotEmpty()) {
+            if (segmentId <= heldSegmentId) return
+            heldSegmentId = segmentId
+            if (heldTranscript.length + commitText.length > 20000) {
+                failVoice("语音内容过长，请分段录入")
+                return
+            }
+            heldTranscript.append(commitText)
+            return
+        }
         if (voiceSegments.size >= 8) {
             failVoice("输入框响应较慢，语音已停止")
             return
@@ -385,8 +499,6 @@ internal object VoiceController {
                         } else {
                             if (usingAiVoice && !heldVoice) {
                                 aiVoiceRoundCommitted = true
-                                voicePreview = ""
-                                voiceText?.text = ""
                                 updateVoiceLabels()
                             }
                             drainVoiceSegments()
@@ -397,3 +509,11 @@ internal object VoiceController {
         }
     }
 }
+
+internal fun KeyboardSession.voiceCancelButton(action: () -> Unit) =
+    icon("clear", "取消", action).apply {
+        background = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(keyBg)
+        }
+    }

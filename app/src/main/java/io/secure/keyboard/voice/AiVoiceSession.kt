@@ -65,7 +65,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
             timer?.let(main::removeCallbacks); timer = null
             outcome.fold(onSuccess = { text ->
                 if (text != null) {
-                    listener.onPreview(text, true)
+                    listener.onFinalText(text)
                     if (current(id)) listener.onSegment(1, text)
                 }
             }, onFailure = { error ->
@@ -78,7 +78,10 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         }
     }
 
-    fun stop() {
+    @Volatile private var skipTranslation = false
+
+    fun stop(skipAutoTranslation: Boolean = false) {
+        skipTranslation = skipAutoTranslation
         levels.clear()
         // Hardware ownership stays on the capture worker, including a start still in flight.
         recording = false
@@ -117,7 +120,9 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
                 val n=input.read(pcm,count,minOf(3200,pcm.size-count),AudioRecord.READ_NON_BLOCKING)
                 if(n<0) { if(!recording || !current(id)) break; error("录音中断，请重试") }
                 if (!current(id) || (n == 0 && !recording)) break
-                check(progress.accept(n, SystemClock.elapsedRealtime())) { "麦克风未返回录音数据，请关闭语音后重试" }
+                if (!progress.accept(n, SystemClock.elapsedRealtime())) {
+                    emit(id) { listener.onCaptureTimeout() }; return null
+                }
                 if (n == 0) { Thread.sleep(10); continue }
                 if(n>0) {
                     check(signal.accept(pcm, count, n)) { "麦克风录音数据异常，请重试" }
@@ -145,7 +150,7 @@ internal class AiVoiceSession(context: Context, private val config: ApiConfigura
         check(current(id)) { "已取消" }
         val normalized = VoiceChineseNormalizer.simplify(context, transcript)
         check(current(id)) { "已取消" }
-        if (!translateToEnglish) return normalized
+        if (!translateToEnglish || skipTranslation) return normalized
         val c = config.validatedGoogle()
         require(c.googleKey.isNotBlank()) { "请先配置 Google 翻译密钥" }
         val payload = io.secure.keyboard.translation.GoogleTranslation.requestBody(normalized, "auto", "en", c.googleModel)

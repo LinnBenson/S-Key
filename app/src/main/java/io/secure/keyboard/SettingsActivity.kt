@@ -222,7 +222,7 @@ open class SettingsActivity : ComponentActivity() {
                 route.startsWith("profile_") -> "layout"
                 route.startsWith("theme_") -> "behavior"
                 route == "custom_ai" -> "api"
-                route == "ai_provider" -> "api"
+                route == "ai_provider" || route == "voice_ai" -> "api"
                 route == "voice_provider" -> "voice"
                 route == "symbol_keyboard" -> "layout"
                 route == "feedback" || route == "key_sound" -> "keyboard"
@@ -322,6 +322,7 @@ open class SettingsActivity : ComponentActivity() {
                                 "ai_provider" -> ProviderChoices("默认 AI 提供商", model.apiDraft.aiProvider) {
                                     model.updateApi(model.apiDraft.copy(aiProvider = it))
                                 }
+                                "voice_ai" -> VoiceAiSettings()
                                 "voice_provider" -> ProviderChoices("AI 语音提供商", model.apiDraft.voiceProvider) {
                                     model.updateApi(model.apiDraft.copy(voiceProvider = it))
                                 }
@@ -336,7 +337,7 @@ open class SettingsActivity : ComponentActivity() {
                                 }
                                 "cleanup", "recovery" -> {
                                   Group("本机内容") {
-                                    Info("包含：输入、语音、声音振动及隐私偏好、AI 接口地址、密钥和模型配置、中文和英文自定义词库、常用语、自定义 AI、主题颜色、主题 UI 设计、4 个布局配置、剪贴板保留设置、工具栏、符号自动闭合、符号键盘、字母长按符号、内置 AI 提示词、快捷 emoji 表情。")
+                                    Nav("可备份的内容", "查看完整清单和还原说明", "dictionary") { openPage("backup_contents") }
                                     Action("备份数据", !model.busy) {
                                         launch { backupPicker.launch("S-Key-backup-${java.time.LocalDate.now()}.skeybackup") }
                                     }
@@ -392,6 +393,8 @@ open class SettingsActivity : ComponentActivity() {
                                     }
                                 }
                                 "about" -> AboutApp()
+                                "backup_contents" -> BackupContents()
+                                "usage_help" -> UsageHelp()
                                 "privacy_data" -> PrivacyDataStatement()
                                 else -> when {
                                     route.startsWith("profile_") -> ProfileSettings(route)
@@ -482,6 +485,7 @@ open class SettingsActivity : ComponentActivity() {
         }
         Group("应用与隐私") {
             Nav("备份与清理", "备份、还原与清理本机内容", "delete") { openPage("cleanup") }
+            Nav("使用帮助", "输入手势、AI、翻译与备份", "dictionary") { openPage("usage_help") }
             Nav("开源声明", "Miuix、图标、词库、音效与语音组件", "dictionary") { openPage("licenses") }
             Nav("关于应用", "版本信息、项目与隐私声明", "settings") { openPage("about") }
         }
@@ -510,6 +514,7 @@ open class SettingsActivity : ComponentActivity() {
             Nav("AI 设置", "API / 模型 / 提示词设置", "input") { openPage("api") }
             Nav("语音输入", "离线语音 / AI 语音", "voice") { openPage("voice") }
             Nav("备份与清理", "备份、还原与清理本机内容", "delete") { openPage("cleanup") }
+            Nav("使用帮助", "输入手势、AI、翻译与备份", "dictionary") { openPage("usage_help") }
             Nav("开源声明", "Miuix、图标、词库、音效与语音组件", "dictionary") { openPage("licenses") }
             Nav("关于应用", "版本信息、项目与隐私声明", "settings") { openPage("about") }
         }
@@ -542,6 +547,54 @@ open class SettingsActivity : ComponentActivity() {
         CurrentInformation(applicationContext)
     }
 
+    @Composable private fun UsageHelp() {
+        Group("输入帮助") {
+            Info("移动光标", true)
+            Info("在空格键上左右滑动，可前后移动光标；上下滑动，可在多行文字间移动。")
+            Info("在快捷编辑中选择文字", true)
+            Info("在“选择”键上向上、下、左、右滑动，都可以移动光标。要选中文字，先轻点“选择”，再滑动这个键来扩大或缩小选区。再点一次即可退出选择模式。")
+            Info("语音输入", true)
+            Info("按住空格键开始说话，松手结束录音。想让 AI 处理这段话，可以保持按住，滑到“润色”“扩写”等气泡上再松手，处理结果会直接输入。气泡可在“AI 设置 → 语音快捷 AI”中选择。")
+            Info("选择 Emoji 肤色", true)
+            Info("在表情面板长按支持多种肤色的 Emoji，再选择想用的肤色。")
+        }
+        Group("AI 使用") {
+            Info("复制要处理的文字，在 AI 助手里选好功能，再长按“原文”标题。剪贴板文字会接在已有原文后面，AI 会立即开始生成。")
+        }
+        Group("翻译使用") {
+            Info("复制要翻译的文字，在翻译面板选好目标语言，再长按“原文”标题。剪贴板文字会接在已有原文后面，并立即开始翻译。")
+        }
+        Group("备份与还原") {
+            Info("在“偏好设置 → 备份与清理”中导出加密备份。还原时需要输入备份密码，核对变更后再确认。")
+        }
+        BackupContents()
+    }
+
+    @Composable private fun BackupContents() {
+        Group("可备份的内容") {
+            Info("词库、常用语与表情", true)
+            Info("• 中文自定义词库的词条和编码或拼音、英文自定义词库的词条和字母编码。\n• 常用语的文字、排列顺序和置顶状态。\n• 快捷 Emoji 列表，以及每个表情对应的输入关键词。")
+            Info("中文和英文输入", true)
+            Info("• 中文输入方式（五笔或拼音）、五笔四码自动上屏、五笔拼音混输入。\n• 模糊拼音开关，以及单独选中的声母、韵母模糊组合。\n• 简繁转换、中文自动联想、输入框预览、自动插入空格、空格显示英语翻译。\n• 英文自动联想、空格选择首选词。")
+            Info("按键、手势与符号", true)
+            Info("• 按键声音和音量、按键振动和强度。\n• 滑动退格删除、面板回车发送、上滑输入符号、长按输入符号和长按延迟。\n• 中文和英文键盘中每个字母的长按符号，以及两种键盘各自两页符号键的内容。\n• 符号自动闭合规则，包括起始符号、结束符号和光标回移量。")
+            Info("布局、工具栏与外观", true)
+            Info("• 是否计算底部导航栏。内屏和外屏各自的横屏、竖屏布局分别保存，包括键盘高度、两侧和底部留白、次面板高度、悬浮开关与位置及宽高、分离开关与间距。\n• 工具栏的固定项目和工具排列顺序。\n• 跟随系统、浅色或深色主题，以及手动切换的明暗状态。浅色和深色配色分别保存，包括键盘背景、普通键与特殊键、文字与角标、工具栏图标、候选词与选中候选词、强调色、回车文字、预编辑文字、分隔线和选中按键配色。\n• 按键边框宽度、横向与纵向间距、按键圆角和回车键圆角；候选栏与展开候选的字号、按键角标显示方式。")
+            Info("语音与翻译", true)
+            Info("• 离线语音或 AI 语音识别方式、语音自动翻译开关、选中的语音快捷 AI。\n• 翻译面板的源语言和目标语言。")
+            Info("AI 助手与提示词", true)
+            Info("• AI 生成后自动上屏开关、普通 AI 的会话有效期。\n• 普通 AI 通用提示词、自定义 AI 统一提示词；润色、扩写、翻译和每种语气的提示词，以及各功能为不同提供商指定的模型。\n• 自定义 AI 的排列顺序、名称、提示词、提供商、模型、推理强度、网页搜索与 X 搜索开关，以及每项的会话有效期。")
+            Info("在线服务配置", true)
+            Info("• 默认 AI 提供商、AI 语音提供商。\n• Google 翻译的接口地址、API 密钥和翻译模型。\n• Grok、OpenAI、Gemini 各自的对话接口地址、API 密钥和模型，以及各自的语音识别接口地址、API 密钥和语音模型。")
+            Info("剪贴板与隐私偏好", true)
+            Info("• 快捷粘贴开关和显示时长、允许后台读取复制、历史记录保留方式、定时清理时长和记录数量上限。\n• 截屏保护开关。")
+        }
+        Group("还原前须知") {
+            Info("还原会替换自定义词库、常用语和自定义 AI，并清空本机 AI 会话历史。备份包含已保存的 API 密钥，请妥善保管备份文件和密码。")
+            Info("剪贴板历史及置顶记录、最近使用的表情、AI 对话历史、图片、内置词库文件和离线语音模型文件不包含在备份中。")
+        }
+    }
+
     @Composable private fun PrivacyDataStatement() {
         Group("适用范围") {
             Info("本声明说明当前版本 S Key 的数据处理方式。普通键盘输入和本地词库查询在设备上完成；AI、在线翻译和 AI 语音会向你配置的服务发送相应内容。请在使用前核对接口地址及服务提供方。")
@@ -563,6 +616,7 @@ open class SettingsActivity : ComponentActivity() {
         }
         Group("语音与离线模型") {
             Info("语音功能需麦克风权限。离线语音使用本机模型处理音频；AI 语音会把本次录音发送到配置的语音识别接口。音频用于当前识别流程，不作为应用录音历史保存。识别文字可用于当前输入，若随后使用 AI 或在线翻译，则会按相应功能发送。")
+            Info("长按空格录音并在“语音快捷 AI”气泡上松手时，识别原文和对应提示词会发送到所选 AI 服务，使用离线语音识别时也是如此。处理结果直接输入当前应用。本次原文和结果不会写入 S Key 的 AI 对话历史，也不保存续聊 ID。")
             Info("开启“语音自动翻译”后，在英文键盘使用语音可能进一步把识别文本发送到翻译接口。离线模型安装需要从模型下载服务器联网获取文件，或读取你选择的本地模型文件；下载模型不需要上传你的录音或输入文字。")
         }
         Group("图片与文件权限") {
@@ -605,6 +659,7 @@ open class SettingsActivity : ComponentActivity() {
             Nav("自定义 AI", null, "ai") { openPage("custom_ai") }
             Toggle("AI 生成后自动上屏", model.settings.aiAutoApply, "结果生成完成后自动上屏", icon = "enter") { model.settings.aiAutoApply = it }
             Toggle("语音自动翻译", model.settings.voiceAutoTranslate, "在英文键盘时使用语音启用自动翻译", icon = "translate") { model.settings.voiceAutoTranslate = it }
+            Nav("语音快捷 AI", null, "ai") { openPage("voice_ai") }
             Nav("内置 AI 提示词", null, "ai") { openPage("builtin_ai_prompts") }
             Nav("默认 AI 提供商", model.apiStatusText ?: AiProviders.assistantLabel(model.apiDraft.aiProvider), "ai") { openPage("ai_provider") }
             Range("会话有效期", model.aiConversationHours, 0, 720, "小时") { model.updateAiConversationHours(it) }
@@ -1180,7 +1235,7 @@ open class SettingsActivity : ComponentActivity() {
         model.revision
         val ai = model.settings.voiceMode == "ai"
         Group("识别方式") {
-            HorizontalChoices(listOf("offline" to "离线语音", "ai" to "AI 语音"), model.settings.voiceMode) {
+            HorizontalChoices(listOf("offline" to "离线语音", "ai" to "AI 语音"), model.settings.voiceMode, equalWidth = true) {
                 model.settings.voiceMode = it
             }
         }
@@ -1279,6 +1334,28 @@ open class SettingsActivity : ComponentActivity() {
             onClick = { change(!checked) },
             rightActions = { Switch(checked = checked, onCheckedChange = change) })
     }
+    @Composable private fun VoiceAiSettings() {
+        val options by produceState<List<io.secure.keyboard.ai.VoiceAiChoice>?>(null) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                io.secure.keyboard.ai.VoiceAiChoice.options(model.content.aiPresets())
+            }
+        }
+        val choices = options ?: return
+        var selected by remember { mutableStateOf(model.settings.voiceAiChoices.intersect(choices.map { it.id }.toSet())) }
+        Group("已选 ${selected.size} / 4") {
+            choices.forEach { choice ->
+                Toggle(choice.title, choice.id in selected) { enabled ->
+                    if (enabled && selected.size >= io.secure.keyboard.ai.VoiceAiChoice.LIMIT) {
+                        android.widget.Toast.makeText(this@SettingsActivity, "最多选择 4 项", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        selected = if (enabled) selected + choice.id else selected - choice.id
+                        model.settings.voiceAiChoices = selected
+                    }
+                }
+            }
+        }
+    }
+
     @Composable private fun ProviderChoices(title: String, selected: String, select: (String) -> Unit) {
         Group(title) {
             model.apiStatusText?.let { Info(it); return@Group }
@@ -1370,6 +1447,7 @@ open class SettingsActivity : ComponentActivity() {
     private fun pageTitle(route: String): String = when(route) {
         "symbol_keyboard" -> "键盘符号显示"
         "symbol_closure" -> "符号自动闭合"
+        "voice_ai" -> "语音快捷 AI"
         "builtin_ai_prompts" -> "内置 AI 提示词"
         "builtin_dictionaries" -> "内置词库"
         "dashboard" -> "S Key"
@@ -1400,6 +1478,8 @@ open class SettingsActivity : ComponentActivity() {
         "cleanup", "recovery" -> "备份与清理"
         "licenses" -> "开源声明"
         "about" -> "关于应用"
+        "backup_contents" -> "可备份的内容"
+        "usage_help" -> "使用帮助"
         "privacy_data" -> "隐私数据声明"
         else -> if (route.startsWith("profile_")) "${if (route.contains("outer")) "外屏" else "内屏"} · ${if (route.endsWith("landscape")) "横屏" else "竖屏"}" else "偏好设置"
     }

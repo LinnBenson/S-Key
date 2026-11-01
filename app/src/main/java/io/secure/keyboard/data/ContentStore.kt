@@ -335,7 +335,10 @@ class ContentStore(context: Context) {
             }
             root.put(key, JSONArray(list))
             writeCategory(key, root)
-            if (key == "aiPresets") { aiPresetEpoch.incrementAndGet(); retentionPolicyEpoch.incrementAndGet() }
+            if (key == "aiPresets") {
+                pruneVoicePresets(root.getJSONArray(key))
+                aiPresetEpoch.incrementAndGet(); retentionPolicyEpoch.incrementAndGet()
+            }
         }
 
     private fun contentCharacters(rows: List<JSONObject>): Long = rows.sumOf { row ->
@@ -801,6 +804,7 @@ class ContentStore(context: Context) {
             write(JSONObject(root.toString()))
             plan.configuration?.let(settingsBackup::apply)
             plan.api?.let(apiStore::saveDraft)
+            pruneVoicePresets(plan.clean.getJSONArray("aiPresets"))
         } catch (failure: Exception) {
             // Attempt every rollback even if one store is still failing.
             listOf<() -> Unit>(
@@ -815,6 +819,13 @@ class ContentStore(context: Context) {
         invalidateDictionarySnapshots()
         aiPresetEpoch.incrementAndGet(); retentionPolicyEpoch.incrementAndGet()
         settings.lastCustomAiPresetId = null
+    }
+
+    private fun pruneVoicePresets(rows: JSONArray) {
+        val ids = (0 until rows.length()).mapTo(hashSetOf()) { "custom:" + rows.getJSONObject(it).getString("id") }
+        val current = settings.voiceAiChoices
+        val kept = current.filterTo(mutableSetOf()) { !it.startsWith("custom:") || it in ids }
+        if (current != kept) settings.voiceAiChoices = kept
     }
 
     fun customAiEpoch(): Long = aiPresetEpoch.get()
@@ -953,6 +964,7 @@ class ContentStore(context: Context) {
             aiPresetEpoch.incrementAndGet(); retentionPolicyEpoch.incrementAndGet()
             AiConversationStore(app).clear()
             settings.lastCustomAiPresetId = null
+            pruneVoicePresets(JSONArray())
             DictionaryKind.entries.forEach { advanceDictionaryEpoch(it) }
             invalidateDictionarySnapshots()
             suppressCurrentClipboard()

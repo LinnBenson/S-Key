@@ -42,6 +42,10 @@ class SettingsStore(context: Context) {
         get() = prefs.getLong("quickPasteConsumedToken", 0L)
         set(value) { prefs.edit().putLong("quickPasteConsumedToken", value).apply() }
 
+    var voiceAiChoices: Set<String>
+        get() = prefs.getStringSet("voiceAiChoices", null)?.toSet() ?: io.secure.keyboard.ai.VoiceAiChoice.defaults.toSet()
+        set(value) { prefs.edit().putStringSet("voiceAiChoices", value.toSet()).apply() }
+
     var lastCustomAiPresetId: String?
         get() = prefs.getString("lastCustomAiPresetId", null)
         set(value) { prefs.edit().putString("lastCustomAiPresetId", value).apply() }
@@ -54,7 +58,7 @@ class SettingsStore(context: Context) {
         set(value) { prefs.edit().putBoolean("aiAutoApply", value).apply() }
 
     var voiceAutoTranslate: Boolean
-        get() = prefs.getBoolean("voiceAutoTranslate", true)
+        get() = prefs.getBoolean("voiceAutoTranslate", false)
         set(value) { prefs.edit().putBoolean("voiceAutoTranslate", value).apply() }
 
     var editorPreview: Boolean
@@ -314,7 +318,7 @@ class SettingsStore(context: Context) {
         set(value) { prefs.edit().putBoolean("panelEnterSends", value).apply() }
 
     var swipeUpSymbols: Boolean
-        get() = prefs.getBoolean("swipeUpSymbols", false)
+        get() = prefs.getBoolean("swipeUpSymbols", true)
         set(value) { prefs.edit().putBoolean("swipeUpSymbols", value).apply() }
 
     var longPressSymbols: Boolean

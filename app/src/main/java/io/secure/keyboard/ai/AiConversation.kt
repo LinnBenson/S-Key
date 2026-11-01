@@ -15,6 +15,7 @@ internal data class AiConversation(val id: String, val scope: String, val update
     val webSearch: Boolean = false,
     val xSearch: Boolean = false,
     val provider: String = "default",
+    val voiceResult: String = "",
 ) {
     fun normalizeSearchScope(context: String, instruction: String): AiConversation {
         if (!type.startsWith("custom:") || webSearch || xSearch) return this
@@ -23,7 +24,7 @@ internal data class AiConversation(val id: String, val scope: String, val update
     }
 
     fun valid(now: Long, expectedScope: String = scope): Boolean =
-        id.matches(Regex("[A-Za-z0-9_-]{1,256}")) && scope == expectedScope &&
+        (id.matches(Regex("[A-Za-z0-9_-]{1,256}")) || (id.isEmpty() && voiceResult.isNotEmpty())) && scope == expectedScope &&
             updatedAt > 0 && now >= updatedAt && now - updatedAt < retentionMillis
 
     val retentionMillis: Long get() = retentionHours.coerceIn(0, 720) * 3_600_000L

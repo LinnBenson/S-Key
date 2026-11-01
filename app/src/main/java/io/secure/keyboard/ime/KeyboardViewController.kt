@@ -58,8 +58,6 @@ internal object KeyboardViewController {
         popup?.dismiss()
         popup = null
         cancelVoice()
-        voicePreview = ""
-        voiceText = null
         voiceStatus = null
         voiceWaveform = null
         main.removeCallbacksAndMessages("key")

@@ -11,6 +11,7 @@ import android.view.MotionEvent
 internal class SpaceHoldTouchTracker(
     private val onRelease: () -> Unit,
     private val onCancel: () -> Unit,
+    private val onPosition: (Float, Float) -> Unit = { _, _ -> },
 ) {
     private val pointers = mutableSetOf<Int>()
     private var ownedPointer = -1
@@ -38,6 +39,8 @@ internal class SpaceHoldTouchTracker(
             if (index < 0 || !event.getX(index).isFinite() || !event.getY(index).isFinite()) {
                 ownedPointer = -1
                 onCancel()
+            } else {
+                onPosition(event.rawX + event.getX(index) - event.x, event.rawY + event.getY(index) - event.y)
             }
         }
         when (event.actionMasked) {

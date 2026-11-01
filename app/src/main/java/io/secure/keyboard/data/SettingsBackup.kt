@@ -45,6 +45,12 @@ internal class SettingsBackup(private val context: Context) {
             values.keys().forEach { key ->
                 val value = values.get(key)
                 when {
+                    key == "voiceAiChoices" -> {
+                        require(value is JSONArray && value.length() <= io.secure.keyboard.ai.VoiceAiChoice.LIMIT)
+                        val builtins = io.secure.keyboard.ai.VoiceAiChoice.options(emptyList()).map { it.id }
+                        val ids = (0 until value.length()).map { value.get(it) }
+                        require(ids.distinct().size == ids.size && ids.all { it is String && (it in builtins || (it.startsWith("custom:") && it.substringAfter(':').let { id -> id.isNotBlank() && id.length <= 128 })) })
+                    }
                     key == "fuzzyPairs" -> {
                         require(value is JSONArray && value.length() <= SettingsStore.fuzzyPairIds.size)
                         val pairs = (0 until value.length()).map { value.get(it) }
@@ -142,7 +148,7 @@ internal class SettingsBackup(private val context: Context) {
             val spec = groups.getValue(group)
             val before = current.getJSONObject(group); val after = next.getJSONObject(group)
             val count = spec.second.count { key ->
-                (!preserveWhenMissing(group, key) || after.has(key)) && if (key == "fuzzyPairs") {
+                (!preserveWhenMissing(group, key) || after.has(key)) && if (key == "fuzzyPairs" || key == "voiceAiChoices") {
                     fun pairs(values: JSONObject): Set<String>? = values.optJSONArray(key)?.let { array ->
                         (0 until array.length()).map { array.getString(it) }.toSet()
                     }
@@ -181,10 +187,10 @@ internal class SettingsBackup(private val context: Context) {
             "englishAssociation", "englishSpaceSelectsFirst", "fourCodeAutoCommit", "quickPaste", "screenshotProtection",
             "traditionalOutput", "vibration", "voiceAutoTranslate", "wubiPinyinInput")
         private val translationLanguages = setOf("zh-CN", "zh-TW", "en", "ja", "ko", "fr", "de", "es", "ru", "pt", "ar", "th", "vi", "id")
-        private val preferenceKeys = booleanPreferences + setOf("translationSource", "translationTarget", "fuzzyPairs", "chineseInputMode", "keySoundType", "keySoundVolume", "vibrationStrength", "voiceMode", "quickPasteSeconds")
+        private val preferenceKeys = booleanPreferences + setOf("translationSource", "translationTarget", "fuzzyPairs", "voiceAiChoices", "chineseInputMode", "keySoundType", "keySoundVolume", "vibrationStrength", "voiceMode", "quickPasteSeconds")
         private fun preferenceValues(s: SettingsStore): Map<String, Any> = linkedMapOf(
             "translationSource" to s.translationSource, "translationTarget" to s.translationTarget,
-            "fuzzyPinyin" to s.fuzzyPinyin, "fuzzyPairs" to JSONArray(s.fuzzyPairs.sorted()),
+            "voiceAiChoices" to JSONArray(s.voiceAiChoices.sorted()), "fuzzyPinyin" to s.fuzzyPinyin, "fuzzyPairs" to JSONArray(s.fuzzyPairs.sorted()),
             "swipeDelete" to s.swipeDelete, "spaceEnglishGloss" to s.spaceEnglishGloss,
             "aiAutoApply" to s.aiAutoApply, "autoChineseSpacing" to s.autoChineseSpacing,
             "chineseAssociation" to s.chineseAssociation, "chineseInputMode" to s.chineseInputMode.id,

@@ -332,7 +332,10 @@ internal object PanelController {
 
     internal fun KeyboardSession.renderContentImpl() {
         val isClipboard = panel == "clipboard"
-        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            isClickable = true // Consume taps in the empty area as the last rows disappear.
+        }
         body.addView(column, FrameLayout.LayoutParams(-1, -1))
         val loading = label("正在读取…", 14f, muted)
         column.addView(loading)
@@ -382,12 +385,14 @@ internal object PanelController {
                     setPadding(dp(10), 0, dp(10), 0)
                     clipToPadding = true
                 }
+                val visibleEntries = entries.toMutableList()
+                val pendingDeletes = mutableSetOf<String>()
                 list.adapter = object : BaseAdapter() {
-                    override fun getCount() = entries.size
-                    override fun getItem(position: Int) = entries[position]
+                    override fun getCount() = visibleEntries.size
+                    override fun getItem(position: Int) = visibleEntries[position]
                     override fun getItemId(position: Int) = position.toLong()
                     override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                        val entry = entries[position]
+                        val entry = getItem(position)
                         val webLink = webLinks[entry.id]
                         val openLink: (() -> Unit)? = webLink?.let { url -> {
                             if (current() && !changing) {
@@ -411,10 +416,26 @@ internal object PanelController {
                             if (isClipboard) content.setClipboardPinned(entry.id, pinned)
                             else content.setPhrasePinned(entry.id, pinned)
                         } }
-                        val delete: () -> Unit = { changeContent {
-                            if (isClipboard) content.deleteClipboard(entry.id)
-                            else content.deletePhrase(entry.id)
-                        } }
+                        val delete: () -> Unit = delete@{
+                            if (!current() || changing || !pendingDeletes.add(entry.id)) return@delete
+                            worker.execute {
+                                val deleted = readContent(false) {
+                                    if (isClipboard) content.deleteClipboard(entry.id) else content.deletePhrase(entry.id)
+                                    true
+                                }
+                                main.post {
+                                    pendingDeletes.remove(entry.id)
+                                    if (current() && deleted) {
+                                        visibleEntries.removeAll { it.id == entry.id }
+                                        notifyDataSetChanged()
+                                        if (visibleEntries.isEmpty()) {
+                                            list.visibility = View.GONE
+                                            if (isClipboard) column.addView(label("复制的文字会保存在这里", 14f, muted))
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         val edit: (() -> Unit)? = if (isClipboard) null else ({
                             if (current() && !changing) with(PhraseEditorController) { openPhraseEditor(entry.id, entry.text) }
                         })

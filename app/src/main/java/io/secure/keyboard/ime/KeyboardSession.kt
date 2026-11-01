@@ -279,13 +279,11 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal lateinit var body: FrameLayout
     internal lateinit var preedit: TextView
     internal var voice: OfflineVoiceSession? = null
-    internal var voicePreview = ""
     internal var aiVoice: io.secure.keyboard.voice.AiVoiceSession? = null
     internal var usingAiVoice = false
     internal var aiVoiceRoundCommitted = false
     internal var aiVoiceRestart: Runnable? = null
     internal var voiceState = OfflineVoiceSession.State.IDLE
-    internal var voiceText: TextView? = null
     internal var voiceStatus: TextView? = null
     internal var voiceWaveform: io.secure.keyboard.ui.VoiceWaveform? = null
     internal val voiceEditorWorker = Executors.newSingleThreadExecutor()
@@ -297,6 +295,12 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
     internal var voiceConnection: InputConnection? = null
     internal val voiceSegments = ArrayDeque<Pair<Long, String>>()
     internal var voiceValidationPending = false
+    internal var voiceChoices = emptyList<io.secure.keyboard.ai.VoiceAiChoice>()
+    internal val voiceBubbles = linkedMapOf<io.secure.keyboard.ai.VoiceAiChoice, TextView>()
+    internal var voiceChoice: io.secure.keyboard.ai.VoiceAiChoice? = null
+    internal var voiceShortcutCall: io.secure.keyboard.ai.AiWriting.Call? = null
+    internal val heldTranscript = StringBuilder()
+    internal var heldSegmentId = -1L
     internal var heldVoice = false
     internal var heldVoiceWaitingKeys = false
     internal var heldVoiceFinishRequested = false
@@ -307,6 +311,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             if(assistantHeldVoice) { aiCommandVoice?.stop(); inlineOfflineVoice?.stop() }
             else finishHeldVoice()
         },
+        onPosition = { x, y -> with(VoiceController) { updateShortcutHover(x, y) } },
         onCancel = { if(assistantHeldVoice) cancelAiCommandVoice() else cancelVoice() },
     )
     internal var popup: PopupWindow? = null

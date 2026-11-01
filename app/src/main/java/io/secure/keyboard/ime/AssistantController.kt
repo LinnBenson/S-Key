@@ -675,7 +675,7 @@ internal object AssistantController {
             val result = runCatching {
                 val date = java.text.SimpleDateFormat("MM/dd HH:mm", java.util.Locale.getDefault())
                 aiConversationStore.list().map { entry -> ConversationRow(entry.key,
-                    "${date.format(java.util.Date(entry.startedAt))} • ${entry.title} • ${entry.firstMessage.ifBlank { "（无首句记录）" }}",
+                    "${date.format(java.util.Date(entry.startedAt))} • ${entry.title} • ${entry.firstMessage.take(200).ifBlank { "（无首句记录）" }}",
                     entry.updatedAt + entry.retentionMillis) }
             }
             main.post {
@@ -684,7 +684,7 @@ internal object AssistantController {
                 column.removeAllViews()
                 val entries = result.getOrNull()
                 if (entries == null || entries.isEmpty()) {
-                    column.addView(label(if (entries == null) "会话读取失败，请重试" else "暂无可续聊的会话", 13f, muted))
+                    column.addView(label(if (entries == null) "会话读取失败，请重试" else "暂无历史会话", 13f, muted))
                     return@post
                 }
                 val list = android.widget.ListView(this).apply {
@@ -717,7 +717,15 @@ internal object AssistantController {
                                         main.post {
                                             if (destroyed || !active || !aiMode || secret || ticket != aiConversationGeneration.get()) return@post
                                             translation.complete(selecting, oldResult)
-                                            if (saved == null) { toast("会话已过期"); updateAiPreview() } else selectAiConversation(saved)
+                                            if (saved == null) { toast("会话已过期"); updateAiPreview() } else if (saved.voiceResult.isNotEmpty()) {
+                                                updateAiPreview()
+                                                val (detail, _) = aiChoicePopup(anchor)
+                                                detail.addView(label(saved.title, 15f))
+                                                detail.addView(label("原文", 13f, muted))
+                                                detail.addView(label(saved.firstMessage, 14f))
+                                                detail.addView(label("处理结果", 13f, muted))
+                                                detail.addView(label(saved.voiceResult, 14f))
+                                            } else selectAiConversation(saved)
                                         }
                                     }
                                 }
@@ -1022,14 +1030,12 @@ internal object AssistantController {
         }
         val status=label("准备聆听",15f,fg)
         val waveform=io.secure.keyboard.ui.VoiceWaveform(this,accent)
-        val preview=label("",18f).apply { gravity=Gravity.CENTER; maxLines=3; ellipsize=android.text.TextUtils.TruncateAt.END }
         overlay.addView(status,LinearLayout.LayoutParams(-1,dp(28)))
         overlay.addView(waveform,LinearLayout.LayoutParams(-1,0,1f))
-        overlay.addView(preview,LinearLayout.LayoutParams(-1,dp(50)))
-        val actions=LinearLayout(this)
+        val actions=LinearLayout(this).apply { gravity = Gravity.CENTER }
         overlay.addView(actions,LinearLayout.LayoutParams(-1,dp(44)))
-        if(usingAi && !held) actions.addView(button("识别语音") { aiCommandVoice?.stop() },LinearLayout.LayoutParams(0,-1,1f).apply { rightMargin=dp(10) })
-        actions.addView(button("取消") { cancelAiCommandVoice() },LinearLayout.LayoutParams(0,-1,1f))
+        if(usingAi && !held) actions.addView(button("识别语音") { aiCommandVoice?.stop() }.apply { background = shape(keyBg, 22) },LinearLayout.LayoutParams(0,-1,1f).apply { rightMargin=dp(10) })
+        actions.addView(voiceCancelButton { cancelAiCommandVoice() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         assistantVoicePanel=overlay
         body.addView(overlay,FrameLayout.LayoutParams(-1,-1))
         val epoch=++aiCommandEpoch; val editor=voiceEditorGeneration; val connection=currentInputConnection
@@ -1076,12 +1082,11 @@ internal object AssistantController {
                     else -> "识别完成"
                 }
             }
-            override fun onPreview(text:String,isFinal:Boolean) {
+            override fun onFinalText(text:String) {
                 if(epoch!=aiCommandEpoch) return
-                if(valid()) preview.text=text
-                if(!isFinal) return
                 finish(if (usingAi) text else offlineSegments.toString().ifEmpty { text })
             }
+            override fun onCaptureTimeout() { if (epoch == aiCommandEpoch) cancelAiCommandVoice() }
             override fun onError(message:String) { if(epoch==aiCommandEpoch) { cancelAiCommandVoice(); toast(message) } }
         }
         if(usingAi) {
