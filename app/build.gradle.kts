@@ -6,8 +6,8 @@ android {
         applicationId = "io.secure.keyboard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 199
-        versionName = "1.3.13"
+        versionCode = 200
+        versionName = "1.3.14"
     }
     androidResources { noCompress += "skt" }
     buildFeatures { compose = true }

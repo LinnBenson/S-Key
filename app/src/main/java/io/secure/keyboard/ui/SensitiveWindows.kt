@@ -16,7 +16,10 @@ internal object SensitiveWindows {
         (root.context.getSystemService(android.content.Context.WINDOW_SERVICE) as WindowManager).updateViewLayout(root, params)
     }
     fun apply(window: Window?, sensitive: Boolean) {
-        if (window != null && sensitive && io.secure.keyboard.data.SettingsStore(window.context).screenshotProtection) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        else window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (window == null) return
+        val flag = WindowManager.LayoutParams.FLAG_SECURE
+        val secure = sensitive && io.secure.keyboard.data.SettingsStore(window.context).screenshotProtection
+        if ((window.attributes.flags and flag != 0) == secure) return
+        if (secure) window.addFlags(flag) else window.clearFlags(flag)
     }
 }

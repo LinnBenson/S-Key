@@ -559,7 +559,7 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             renderHeader()
             renderBody()
         } else {
-            if (keepPaste) renderHeader()
+            if (active && headerInitialized) renderHeader()
             if (retainedSpaceLabel == null) return
             // A live editor restart may retain the ordinary key views without onStartInputView.
             spaceGlossLabel = retainedSpaceLabel
@@ -591,8 +591,15 @@ internal class KeyboardSession(private val host: InputMethodService) : ContextWr
             }
         }
         // Mode/privacy state is final before constructing or attaching the first visible root.
-        createView()
-        setInputView(root)
+        if (restarting && !opening && rootInitialized && root.isAttachedToWindow) {
+            // A host can restart its editor while the user returns from an inline panel.
+            // Keep the visible input window and refresh its contents in place.
+            renderHeader()
+            renderBody()
+        } else {
+            createView()
+            setInputView(root)
+        }
         captureClipboard(opening = opening)
         refreshCandidates()
     }

@@ -868,14 +868,19 @@ internal object PanelController {
             else side
         val bottom =
             layoutBottomPx(h)
-        lp.height = h
-        lp.width = width
-        lp.leftMargin = left
-        lp.bottomMargin = bottom
-        box.layoutParams = lp
-        // A rebuilt root can receive a theme/layout update before the IME window attaches it.
-        root.layoutParams?.height = h + bottom
-        root.requestLayout()
+        if (lp.height != h || lp.width != width || lp.leftMargin != left || lp.bottomMargin != bottom) {
+            lp.height = h
+            lp.width = width
+            lp.leftMargin = left
+            lp.bottomMargin = bottom
+            box.layoutParams = lp
+        }
+        root.layoutParams?.let { params ->
+            if (params.height != h + bottom) {
+                params.height = h + bottom
+                root.layoutParams = params
+            }
+        }
     }
 
 }
